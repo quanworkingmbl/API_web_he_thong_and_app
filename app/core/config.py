@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from pydantic import field_validator
+from typing import List, Union
 import os
 
 class Settings(BaseSettings):
@@ -18,7 +19,19 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "CMS API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: Union[bool, str] = True
+    
+    @field_validator('DEBUG', mode='before')
+    @classmethod
+    def parse_debug(cls, v: Union[bool, str, int]) -> bool:
+        """Parse DEBUG from various formats"""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "yes", "on")
+        if isinstance(v, int):
+            return bool(v)
+        return True  # Default to True
     
     @property
     def cors_origins_list(self) -> List[str]:

@@ -1,0 +1,55 @@
+# Railway ignore file
+# Files and directories to exclude from Railway deployment
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Development files
+*.md
+!README.md
+!RAILWAY_SETUP_GUIDE.md
+
+# Test files
+test_*.py
+*_test.py
+verify_*.py
+encode_*.py
+setup_*.py
+
+# Documentation (keep only essential)
+DATABASE_SETUP.md
+QUICK_START.md
+SETUP_SUMMARY.md
+DEPLOYMENT_CHECKLIST.md
+FINAL_CHECK.md
+PRODUCTION_READY.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment (should be set in Railway)
+.env
+.env.local
+.env.*.local
+
+
