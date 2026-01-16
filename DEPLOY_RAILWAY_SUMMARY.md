@@ -30,10 +30,14 @@ Vào tab **"Variables"** và thêm các biến sau:
 
 #### Bắt buộc:
 ```
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.bfzxkojszxxjbfisocwt.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres.bfzxkojszxxjbfisocwt:[PASSWORD]@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true
 DIRECT_URL=postgresql://postgres.bfzxkojszxxjbfisocwt:[PASSWORD]@aws-1-ap-south-1.pooler.supabase.com:5432/postgres
 SECRET_KEY=[TẠO_KEY_32_KÝ_TỰ]
 ```
+
+**Lưu ý**: 
+- `DATABASE_URL` dùng port **6543** với pgbouncer (connection pooling)
+- `DIRECT_URL` dùng port **5432** (direct connection cho migrations)
 
 #### Khuyến nghị:
 ```

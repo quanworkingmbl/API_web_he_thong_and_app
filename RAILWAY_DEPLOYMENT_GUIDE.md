@@ -85,15 +85,24 @@ Sau khi Railway đã detect project, bạn cần cấu hình các biến môi tr
 Thêm các biến sau (click **"New Variable"** cho mỗi biến):
 
 #### Database Configuration
+
+**Format đúng cho Supabase:**
+
 ```
-DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.bfzxkojszxxjbfisocwt.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres.bfzxkojszxxjbfisocwt:[YOUR-PASSWORD]@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true
 ```
 
 ```
 DIRECT_URL=postgresql://postgres.bfzxkojszxxjbfisocwt:[YOUR-PASSWORD]@aws-1-ap-south-1.pooler.supabase.com:5432/postgres
 ```
 
-**Lưu ý**: Thay `[YOUR-PASSWORD]` bằng password thực tế của Supabase database
+**Giải thích:**
+- **DATABASE_URL**: Dùng port **6543** với `?pgbouncer=true` cho connection pooling (tốt cho production app)
+- **DIRECT_URL**: Dùng port **5432** (direct connection) cho migrations (Alembic cần direct connection)
+
+**Lưu ý**: 
+- Thay `[YOUR-PASSWORD]` bằng password thực tế của Supabase database
+- Code đã tự động xử lý `pgbouncer=true` parameter, nên bạn có thể để hoặc bỏ đều được
 
 #### JWT Configuration
 ```
