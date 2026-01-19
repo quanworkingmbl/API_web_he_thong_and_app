@@ -18,8 +18,7 @@ from app.api.v1 import (
 api_router = APIRouter()
 
 # Authentication routes
-# Login is at /api/login (no prefix needed as it's already in router)
-api_router.include_router(auth.router, tags=["Authentication"])
+api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 
 # API routes
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
