@@ -161,7 +161,9 @@ DEBUG=False
 ## 📚 Tài liệu
 
 - README.md - Hướng dẫn tổng quan
-- RAILWAY_SETUP.md - Hướng dẫn deploy Railway chi tiết
+- RAILWAY_DEPLOYMENT_GUIDE.md - Hướng dẫn deploy Railway chi tiết
+- RENDER_DEPLOYMENT_GUIDE.md - Hướng dẫn deploy Render chi tiết
+- **API_TESTING_GUIDE.md** - Tài liệu API chi tiết với request/response và ví dụ test
 - API Documentation - Tự động generate tại `/docs` khi chạy server
 
 ## ⚠️ Lưu ý
