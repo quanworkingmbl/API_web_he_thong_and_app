@@ -1,4 +1,4 @@
-from app.models.user import User
+from app.models.user import User, UserRole, UserOrganization
 from app.models.role import Role
 from app.models.permission import Permission
 from app.models.organization import Organization
@@ -11,6 +11,8 @@ from app.models.partner_contract import PartnerContract
 
 __all__ = [
     "User",
+    "UserRole",
+    "UserOrganization",
     "Role",
     "Permission",
     "Organization",

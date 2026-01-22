@@ -26,6 +26,7 @@ wheels/
 # Environment
 .env
 .env.local
+.env.*.local
 
 # IDE
 .vscode/
@@ -45,4 +46,11 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test/Development scripts (not needed in production)
+test_*.py
+verify_*.py
+encode_*.py
+setup_*.py
+*_test.py
 
