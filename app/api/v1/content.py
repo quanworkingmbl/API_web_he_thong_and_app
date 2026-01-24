@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from app.core.database import get_db
 from app.models.content import Content, ContentStatus
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from pydantic import BaseModel
 
@@ -34,7 +34,7 @@ async def get_contents(
     status: Optional[str] = Query(None),
     author_id: Optional[int] = Query(None),
     content_type: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """Get list of contents (posts from producers and cooperatives)"""

@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fastapi.encoders import jsonable_encoder
 
+# Xác thực cho from như các trường email, name, user
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors"""
     return JSONResponse(
@@ -26,7 +27,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "message": exc.detail,
         },
     )
-
+# Bug hệ thống Bug code DB down ,NoneType has no attribute ,Chia cho 0, Timeout
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions"""
     return JSONResponse(
