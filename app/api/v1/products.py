@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from app.core.database import get_db
 from app.models.product import Product, ProductApproval, ProductStatus, ProductLabel
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from pydantic import BaseModel
 from decimal import Decimal
@@ -37,7 +37,7 @@ class ProductApprovalRequest(BaseModel):
 async def get_products(
     status: Optional[str] = Query(None),
     producer_id: Optional[int] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """Get list of products"""

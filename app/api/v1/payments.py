@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from app.core.database import get_db
 from app.models.payment import Payment, PaymentTransaction, PaymentStatus, PaymentCycle
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from pydantic import BaseModel
 from decimal import Decimal
@@ -46,7 +46,7 @@ async def get_payments(
     status: Optional[str] = Query(None),
     customer_id: Optional[int] = Query(None),
     seller_id: Optional[int] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """Get list of payments"""
@@ -79,7 +79,7 @@ async def get_payment_status(
 async def get_payment_reconciliation(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """Get payment reconciliation data"""

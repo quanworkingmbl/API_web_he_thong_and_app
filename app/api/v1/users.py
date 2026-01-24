@@ -18,10 +18,10 @@ class UserResponse(BaseModel):
     activated: int
     created_by: Optional[str]
     updated_by: Optional[str]
-    created_at: str
-    updated_at: Optional[str]
+    created_at: datetime
+    updated_at: Optional[datetime]
     deleted_by: Optional[str]
-    deleted_at: Optional[str]
+    deleted_at: Optional[datetime]
     type: Optional[str]
 
     class Config:

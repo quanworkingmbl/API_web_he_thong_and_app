@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from app.core.database import get_db
 from app.models.partner_contract import PartnerContract, ContractStatus
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from pydantic import BaseModel
 from datetime import datetime
@@ -31,7 +31,7 @@ async def get_contracts(
     status: Optional[str] = Query(None),
     partner_id: Optional[int] = Query(None),
     contract_type: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """Get partner contracts (advertising contracts with producers)"""
