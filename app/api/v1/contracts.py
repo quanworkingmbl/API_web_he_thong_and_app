@@ -16,25 +16,33 @@ class ContractResponse(BaseModel):
     contract_number: str
     partner_id: int
     contract_type: str
-    start_date: str
-    end_date: Optional[str]
+    start_date: datetime
+    end_date: Optional[datetime]
     amount: Optional[Decimal]
     status: str
     terms: Optional[str]
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
-@router.get("", response_model=List[ContractResponse])
+class PaginatedContractResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    data: List[ContractResponse]
+
+@router.get("", response_model=PaginatedContractResponse)
 async def get_contracts(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     partner_id: Optional[int] = Query(None),
     contract_type: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get partner contracts (advertising contracts with producers)"""
+    """Get partner contracts (advertising contracts with producers) with pagination"""
     query = db.query(PartnerContract)
     
     if status:
@@ -44,8 +52,19 @@ async def get_contracts(
     if contract_type:
         query = query.filter(PartnerContract.contract_type == contract_type)
     
-    contracts = query.all()
-    return [ContractResponse.from_orm(c) for c in contracts]
+    # Get total count
+    total = query.count()
+    
+    # Apply pagination
+    skip = (page - 1) * limit
+    contracts = query.offset(skip).limit(limit).all()
+    
+    return PaginatedContractResponse(
+        total=total,
+        page=page,
+        limit=limit,
+        data=[ContractResponse.from_orm(c) for c in contracts]
+    )
 
 @router.post("")
 async def create_contract(
