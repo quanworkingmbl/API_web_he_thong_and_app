@@ -7,6 +7,7 @@ from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from pydantic import BaseModel
 from decimal import Decimal
+from datetime import datetime
 
 router = APIRouter()
 
@@ -21,10 +22,16 @@ class PaymentResponse(BaseModel):
     seller_amount: Decimal
     status: str
     payment_cycle: str
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
+
+class PaginatedPaymentResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    data: List[PaymentResponse]
 
 class PaymentReconciliationResponse(BaseModel):
     total_customer_paid: Decimal
@@ -41,15 +48,17 @@ class PaymentComplaintRequest(BaseModel):
     payment_id: int
     complaint: str
 
-@router.get("", response_model=List[PaymentResponse])
+@router.get("", response_model=PaginatedPaymentResponse)
 async def get_payments(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     customer_id: Optional[int] = Query(None),
     seller_id: Optional[int] = Query(None),
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get list of payments"""
+    """Get list of payments with pagination"""
     query = db.query(Payment)
     
     if status:
@@ -59,8 +68,19 @@ async def get_payments(
     if seller_id:
         query = query.filter(Payment.seller_id == seller_id)
     
-    payments = query.all()
-    return [PaymentResponse.from_orm(p) for p in payments]
+    # Get total count
+    total = query.count()
+    
+    # Apply pagination
+    skip = (page - 1) * limit
+    payments = query.offset(skip).limit(limit).all()
+    
+    return PaginatedPaymentResponse(
+        total=total,
+        page=page,
+        limit=limit,
+        data=[PaymentResponse.from_orm(p) for p in payments]
+    )
 
 @router.get("/{payment_id}/status")
 async def get_payment_status(
