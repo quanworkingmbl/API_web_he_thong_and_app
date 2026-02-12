@@ -17,7 +17,7 @@ def clean_database_url(url: str) -> str:
     if parsed.query:
         params = parse_qs(parsed.query)
         # Remove pgbouncer from params
-        params.pop('pgbouncer', None)
+        params.pop(' ', None)
         # Rebuild URL
         new_query = urlencode(params, doseq=True) if params else ''
         parsed = parsed._replace(query=new_query)

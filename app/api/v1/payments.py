@@ -177,7 +177,7 @@ async def update_platform_fee(
 
 @router.put("/config/cycle")
 async def update_payment_cycle(
-    cycle: str = Query(..., regex="^(WEEKLY|MONTHLY)$"),
+    cycle: str = Query(..., pattern="^(WEEKLY|MONTHLY)$"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

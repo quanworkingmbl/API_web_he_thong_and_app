@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 
 router = APIRouter()
+
 
 class MediaResponse(BaseModel):
     id: int
@@ -25,22 +26,29 @@ class MediaResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class MediaListResponse(BaseModel):
     data: List[MediaResponse]
     meta: dict
 
+
 @router.get("", response_model=MediaListResponse)
 async def get_media_list(
-    limit: int = 50,
-    page: int = 1,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+    file_type: Optional[str] = Query(None, description="Filter by file type: image, video, document"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get list of media files"""
     query = db.query(Media)
+    
+    if file_type:
+        query = query.filter(Media.file_type == file_type)
+    
     total = query.count()
     offset = (page - 1) * limit
-    medias = query.offset(offset).limit(limit).all()
+    medias = query.order_by(Media.id.desc()).offset(offset).limit(limit).all()
     
     return MediaListResponse(
         data=[MediaResponse.from_orm(media) for media in medias],
@@ -51,6 +59,21 @@ async def get_media_list(
             "total_pages": (total + limit - 1) // limit
         }
     )
+
+
+@router.get("/{media_id}", response_model=MediaResponse)
+async def get_media_by_id(
+    media_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get media by ID"""
+    media = db.query(Media).filter(Media.id == media_id).first()
+    if not media:
+        raise HTTPException(status_code=404, detail="Media not found")
+    
+    return MediaResponse.from_orm(media)
+
 
 @router.post("")
 async def create_media(
@@ -77,6 +100,7 @@ async def create_media(
     db.refresh(new_media)
     
     return MediaResponse.from_orm(new_media)
+
 
 @router.post("/uploads")
 async def upload_file(
@@ -123,6 +147,7 @@ async def upload_file(
         db.refresh(new_media)
         
         return {
+            "success": True,
             "id": new_media.id,
             "filename": new_media.filename,
             "file_path": new_media.file_path,
@@ -131,3 +156,27 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
+
+@router.delete("/{media_id}")
+async def delete_media(
+    media_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a media file"""
+    media = db.query(Media).filter(Media.id == media_id).first()
+    if not media:
+        raise HTTPException(status_code=404, detail="Media not found")
+    
+    # Delete physical file if exists
+    if media.file_path and os.path.exists(media.file_path):
+        try:
+            os.remove(media.file_path)
+        except Exception:
+            pass  # Continue even if file deletion fails
+    
+    # Delete database record
+    db.delete(media)
+    db.commit()
+    
+    return {"success": True, "message": "Media deleted successfully"}

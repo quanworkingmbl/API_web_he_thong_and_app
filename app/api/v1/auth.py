@@ -22,7 +22,12 @@ class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     gender: Optional[str] = None
     type: Optional[str] = "consumer"  # consumer, producer, etc.
-
+# ... nghĩa là không được thiếu
+# Tham số ge: ≥ (greater or equal), gt: >, le: ≤, lt: <
+# Khai báo	Có bắt buộc không?
+# str	✅ Bắt buộc
+# Optional[str]	✅ Bắt buộc (nhưng cho null)
+# Optional[str] = None	❌ Không bắt buộc
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
