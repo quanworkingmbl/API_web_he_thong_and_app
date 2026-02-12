@@ -8,6 +8,9 @@ from app.models.payment import Payment, PaymentTransaction
 from app.models.content import Content
 from app.models.complaint import Complaint, Review
 from app.models.partner_contract import PartnerContract
+from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
+from app.models.category import Category
+from app.models.region import Region
 
 __all__ = [
     "User",
@@ -25,5 +28,11 @@ __all__ = [
     "Complaint",
     "Review",
     "PartnerContract",
+    "Order",
+    "OrderItem",
+    "OrderStatus",
+    "PaymentMethod",
+    "Category",
+    "Region",
 ]
 

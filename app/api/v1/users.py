@@ -139,3 +139,148 @@ async def update_user(
     
     return UserResponse.from_orm(user)
 
+
+# ==============================================================================
+# NEW ENDPOINTS
+# ==============================================================================
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user_by_id(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get user by ID"""
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.deleted_at.is_(None)
+    ).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return UserResponse.from_orm(user)
+
+
+@router.delete("/{user_id}")
+async def delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Soft delete a user
+    Không xóa vĩnh viễn, chỉ đánh dấu deleted_at
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    user.deleted_at = datetime.utcnow()
+    user.deleted_by = current_user.email
+    
+    db.commit()
+    
+    return {"success": True, "message": "User deleted successfully"}
+
+
+@router.put("/{user_id}/activate")
+async def activate_user(
+    user_id: int,
+    activated: int = Query(..., ge=0, le=1, description="1 = active, 0 = inactive"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Activate or deactivate a user
+    activated = 1: Kích hoạt
+    activated = 0: Vô hiệu hóa
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.activated = activated
+    user.updated_by = current_user.email
+    user.updated_at = datetime.utcnow()
+    
+    db.commit()
+    
+    status_text = "activated" if activated == 1 else "deactivated"
+    return {"success": True, "message": f"User {status_text} successfully"}
+
+
+@router.post("/{user_id}/roles")
+async def assign_roles_to_user(
+    user_id: int,
+    role_ids: List[int],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Assign roles to a user
+    Xóa tất cả roles cũ và gán roles mới
+    """
+    from app.models.user import UserRole
+    from app.models.role import Role
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Validate role_ids exist
+    existing_roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
+    existing_role_ids = [r.id for r in existing_roles]
+    
+    invalid_ids = set(role_ids) - set(existing_role_ids)
+    if invalid_ids:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid role IDs: {list(invalid_ids)}"
+        )
+    
+    # Remove existing roles
+    db.query(UserRole).filter(UserRole.user_id == user_id).delete()
+    
+    # Assign new roles
+    for role_id in role_ids:
+        user_role = UserRole(user_id=user_id, role_id=role_id)
+        db.add(user_role)
+    
+    db.commit()
+    
+    return {
+        "success": True, 
+        "message": f"Assigned {len(role_ids)} roles to user",
+        "role_ids": role_ids
+    }
+
+
+@router.get("/{user_id}/roles")
+async def get_user_roles(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all roles assigned to a user"""
+    from app.models.user import UserRole
+    from app.models.role import Role
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user_roles = db.query(UserRole).filter(UserRole.user_id == user_id).all()
+    role_ids = [ur.role_id for ur in user_roles]
+    roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
+    
+    return {
+        "success": True,
+        "data": [
+            {"id": role.id, "role_name": role.role_name, "description": role.description}
+            for role in roles
+        ]
+    }

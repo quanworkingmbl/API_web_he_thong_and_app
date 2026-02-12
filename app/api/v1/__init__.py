@@ -13,6 +13,10 @@ from app.api.v1 import (
     complaints,
     contracts,
     stats,
+    orders,
+    categories,
+    regions,
+    mobile_app,
 )
 
 api_router = APIRouter()
@@ -32,4 +36,13 @@ api_router.include_router(payments.router, prefix="/payments", tags=["Payments"]
 api_router.include_router(content.router, prefix="/content", tags=["Content"])
 api_router.include_router(complaints.router, prefix="/complaints", tags=["Complaints"])
 api_router.include_router(contracts.router, prefix="/contracts", tags=["Contracts"])
-api_router.include_router(stats.router, prefix="/stats", tags=["Stats"])
+api_router.include_router(stats.router, tags=["Stats"])
+
+# New routes for e-commerce features
+api_router.include_router(orders.router, prefix="/orders", tags=["Orders"])
+api_router.include_router(categories.router, prefix="/categories", tags=["Categories"])
+api_router.include_router(regions.router, prefix="/regions", tags=["Regions"])
+
+# Mobile App API
+api_router.include_router(mobile_app.router, prefix="/mobile", tags=["Mobile App"])
+
