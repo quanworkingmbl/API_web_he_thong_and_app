@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.product import Product, ProductApproval, ProductStatus, ProductLabel
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
+from app.core.permissions import check_product_approve_access
 from pydantic import BaseModel, Field
 from decimal import Decimal
 
@@ -267,6 +268,10 @@ async def approve_product(
     db: Session = Depends(get_db)
 ):
     """Approve or reject a product"""
+    # Permission check
+    if not check_product_approve_access(current_user, db):
+        raise HTTPException(status_code=403, detail="Không có quyền duyệt sản phẩm. Yêu cầu role: admin hoặc content_manager")
+    
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
