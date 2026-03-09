@@ -5,10 +5,10 @@ import enum
 from app.core.database import Base
 
 class ContractStatus(str, enum.Enum):
-    DRAFT = "DRAFT"
-    ACTIVE = "ACTIVE"
-    EXPIRED = "EXPIRED"
-    CANCELLED = "CANCELLED"
+    DRAFT = "DRAFT"  #Bản nháp, chưa có hiệu lực
+    ACTIVE = "ACTIVE" #Đang có hiệu lực
+    EXPIRED = "EXPIRED" # Hết hạn
+    CANCELLED = "CANCELLED" # Bị hủy
 
 class PartnerContract(Base):
     __tablename__ = "partner_contracts"

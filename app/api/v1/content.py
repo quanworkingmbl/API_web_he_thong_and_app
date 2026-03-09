@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.models.content import Content, ContentStatus
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
+from app.core.permissions import check_content_approve_access
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -273,6 +274,10 @@ async def approve_content(
     db: Session = Depends(get_db)
 ):
     """Approve or reject content"""
+    # Permission check
+    if not check_content_approve_access(current_user, db):
+        raise HTTPException(status_code=403, detail="Không có quyền duyệt content. Yêu cầu role: admin hoặc content_manager")
+    
     content = db.query(Content).filter(Content.id == content_id).first()
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")

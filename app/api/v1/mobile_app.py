@@ -7,7 +7,7 @@ Bao gồm các API cho:
 - Profile: Quản lý thông tin cá nhân
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime
@@ -20,6 +20,37 @@ from app.api.v1.auth import get_current_user, get_current_user_optional
 from pydantic import BaseModel, Field
 from decimal import Decimal
 import uuid
+import os
+import boto3
+from botocore.client import Config
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Supabase S3 config (dùng chung với media.py)
+_S3_ENDPOINT  = os.getenv("SUPABASE_S3_ENDPOINT", "")
+_S3_KEY       = os.getenv("SUPABASE_S3_ACCESS_KEY", "")
+_S3_SECRET    = os.getenv("SUPABASE_S3_SECRET_KEY", "")
+_S3_REGION    = os.getenv("SUPABASE_S3_REGION", "ap-south-1")
+_PROJECT_ID   = os.getenv("SUPABASE_PROJECT_ID", "")
+_BUCKET       = os.getenv("SUPABASE_STORAGE_BUCKET", "file_test00")
+_PUBLIC_BASE  = f"https://{_PROJECT_ID}.supabase.co/storage/v1/object/public/{_BUCKET}/"
+_ALLOWED_IMG  = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+def _upload_to_supabase(content: bytes, filename: str, mime: str) -> str:
+    """Upload bytes lên Supabase Storage, trả về public URL"""
+    ext = os.path.splitext(filename)[1].lower() or ".jpg"
+    key = f"{uuid.uuid4()}{ext}"
+    s3  = boto3.client(
+        "s3",
+        endpoint_url=_S3_ENDPOINT,
+        aws_access_key_id=_S3_KEY,
+        aws_secret_access_key=_S3_SECRET,
+        region_name=_S3_REGION,
+        config=Config(signature_version="s3v4"),
+    )
+    s3.put_object(Bucket=_BUCKET, Key=key, Body=content, ContentType=mime)
+    return _PUBLIC_BASE + key
 
 router = APIRouter()
 
@@ -143,74 +174,7 @@ async def get_public_posts(
     }
 
 
-@router.get("/posts/{post_id}")
-async def get_post_detail(
-    post_id: int,
-    db: Session = Depends(get_db)
-):
-    """Xem chi tiết bài viết - Public"""
-    post = db.query(Content).filter(
-        Content.id == post_id,
-        Content.status == ContentStatus.APPROVED
-    ).first()
-    
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    
-    author = db.query(User).filter(User.id == post.author_id).first()
-    
-    return {
-        "success": True,
-        "data": {
-            "id": post.id,
-            "title": post.title,
-            "content": post.content,
-            "author_id": post.author_id,
-            "author_name": author.name if author else "Unknown",
-            "author_type": author.type if author else None,
-            "images": post.images,
-            "videos": post.videos,
-            "product_id": post.product_id,
-            "created_at": post.created_at.isoformat()
-        }
-    }
-
-
-@router.post("/posts/my")
-async def create_my_post(
-    post_data: CreatePostRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Producer tạo bài viết mới
-    Bài viết sẽ ở trạng thái PENDING chờ admin duyệt
-    """
-    new_post = Content(
-        title=post_data.title,
-        content=post_data.content,
-        content_type="POST",
-        author_id=current_user.id,
-        product_id=post_data.product_id,
-        status=ContentStatus.PENDING,
-        images=post_data.images,
-        videos=post_data.videos
-    )
-    
-    db.add(new_post)
-    db.commit()
-    db.refresh(new_post)
-    
-    return {
-        "success": True,
-        "message": "Post created successfully. Waiting for approval.",
-        "data": {
-            "id": new_post.id,
-            "title": new_post.title,
-            "status": "PENDING"
-        }
-    }
-
+# --- /posts/my routes MUST be before /posts/{post_id} to avoid conflict ---
 
 @router.get("/posts/my")
 async def get_my_posts(
@@ -245,6 +209,106 @@ async def get_my_posts(
             "total": total,
             "page": page,
             "limit": limit
+        }
+    }
+
+
+@router.post("/posts/my")
+async def create_my_post(
+    # --- Text fields qua Form (multipart) ---
+    title: str = Form(..., min_length=2, max_length=255),
+    content: Optional[str] = Form(None),
+    product_id: Optional[int] = Form(None),
+    images: Optional[str] = Form(None),   # URL nếu đã upload riêng
+    videos: Optional[str] = Form(None),
+    # --- File ảnh (tùy chọn) --- 
+    image_file: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Producer tạo bài viết mới (multipart/form-data).
+    - Nếu gửi kèm `image_file`: tự upload lên Supabase rồi lưu URL.
+    - Nếu chỉ gửi `images` (URL text): dùng trực tiếp.
+    - Bài viết tạo xong ở trạng thái PENDING chờ admin duyệt.
+    """
+    final_image_url = images  # mặc định là URL text nếu có
+
+    # Nếu có file ảnh đính kèm, upload lên Supabase trước
+    if image_file and image_file.filename:
+        if image_file.content_type not in _ALLOWED_IMG:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Chỉ chấp nhận ảnh (JPEG/PNG/GIF/WEBP). Nhận được: {image_file.content_type}"
+            )
+        file_bytes = await image_file.read()
+        if len(file_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Ảnh quá lớn, tối đa 10MB")
+        try:
+            final_image_url = _upload_to_supabase(
+                file_bytes, image_file.filename, image_file.content_type
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Upload ảnh thất bại: {str(e)}")
+
+    new_post = Content(
+        title=title,
+        content=content,
+        content_type="POST",
+        author_id=current_user.id,
+        product_id=product_id,
+        status=ContentStatus.PENDING,
+        images=final_image_url,
+        videos=videos
+    )
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+
+    return {
+        "success": True,
+        "message": "Post created successfully. Waiting for approval.",
+        "data": {
+            "id": new_post.id,
+            "title": new_post.title,
+            "status": "PENDING",
+            "images": final_image_url
+        }
+    }
+
+
+# --- Dynamic path /posts/{post_id} AFTER static /posts/my ---
+
+@router.get("/posts/{post_id}")
+async def get_post_detail(
+    post_id: int,
+    db: Session = Depends(get_db)
+):
+    """Xem chi tiết bài viết - Public"""
+    post = db.query(Content).filter(
+        Content.id == post_id,
+        Content.status == ContentStatus.APPROVED
+    ).first()
+    
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    author = db.query(User).filter(User.id == post.author_id).first()
+    
+    return {
+        "success": True,
+        "data": {
+            "id": post.id,
+            "title": post.title,
+            "content": post.content,
+            "author_id": post.author_id,
+            "author_name": author.name if author else "Unknown",
+            "author_type": author.type if author else None,
+            "images": post.images,
+            "videos": post.videos,
+            "product_id": post.product_id,
+            "created_at": post.created_at.isoformat()
         }
     }
 

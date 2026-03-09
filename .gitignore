@@ -27,7 +27,7 @@ wheels/
 # .env
 # .env.local
 # .env.*.local
-
+/md
 # IDE
 .vscode/
 .idea/
