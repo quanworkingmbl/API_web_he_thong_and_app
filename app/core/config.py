@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     APP_NAME: str = "CMS API"
     APP_VERSION: str = "1.0.0"
     DEBUG: Union[bool, str] = True
+
+    # Supabase Storage (S3-compatible)
+    SUPABASE_PROJECT_ID: str = ""
+    SUPABASE_S3_ENDPOINT: str = ""
+    SUPABASE_S3_ACCESS_KEY: str = ""
+    SUPABASE_S3_SECRET_KEY: str = ""
+    SUPABASE_S3_REGION: str = "ap-south-1"
+    SUPABASE_STORAGE_BUCKET: str = "file_test00"
+
     
     @field_validator('DEBUG', mode='before')
     @classmethod
