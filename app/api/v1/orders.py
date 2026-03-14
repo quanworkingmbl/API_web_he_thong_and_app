@@ -86,15 +86,27 @@ async def get_orders(
     db: Session = Depends(get_db)
 ):
     """
-    Get list of orders with pagination and filters
+    Get list of orders with pagination and filters.
+    [FIX 2] Phân quyền theo role:
+    - consumer  → chỉ xem đơn của chính mình
+    - producer  → chỉ xem đơn thuộc shop mình
+    - admin     → xem tất cả (có thể lọc thêm)
     """
+    user_type = (current_user.type or "").lower()
     query = db.query(Order)
-    
+
+    # Giới hạn theo role
+    if user_type == "consumer":
+        query = query.filter(Order.customer_id == current_user.id)
+    elif user_type in ("producer", "seller"):
+        query = query.filter(Order.seller_id == current_user.id)
+    # admin: không lọc, xem tất cả
+
     if status:
         query = query.filter(Order.status == status)
-    if customer_id:
+    if customer_id and user_type == "admin":
         query = query.filter(Order.customer_id == customer_id)
-    if seller_id:
+    if seller_id and user_type == "admin":
         query = query.filter(Order.seller_id == seller_id)
     if payment_status:
         query = query.filter(Order.payment_status == payment_status)
@@ -198,12 +210,29 @@ async def update_order_status(
     db: Session = Depends(get_db)
 ):
     """
-    Update order status
-    Valid statuses: PENDING, CONFIRMED, PROCESSING, SHIPPING, DELIVERED, CANCELLED, REFUNDED
+    Update order status.
+    [FIX 2] Phân quyền:
+    - consumer  → CHỈ được huỷ đơn của chính mình (CANCELLED)
+    - producer  → chỉ được cập nhật đơn thuộc shop mình
+    - admin     → cập nhật bất kỳ đơn nào
     """
+    user_type = (current_user.type or "").lower()
+
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    # Kiểm tra quyền sở hữu
+    if user_type == "consumer":
+        if order.customer_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Không có quyền chỉnh sửa đơn hàng này")
+        # Consumer chỉ được huỷ đơn
+        if status_data.status != "CANCELLED":
+            raise HTTPException(status_code=403, detail="Người mua chỉ được phép huỷ đơn")
+    elif user_type in ("producer", "seller"):
+        if order.seller_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Không có quyền chỉnh sửa đơn hàng này")
+    # admin: không giới hạn
     
     old_status = order.status
     order.status = status_data.status

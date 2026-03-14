@@ -180,13 +180,17 @@ async def register(register_data: RegisterRequest, db: Session = Depends(get_db)
         )
     
     # Create new user
+    # Producer/seller phải qua xét duyệt hồ sơ (activated=0) trước khi bán hàng
+    # Consumer được kích hoạt ngay (activated=1)
+    user_type = register_data.type or "consumer"
+    is_seller = user_type in ("producer", "seller")
     new_user = User(
         email=register_data.email,
         password_hash=get_password_hash(register_data.password),
         name=register_data.name,
         gender=register_data.gender,
-        type=register_data.type or "consumer",
-        activated=1  # Auto-activate for now, can be changed based on business logic
+        type=user_type,
+        activated=0 if is_seller else 1
     )
     
     db.add(new_user)

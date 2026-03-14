@@ -1,313 +1,131 @@
-# Product Backlog - Hệ thống CMS Nông sản
+# Product Backlog – Hệ thống Marketplace Nông sản & Làng nghề
 
-> **Ngày tạo:** 02/02/2026  
-> **Product Owner:** [Tên Product Owner]  
-> **Scrum Master:** [Tên Scrum Master]
+> Tài liệu được phân tích từ source code thực tế. Cập nhật: 2026-03-12
 
----
+## Quy ước thuật ngữ
 
-## 📋 Quy ước
+Cột **AS A/AN** sử dụng **actor nghiệp vụ**, không nhất thiết trùng 1-1 với role/type trong code. Bảng ánh xạ:
 
-- **Priority**: Must Have (🔴) > Should Have (🟡) > Could Have (🟢)
-- **Status**: ✅ Hoàn thành | 🔄 Đang làm | ⏳ Chưa làm
-- **Story Points**: Fibonacci scale (1, 2, 3, 5, 8, 13, 21)
+| Actor (Backlog) | Ý nghĩa | Mapping trong code |
+|-----------------|---------|--------------------|
+| **Guest** | Khách chưa đăng nhập | Không yêu cầu xác thực |
+| **User** | Người dùng đã đăng nhập (bất kỳ loại nào) | Tất cả user có token hợp lệ |
+| **Customer** | Người mua hàng | `type = "consumer"` |
+| **Seller** | Người bán hàng / nhà sản xuất | `type = "producer"` hoặc `"seller"` |
+| **Admin** | Nhóm quản trị hệ thống (mức nghiệp vụ tổng quát) | Khi triển khai có thể map sang `admin` / `operation_coordinator` / `content_manager` / `cooperative_staff` tùy chức năng |
+| **System** | Hệ thống / webhook tự động | Không yêu cầu user, xử lý nội bộ |
 
----
-
-# 🏃 SPRINT 1 - Authentication & User Management (ĐÃ HOÀN THÀNH)
-
-**Sprint Goal**: Xây dựng hệ thống xác thực và quản lý người dùng cơ bản
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Auth | US-AUTH-001 | Đăng ký tài khoản | Người dùng mới | Đăng ký tài khoản với email | Tôi có thể sử dụng hệ thống | 🔴 Must | Đăng ký với email, password, name | 1. Nhập email, password, name 2. Password ≥ 8 ký tự 3. Email duy nhất | 5 | ✅ |
-| Auth | US-AUTH-002 | Đăng nhập | Người dùng | Đăng nhập vào hệ thống | Tôi có thể truy cập tài khoản | 🔴 Must | Đăng nhập và nhận JWT token | 1. Nhập email, password 2. Nhận JWT token 3. Token hết hạn sau 24h | 3 | ✅ |
-| Auth | US-AUTH-003 | Lấy thông tin user | Người dùng đã đăng nhập | Xem thông tin tài khoản | Tôi biết thông tin cá nhân | 🔴 Must | API lấy user info với roles và permissions | 1. Trả về user info 2. Bao gồm roles, permissions | 2 | ✅ |
-| Auth | US-AUTH-004 | Đăng xuất | Người dùng | Đăng xuất khỏi hệ thống | Bảo mật tài khoản | 🔴 Must | Logout và xóa token | 1. Xóa token 2. Redirect về login | 1 | ✅ |
-| Auth | US-AUTH-005 | Làm mới token | Người dùng | Refresh token khi hết hạn | Không cần đăng nhập lại | 🟡 Should | Refresh JWT token | 1. Gửi token cũ 2. Nhận token mới | 2 | ✅ |
-| User | US-USER-001 | Danh sách users | Admin | Xem danh sách người dùng | Quản lý users | 🔴 Must | Lấy danh sách với filter, phân trang | 1. Phân trang 2. Filter theo type, activated 3. Tìm kiếm | 3 | ✅ |
-| User | US-USER-002 | Tạo user | Admin | Tạo tài khoản cho người dùng | Thêm user mới | 🔴 Must | Admin tạo user | 1. Nhập thông tin 2. Set password 3. Gán role | 3 | ✅ |
-| User | US-USER-003 | Cập nhật user | Admin | Sửa thông tin user | Cập nhật thông tin | 🔴 Must | Sửa user | 1. Sửa name, gender, type 2. Không sửa được password | 2 | ✅ |
-| User | US-USER-004 | Xóa user | Admin | Vô hiệu hóa user | Loại bỏ user vi phạm | 🔴 Must | Soft delete | 1. Đánh dấu deleted_at 2. User không thể đăng nhập | 2 | ✅ |
-| User | US-USER-005 | Kích hoạt/Vô hiệu hóa | Admin | Bật/tắt tài khoản | Kiểm soát truy cập | 🔴 Must | Toggle activated | 1. Set activated = 0/1 2. Thông báo | 1 | ✅ |
-| User | US-USER-006 | Gán roles | Admin | Gán vai trò cho user | Phân quyền | 🔴 Must | Assign roles to user | 1. Chọn roles 2. Xóa roles cũ 3. Gán roles mới | 3 | ✅ |
-
-**Tổng Sprint 1:** 27 SP | **Status:** ✅ HOÀN THÀNH
+> **Ghi chú về tồn kho:** Hệ thống áp dụng logic **tạm giữ tồn kho (reserve) khi checkout** để tránh oversell. Khi Seller xác nhận đơn, hệ thống xác nhận chính thức việc trừ kho. Khi Seller từ chối/huỷ đơn, hệ thống hoàn trả tồn kho.
 
 ---
 
-# 🏃 SPRINT 2 - Products & Categories (ĐÃ HOÀN THÀNH)
-
-**Sprint Goal**: Quản lý sản phẩm và danh mục
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Product | US-PROD-001 | Danh sách sản phẩm | Người dùng | Xem danh sách sản phẩm | Tìm sản phẩm cần mua | 🔴 Must | Lấy danh sách với filter | 1. Phân trang 2. Filter status, label 3. Tìm kiếm | 5 | ✅ |
-| Product | US-PROD-002 | Chi tiết sản phẩm | Người dùng | Xem chi tiết sản phẩm | Biết thông tin đầy đủ | 🔴 Must | API get product by ID | 1. Thông tin đầy đủ 2. Bao gồm producer info | 2 | ✅ |
-| Product | US-PROD-003 | Tạo sản phẩm | Producer | Đăng sản phẩm mới | Bán hàng trên nền tảng | 🔴 Must | Tạo sản phẩm chờ duyệt | 1. Nhập thông tin 2. Upload ảnh 3. Trạng thái PENDING | 5 | ✅ |
-| Product | US-PROD-004 | Cập nhật sản phẩm | Producer | Sửa thông tin sản phẩm | Cập nhật thông tin | 🔴 Must | Update product | 1. Sửa name, price, description 2. Chuyển về PENDING | 3 | ✅ |
-| Product | US-PROD-005 | Xóa sản phẩm | Producer/Admin | Xóa sản phẩm | Loại bỏ sản phẩm | 🔴 Must | Delete product | 1. Xóa khỏi danh sách 2. Xóa ảnh liên quan | 2 | ✅ |
-| Product | US-PROD-006 | Duyệt sản phẩm | Admin | Duyệt sản phẩm của producer | Kiểm soát chất lượng | 🔴 Must | Approve/reject product | 1. Duyệt/Từ chối 2. Ghi chú lý do 3. Thông báo producer | 5 | ✅ |
-| Product | US-PROD-007 | Gắn nhãn sản phẩm | Admin | Gắn nhãn OCOP/Nông sản sạch | Phân loại sản phẩm | 🟡 Should | Update label | 1. Chọn label 2. Cập nhật thành công | 2 | ✅ |
-| Category | US-CAT-001 | Danh sách danh mục | Người dùng | Xem danh mục sản phẩm | Tìm kiếm theo nhóm | 🔴 Must | Get categories | 1. Danh sách phân cấp 2. Filter is_active | 3 | ✅ |
-| Category | US-CAT-002 | Tạo danh mục | Admin | Thêm danh mục mới | Tổ chức sản phẩm | 🔴 Must | Create category | 1. Nhập name 2. Chọn parent 3. Tự động tạo slug | 3 | ✅ |
-| Category | US-CAT-003 | Cập nhật danh mục | Admin | Sửa danh mục | Cập nhật thông tin | 🔴 Must | Update category | 1. Sửa name, description 2. Cập nhật slug | 2 | ✅ |
-| Category | US-CAT-004 | Xóa danh mục | Admin | Xóa danh mục | Loại bỏ không cần thiết | 🔴 Must | Delete category | 1. Kiểm tra subcategories 2. Xóa nếu không có con | 2 | ✅ |
-
-**Tổng Sprint 2:** 34 SP | **Status:** ✅ HOÀN THÀNH
-
----
-
-# 🏃 SPRINT 3 - Orders & Payments (ĐÃ HOÀN THÀNH)
-
-**Sprint Goal**: Hệ thống đặt hàng và thanh toán
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Order | US-ORD-001 | Danh sách đơn hàng | Admin/Seller | Xem danh sách đơn hàng | Quản lý đơn hàng | 🔴 Must | Get orders với filter | 1. Phân trang 2. Filter theo status 3. Tìm theo order number | 5 | ✅ |
-| Order | US-ORD-002 | Chi tiết đơn hàng | User | Xem chi tiết đơn hàng | Biết thông tin đơn | 🔴 Must | Get order by ID | 1. Thông tin đơn 2. Danh sách items 3. Thông tin thanh toán | 3 | ✅ |
-| Order | US-ORD-003 | Cập nhật trạng thái | Admin/Seller | Thay đổi trạng thái đơn | Xử lý đơn hàng | 🔴 Must | Update order status | 1. Chọn status mới 2. Ghi chú 3. Thông báo customer | 5 | ✅ |
-| Order | US-ORD-004 | Thống kê đơn hàng | Admin | Xem thống kê đơn | Theo dõi kinh doanh | 🟡 Should | Order statistics | 1. Tổng đơn 2. Theo status 3. Doanh thu | 3 | ✅ |
-| Payment | US-PAY-001 | Danh sách thanh toán | Admin | Xem thanh toán | Quản lý tài chính | 🔴 Must | Get payments | 1. Phân trang 2. Filter status | 3 | ✅ |
-| Payment | US-PAY-002 | Trạng thái thanh toán | User | Kiểm tra thanh toán | Biết trạng thái | 🔴 Must | Get payment status | 1. Trạng thái hiện tại | 2 | ✅ |
-| Payment | US-PAY-003 | Đối soát thanh toán | Admin | Xem báo cáo đối soát | Kiểm tra tài chính | 🟡 Should | Payment reconciliation | 1. Tổng hợp theo ngày 2. Platform fee 3. Seller amount | 5 | ✅ |
-| Payment | US-PAY-004 | Hoàn tiền | Admin | Xử lý hoàn tiền | Giải quyết khiếu nại | 🔴 Must | Process refund | 1. Chọn đơn 2. Nhập số tiền 3. Ghi lý do | 5 | ✅ |
-| Payment | US-PAY-005 | Cấu hình phí nền tảng | Admin | Đặt % phí platform | Quản lý doanh thu | 🟡 Should | Update platform fee | 1. Nhập % 2. Áp dụng cho đơn mới | 2 | ✅ |
-
-**Tổng Sprint 3:** 33 SP | **Status:** ✅ HOÀN THÀNH
-
----
-
-# 🏃 SPRINT 4 - Content & Organizations (ĐÃ HOÀN THÀNH)
-
-**Sprint Goal**: Quản lý nội dung và tổ chức
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Content | US-CNT-001 | Danh sách nội dung | User | Xem bài viết | Tìm thông tin | 🔴 Must | Get contents | 1. Phân trang 2. Filter type, status | 3 | ✅ |
-| Content | US-CNT-002 | Chi tiết nội dung | User | Đọc bài viết | Xem thông tin đầy đủ | 🔴 Must | Get content by ID | 1. Nội dung đầy đủ 2. Thông tin author | 2 | ✅ |
-| Content | US-CNT-003 | Tạo nội dung | Producer | Đăng bài viết | Quảng bá sản phẩm | 🔴 Must | Create content | 1. Nhập title, content 2. Upload media 3. Chờ duyệt | 5 | ✅ |
-| Content | US-CNT-004 | Cập nhật nội dung | Producer | Sửa bài viết | Cập nhật thông tin | 🔴 Must | Update content | 1. Sửa title, content 2. Cập nhật media | 3 | ✅ |
-| Content | US-CNT-005 | Xóa nội dung | Producer/Admin | Xóa bài viết | Loại bỏ nội dung | 🔴 Must | Delete content | 1. Xóa bài 2. Xóa media liên quan | 2 | ✅ |
-| Content | US-CNT-006 | Duyệt nội dung | Admin | Kiểm duyệt bài | Kiểm soát nội dung | 🔴 Must | Approve content | 1. Duyệt/Từ chối 2. Ghi chú | 3 | ✅ |
-| Org | US-ORG-001 | Danh sách tổ chức | Admin | Xem HTX, làng nghề | Quản lý tổ chức | 🔴 Must | Get organizations | 1. Phân trang 2. Tìm kiếm | 3 | ✅ |
-| Org | US-ORG-002 | Chi tiết tổ chức | User | Xem thông tin tổ chức | Biết về HTX | 🔴 Must | Get org by ID | 1. Thông tin đầy đủ 2. Số thành viên | 2 | ✅ |
-| Org | US-ORG-003 | Tạo tổ chức | Admin | Thêm HTX mới | Mở rộng mạng lưới | 🔴 Must | Create organization | 1. Nhập thông tin 2. Tạo thành công | 3 | ✅ |
-| Org | US-ORG-004 | Quản lý thành viên | Admin | Thêm/xóa thành viên | Quản lý HTX | 🔴 Must | Manage members | 1. Thêm user vào 2. Xóa user khỏi | 5 | ✅ |
-
-**Tổng Sprint 4:** 31 SP | **Status:** ✅ HOÀN THÀNH
-
----
-
-# 🏃 SPRINT 5 - System Management & Dashboard (ĐÃ HOÀN THÀNH)
-
-**Sprint Goal**: Quản lý hệ thống và dashboard
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Dashboard | US-DASH-001 | Tổng quan hệ thống | Admin | Xem thống kê tổng quan | Nắm bắt tình hình | 🔴 Must | Dashboard overview | 1. Tổng users, products, orders 2. Doanh thu | 5 | ✅ |
-| Dashboard | US-DASH-002 | Thống kê doanh thu | Admin | Xem doanh thu theo kỳ | Theo dõi kinh doanh | 🔴 Must | Revenue stats | 1. Theo ngày/tuần/tháng 2. Platform fee 3. Seller amount | 5 | ✅ |
-| Dashboard | US-DASH-003 | Thống kê sản phẩm | Admin | Xem phân bố sản phẩm | Phân tích dữ liệu | 🟡 Should | Product stats | 1. Theo status 2. Theo label | 3 | ✅ |
-| Dashboard | US-DASH-004 | Thống kê đơn hàng | Admin | Xem tình trạng đơn | Quản lý vận hành | 🟡 Should | Order stats | 1. Theo status 2. Đơn gần đây | 3 | ✅ |
-| Dashboard | US-DASH-005 | Thống kê users | Admin | Xem phân bố user | Hiểu khách hàng | 🟡 Should | User stats | 1. Producer/Consumer 2. Active/Inactive | 3 | ✅ |
-| Role | US-ROLE-001 | Quản lý roles | Admin | CRUD roles | Phân quyền | 🔴 Must | Manage roles | 1. Tạo role 2. Sửa 3. Xóa | 5 | ✅ |
-| Permission | US-PERM-001 | Quản lý permissions | Admin | CRUD permissions | Phân quyền chi tiết | 🔴 Must | Manage permissions | 1. Tạo permission 2. Gán cho role | 5 | ✅ |
-| Region | US-REG-001 | Quản lý vùng miền | Admin | CRUD regions | Phân loại địa lý | 🟡 Should | Manage regions | 1. Tạo 2. Sửa 3. Xóa | 5 | ✅ |
-| Media | US-MED-001 | Quản lý media | User | Upload/quản lý file | Quản lý tài nguyên | 🔴 Must | Media management | 1. Upload 2. List 3. Delete | 5 | ✅ |
-| Contract | US-CON-001 | Quản lý hợp đồng | Admin | CRUD hợp đồng đối tác | Quản lý đối tác | 🟡 Should | Manage contracts | 1. Tạo 2. Sửa 3. Xóa 4. Theo dõi status | 5 | ✅ |
-
-**Tổng Sprint 5:** 44 SP | **Status:** ✅ HOÀN THÀNH
-
----
-
-# 🏃 SPRINT 6 - Mobile App API (ĐÃ HOÀN THÀNH)
-
-**Sprint Goal**: API cho ứng dụng di động
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Mobile | US-MOB-001 | Danh sách posts public | Người dùng mobile | Xem bài viết đã duyệt | Tìm hiểu sản phẩm | 🔴 Must | Get public posts | 1. Chỉ hiện APPROVED 2. Phân trang | 3 | ✅ |
-| Mobile | US-MOB-002 | Chi tiết post | Người dùng mobile | Xem chi tiết bài | Đọc đầy đủ | 🔴 Must | Get post detail | 1. Nội dung đầy đủ 2. Author info | 2 | ✅ |
-| Mobile | US-MOB-003 | Producer tạo post | Producer | Đăng bài trên mobile | Quảng bá sản phẩm | 🔴 Must | Create post | 1. Nhập nội dung 2. Upload ảnh | 5 | ✅ |
-| Mobile | US-MOB-004 | Quản lý posts của tôi | Producer | Xem/sửa/xóa bài của tôi | Quản lý nội dung | 🔴 Must | My posts CRUD | 1. List 2. Update 3. Delete | 5 | ✅ |
-| Mobile | US-MOB-005 | Danh sách sản phẩm | Người dùng mobile | Xem sản phẩm | Tìm mua | 🔴 Must | Get products | 1. Sản phẩm APPROVED 2. Filter giá, nhãn | 5 | ✅ |
-| Mobile | US-MOB-006 | Chi tiết sản phẩm | Người dùng mobile | Xem chi tiết sản phẩm | Quyết định mua | 🔴 Must | Product detail | 1. Thông tin đầy đủ 2. Producer info | 2 | ✅ |
-| Mobile | US-MOB-007 | Đặt hàng | Consumer | Mua sản phẩm | Sở hữu sản phẩm | 🔴 Must | Create order | 1. Thêm vào giỏ 2. Nhập địa chỉ 3. Thanh toán | 8 | ✅ |
-| Mobile | US-MOB-008 | Đơn hàng của tôi | Consumer | Xem đơn đã đặt | Theo dõi đơn | 🔴 Must | My orders | 1. Danh sách 2. Chi tiết 3. Trạng thái | 5 | ✅ |
-| Mobile | US-MOB-009 | Profile | Người dùng | Xem/sửa profile | Quản lý thông tin | 🔴 Must | Profile CRUD | 1. Xem 2. Cập nhật | 3 | ✅ |
-
-**Tổng Sprint 6:** 38 SP | **Status:** ✅ HOÀN THÀNH
-
----
-
-# 🏃 SPRINT 7 - Complaints & Reviews (ĐÃ HOÀN THÀNH)
-
-**Sprint Goal**: Hệ thống khiếu nại và đánh giá
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Review | US-REV-001 | Danh sách đánh giá | Admin | Xem đánh giá sản phẩm | Theo dõi phản hồi | 🔴 Must | Get reviews | 1. Phân trang 2. Filter product_id | 3 | ✅ |
-| Complaint | US-CMP-001 | Danh sách khiếu nại | Admin | Xem khiếu nại | Xử lý vấn đề | 🔴 Must | Get complaints | 1. Phân trang 2. Filter status, type | 3 | ✅ |
-| Complaint | US-CMP-002 | Xử lý khiếu nại | Admin | Giải quyết khiếu nại | Hỗ trợ khách hàng | 🔴 Must | Handle complaint | 1. Cập nhật status 2. Ghi resolution 3. Thông báo user | 5 | ✅ |
-| Stats | US-STAT-001 | Thống kê producer | Admin | Xem stats producer | Phân tích đối tác | 🟡 Should | Producer stats | 1. Tổng 2. Active/Inactive 3. Mới trong tháng | 3 | ✅ |
-| Stats | US-STAT-002 | Thống kê consumer | Admin | Xem stats consumer | Phân tích KH | 🟡 Should | Consumer stats | 1. Tổng 2. Active 3. Mới trong tháng | 3 | ✅ |
-| Stats | US-STAT-003 | Sản phẩm trending | Admin | Xem top sản phẩm | Phân tích bán hàng | 🟡 Should | Trending products | 1. Top N products 2. Order count | 3 | ✅ |
-
-**Tổng Sprint 7:** 20 SP | **Status:** ✅ HOÀN THÀNH
-
----
-
-# 🏃 SPRINT 8 - Authentication Enhancement (CHƯA LÀM)
-
-**Sprint Goal**: Hoàn thiện tính năng xác thực còn thiếu
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Auth | US-AUTH-006 | Quên mật khẩu | Người dùng | Khôi phục mật khẩu | Truy cập lại tài khoản | 🔴 Must | Gửi link reset qua email | 1. Nhập email 2. Nhận link 3. Reset password | 5 | ⏳ |
-| Auth | US-AUTH-007 | Đổi mật khẩu | Người dùng | Thay đổi mật khẩu | Bảo mật tài khoản | 🔴 Must | Đổi password | 1. Nhập cũ 2. Nhập mới 3. Xác nhận | 3 | ⏳ |
-| Auth | US-AUTH-008 | Xác thực OTP | Người dùng mới | Xác thực email | Xác minh email | 🔴 Must | Gửi và verify OTP | 1. Gửi OTP 2. Nhập OTP 3. Verify | 5 | ⏳ |
-| Auth | US-AUTH-009 | Đăng ký Producer | Người bán | Đăng ký bán hàng | Bán trên nền tảng | 🔴 Must | Đăng ký với thông tin KD | 1. Thông tin chi tiết 2. Upload giấy phép 3. Chờ duyệt | 8 | ⏳ |
-| User | US-USER-007 | Upload avatar | Người dùng | Thay ảnh đại diện | Cá nhân hóa | 🟡 Should | Upload và crop avatar | 1. Upload 2. Crop 3. Save | 3 | ⏳ |
-
-**Tổng Sprint 8:** 24 SP | **Status:** ⏳ CHƯA LÀM
-
----
-
-# 🏃 SPRINT 9 - Mobile Shopping Enhancement (CHƯA LÀM)
-
-**Sprint Goal**: Nâng cao trải nghiệm mua sắm mobile
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Cart | US-CART-001 | Giỏ hàng | Consumer | Quản lý giỏ hàng | Mua nhiều sản phẩm | 🔴 Must | Cart CRUD | 1. Thêm/xóa 2. Thay đổi SL 3. Lưu local | 8 | ⏳ |
-| Wishlist | US-WISH-001 | Yêu thích | Consumer | Lưu sản phẩm yêu thích | Xem lại sau | 🔴 Must | Wishlist CRUD | 1. Thêm/bỏ 2. Danh sách | 5 | ⏳ |
-| Review | US-REV-002 | Đánh giá sản phẩm | Consumer | Đánh giá sản phẩm đã mua | Chia sẻ trải nghiệm | 🔴 Must | Create review | 1. 1-5 sao 2. Comment 3. Upload ảnh | 5 | ⏳ |
-| Noti | US-NOTI-001 | Push notification | Người dùng | Nhận thông báo | Cập nhật đơn hàng | 🔴 Must | Push notifications | 1. Order updates 2. Promotions | 13 | ⏳ |
-| Noti | US-NOTI-002 | Lịch sử thông báo | Người dùng | Xem thông báo cũ | Xem lại thông tin | 🟡 Should | Notification list | 1. Danh sách 2. Mark as read | 3 | ⏳ |
-
-**Tổng Sprint 9:** 34 SP | **Status:** ⏳ CHƯA LÀM
-
----
-
-# 🏃 SPRINT 10 - Order & Delivery Tracking (CHƯA LÀM)
-
-**Sprint Goal**: Theo dõi đơn hàng và vận chuyển
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Order | US-ORD-005 | Tracking vận chuyển | Consumer | Theo dõi đơn đang giao | Biết đơn ở đâu | 🟡 Should | Order tracking | 1. Timeline 2. Vị trí (nếu có) | 8 | ⏳ |
-| Order | US-ORD-006 | Hủy đơn hàng | Consumer | Hủy đơn PENDING | Thay đổi quyết định | 🔴 Must | Cancel order | 1. Chỉ PENDING 2. Chọn lý do | 3 | ⏳ |
-| Order | US-ORD-007 | Xác nhận nhận hàng | Consumer | Xác nhận đã nhận | Hoàn tất đơn | 🔴 Must | Confirm received | 1. Bấm xác nhận 2. Chuyển DELIVERED | 2 | ⏳ |
-| Seller | US-SELL-001 | Dashboard seller | Producer | Xem doanh thu | Theo dõi hiệu quả | 🟡 Should | Seller dashboard | 1. Doanh thu 2. Đơn hàng 3. Biểu đồ | 8 | ⏳ |
-| Seller | US-SELL-002 | Quản lý SP mobile | Producer | CRUD sản phẩm mobile | Quản lý dễ dàng | 🔴 Must | Mobile product mgmt | 1. Thêm 2. Sửa 3. Xem status | 8 | ⏳ |
-
-**Tổng Sprint 10:** 29 SP | **Status:** ⏳ CHƯA LÀM
-
----
-
-# 🏃 SPRINT 11 - Promotions System (CHƯA LÀM)
-
-**Sprint Goal**: Hệ thống khuyến mãi
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Voucher | US-PROMO-001 | Tạo voucher | Admin | Tạo mã giảm giá | Khuyến khích mua | 🟡 Should | CRUD voucher | 1. Code 2. % hoặc VNĐ 3. Điều kiện | 8 | ⏳ |
-| Voucher | US-PROMO-002 | Áp dụng voucher | Consumer | Dùng mã giảm giá | Được giảm giá | 🟡 Should | Apply voucher | 1. Nhập code 2. Validate 3. Áp dụng | 5 | ⏳ |
-| Flash | US-PROMO-003 | Flash sale | Admin | Tạo flash sale | Thu hút KH | 🟢 Could | Flash sale mgmt | 1. Chọn SP 2. Giá sale 3. Thời gian | 8 | ⏳ |
-| Banner | US-MKT-001 | Banner quảng cáo | Admin | Quản lý banner | Quảng bá | 🟡 Should | Banner CRUD | 1. Upload 2. Link 3. Order | 5 | ⏳ |
-| Feature | US-MKT-002 | SP nổi bật | Admin | Đánh dấu featured | Ưu tiên hiển thị | 🟡 Should | Featured products | 1. Mark 2. Hiển thị trang chủ | 3 | ⏳ |
-
-**Tổng Sprint 11:** 29 SP | **Status:** ⏳ CHƯA LÀM
-
----
-
-# 🏃 SPRINT 12 - Communication & Support (CHƯA LÀM)
-
-**Sprint Goal**: Giao tiếp và hỗ trợ
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Chat | US-CHAT-001 | Chat với seller | Consumer | Nhắn tin với seller | Hỏi sản phẩm | 🟡 Should | Real-time chat | 1. Text 2. Ảnh 3. Notification | 13 | ⏳ |
-| Chat | US-CHAT-002 | Danh sách chat | User | Xem conversations | Quản lý chat | 🟡 Should | Chat list | 1. Danh sách 2. Sort by time 3. Unread badge | 5 | ⏳ |
-| Support | US-SUP-001 | Tạo ticket | User | Gửi yêu cầu hỗ trợ | Được giải đáp | 🟡 Should | Create ticket | 1. Chọn loại 2. Mô tả 3. Attach | 5 | ⏳ |
-| Support | US-SUP-002 | Quản lý ticket | Admin | Xử lý ticket | Hỗ trợ KH | 🟡 Should | Ticket mgmt | 1. List 2. Assign 3. Reply 4. Close | 5 | ⏳ |
-| FAQ | US-FAQ-001 | Xem FAQ | User | Xem câu hỏi thường gặp | Tự tìm câu trả lời | 🟢 Could | FAQ list | 1. Danh sách 2. Search 3. Categories | 3 | ⏳ |
-
-**Tổng Sprint 12:** 31 SP | **Status:** ⏳ CHƯA LÀM
-
----
-
-# 🏃 SPRINT 13 - Analytics & Reporting (CHƯA LÀM)
-
-**Sprint Goal**: Báo cáo và phân tích
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Export | US-REP-001 | Xuất Excel | Admin | Xuất báo cáo Excel | Phân tích offline | 🟡 Should | Export to Excel | 1. Chọn loại 2. Chọn ngày 3. Download | 5 | ⏳ |
-| Export | US-REP-002 | Xuất PDF | Admin | Xuất báo cáo PDF | In ấn lưu trữ | 🟢 Could | Export to PDF | 1. Định dạng đẹp 2. Logo 3. Date | 5 | ⏳ |
-| Chart | US-ANA-001 | Biểu đồ doanh thu | Admin | Xem chart doanh thu | Theo dõi xu hướng | 🟡 Should | Revenue chart | 1. Line chart 2. So sánh kỳ | 5 | ⏳ |
-| Chart | US-ANA-002 | Phân tích SP | Admin | Xem top sản phẩm | Quyết định KD | 🟡 Should | Product analytics | 1. Top bán chạy 2. Theo danh mục | 5 | ⏳ |
-| Audit | US-AUD-001 | Activity log | Admin | Xem log hoạt động | Kiểm tra | 🟡 Should | Audit log | 1. Ghi log 2. Filter 3. Export | 8 | ⏳ |
-
-**Tổng Sprint 13:** 28 SP | **Status:** ⏳ CHƯA LÀM
-
----
-
-# 🏃 SPRINT 14 - Advanced Features (CHƯA LÀM)
-
-**Sprint Goal**: Tính năng nâng cao
-
-| FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA | STORY POINT | STATUS |
-|---------|---------------|------------------|--------------|----------------------|---------------------|----------|------------------------|---------------------|-------------|--------|
-| Search | US-SRCH-001 | Tìm kiếm nâng cao | Consumer | Tìm với nhiều filter | Tìm SP phù hợp | 🟡 Should | Advanced search | 1. Giá 2. Vùng 3. Nhãn 4. Rating | 8 | ⏳ |
-| OAuth | US-SOC-001 | Google login | User | Đăng nhập Google | Đăng nhập nhanh | 🟢 Could | Google OAuth | 1. Bấm login 2. Chọn TK 3. Auto create | 5 | ⏳ |
-| OAuth | US-SOC-002 | Facebook login | User | Đăng nhập Facebook | Tiện lợi | 🟢 Could | Facebook OAuth | 1. Bấm login 2. Cấp quyền 3. Login | 5 | ⏳ |
-| Share | US-SHR-001 | Chia sẻ sản phẩm | User | Share lên mạng XH | Giới thiệu SP | 🟢 Could | Share product | 1. Bấm share 2. Chọn platform 3. Generate link | 3 | ⏳ |
-| i18n | US-LANG-001 | Đa ngôn ngữ | User | Chuyển ngôn ngữ | Dùng ngôn ngữ quen | 🟢 Could | Multi-language | 1. Chọn ngôn ngữ 2. Switch toàn app | 13 | ⏳ |
-
-**Tổng Sprint 14:** 34 SP | **Status:** ⏳ CHƯA LÀM
-
----
-
-## 📊 TỔNG HỢP PRODUCT BACKLOG
-
-| Sprint | Mục tiêu | Story Points | Status |
-|--------|----------|--------------|--------|
-| Sprint 1 | Authentication & User Management | 27 | ✅ Hoàn thành |
-| Sprint 2 | Products & Categories | 34 | ✅ Hoàn thành |
-| Sprint 3 | Orders & Payments | 33 | ✅ Hoàn thành |
-| Sprint 4 | Content & Organizations | 31 | ✅ Hoàn thành |
-| Sprint 5 | System Management & Dashboard | 44 | ✅ Hoàn thành |
-| Sprint 6 | Mobile App API | 38 | ✅ Hoàn thành |
-| Sprint 7 | Complaints & Reviews | 20 | ✅ Hoàn thành |
-| Sprint 8 | Authentication Enhancement | 24 | ⏳ Chưa làm |
-| Sprint 9 | Mobile Shopping Enhancement | 34 | ⏳ Chưa làm |
-| Sprint 10 | Order & Delivery Tracking | 29 | ⏳ Chưa làm |
-| Sprint 11 | Promotions System | 29 | ⏳ Chưa làm |
-| Sprint 12 | Communication & Support | 31 | ⏳ Chưa làm |
-| Sprint 13 | Analytics & Reporting | 28 | ⏳ Chưa làm |
-| Sprint 14 | Advanced Features | 34 | ⏳ Chưa làm |
-| **TỔNG CỘNG** | | **436 SP** | **7/14 Sprints** |
-
----
-
-## 📈 Tiến độ dự án
-
-```
-Đã hoàn thành: ████████████████████░░░░░░░░░░░░░ 50%
-                     7/14 Sprints
-                     227/436 Story Points
-```
-
-### Release Plan
-
-| Release | Sprints | Status | Description |
-|---------|---------|--------|-------------|
-| **v1.0 (MVP)** | 1-7 | ✅ Done | Core CMS, Products, Orders, Mobile API |
-| **v1.1** | 8-10 | ⏳ Planned | Enhanced Auth, Shopping, Order Tracking |
-| **v2.0** | 11-12 | ⏳ Planned | Promotions, Communication |
-| **v2.1** | 13-14 | ⏳ Planned | Analytics, Advanced Features |
-
----
-
-*Document generated - Last updated: 02/02/2026*
+| Target Sprint | FEATURE | User Story ID | User Story Title | AS A/AN (Là) | I NEED TO (Tôi cần…) | SO THAT I CAN (Để…) | PRIORITY | STORY POINT | STATUS | Person | Date Of Work | USER STORY DESCRIPTION | ACCEPTANCE CRITERIA |
+|---------------|---------|---------------|------------------|--------------|----------------------|---------------------|----------|-------------|--------|--------|--------------|----------------------|---------------------|
+| Sprint 1 | Authentication | US-01 | Đăng ký tài khoản | Guest | đăng ký tài khoản mới với vai trò consumer hoặc producer | có thể truy cập hệ thống và sử dụng các chức năng theo vai trò | High | 5 | Done | | | Người dùng đăng ký bằng email, password, name, type (consumer/producer). Producer phải chờ duyệt hồ sơ trước khi bán hàng. Hệ thống tự động gán role tương ứng | 1. Đăng ký thành công với email chưa tồn tại; 2. Trả về thông tin user và token; 3. Producer có trạng thái activated=0 cho đến khi được duyệt; 4. Validate email format, password tối thiểu |
+| Sprint 1 | Authentication | US-02 | Đăng nhập hệ thống | User | đăng nhập bằng email và password | nhận được mã truy cập để sử dụng hệ thống | High | 3 | Done | | | Xác thực email/password, trả về mã truy cập (JWT token) có thời hạn. Kiểm tra tài khoản đã kích hoạt và chưa bị xoá | 1. Đăng nhập thành công trả về mã truy cập; 2. Sai email/password trả lỗi xác thực; 3. Tài khoản bị vô hiệu hoá không đăng nhập được; 4. Mã truy cập có thời hạn hợp lệ |
+| Sprint 1 | Authentication | US-03 | Xem thông tin cá nhân | User | xem thông tin tài khoản đang đăng nhập | biết được thông tin cá nhân, vai trò và quyền của mình | High | 2 | Done | | | Hệ thống trả về thông tin user hiện tại kèm danh sách vai trò (roles) và quyền hạn (permissions) đã được gán | 1. Trả về đầy đủ thông tin user (id, email, name, type); 2. Bao gồm danh sách vai trò; 3. Bao gồm danh sách quyền hạn; 4. Yêu cầu đăng nhập |
+| Sprint 1 | Authentication | US-04 | Đăng xuất | User | đăng xuất khỏi hệ thống | bảo mật tài khoản khi không sử dụng | Medium | 1 | Done | | | Hệ thống xử lý đăng xuất, phía người dùng tự xoá mã truy cập | 1. Trả về thông báo đăng xuất thành công; 2. Phía người dùng tự xoá mã truy cập |
+| Sprint 1 | Authentication | US-05 | Làm mới mã truy cập | User | làm mới mã truy cập khi mã cũ sắp hết hạn | duy trì phiên đăng nhập liên tục không bị gián đoạn | Medium | 3 | Done | | | Hệ thống tạo mã truy cập mới với thời hạn mới, yêu cầu mã hiện tại còn hợp lệ | 1. Trả về mã truy cập mới với thời hạn mới; 2. Mã cũ không hợp lệ thì từ chối; 3. Mã mới có đầy đủ thông tin phiên |
+| Sprint 1 | User Management | US-06 | Xem danh sách người dùng | Admin | xem danh sách tất cả người dùng trong hệ thống | quản lý và giám sát tài khoản người dùng | High | 3 | Done | | | Lấy danh sách user có phân trang (page, limit), lọc theo type (admin/producer/consumer), trạng thái activated, tìm kiếm theo tên/email | 1. Phân trang hoạt động đúng; 2. Lọc theo type chính xác; 3. Lọc theo activated chính xác; 4. Search theo name/email hoạt động; 5. Không hiển thị user đã soft delete |
+| Sprint 1 | User Management | US-07 | Tạo người dùng mới | Admin | tạo tài khoản người dùng mới | thêm user vào hệ thống mà không cần qua đăng ký | High | 3 | Done | | | Admin tạo user trực tiếp với đầy đủ thông tin: email, password, name, type. Có thể gán trạng thái activated ngay | 1. Tạo thành công với email chưa tồn tại; 2. Email trùng trả lỗi; 3. Password được hash trước khi lưu; 4. Trả về thông tin user vừa tạo |
+| Sprint 1 | User Management | US-08 | Xem chi tiết người dùng | Admin | xem thông tin chi tiết của một người dùng theo ID | nắm bắt thông tin đầy đủ của user | Medium | 2 | Done | | | Lấy thông tin user theo user_id, bao gồm thông tin cơ bản và trạng thái | 1. Trả về đầy đủ thông tin user; 2. User không tồn tại trả lỗi 404 |
+| Sprint 1 | User Management | US-09 | Cập nhật thông tin người dùng | Admin | cập nhật thông tin của một người dùng | chỉnh sửa thông tin khi cần thiết | High | 3 | Done | | | Cập nhật các trường: name, type, email và các thông tin khác của user theo user_id | 1. Cập nhật thành công trả về user mới; 2. User không tồn tại trả lỗi 404; 3. Email trùng trả lỗi |
+| Sprint 1 | User Management | US-10 | Xoá người dùng (soft delete) | Admin | vô hiệu hoá tài khoản người dùng | ngăn user truy cập hệ thống mà vẫn giữ dữ liệu | Medium | 2 | Done | | | Soft delete bằng cách đánh dấu deleted_at, không xoá vĩnh viễn dữ liệu | 1. Đánh dấu deleted_at thành công; 2. User đã xoá không xuất hiện trong danh sách; 3. User đã xoá không đăng nhập được |
+| Sprint 1 | User Management | US-11 | Kích hoạt/vô hiệu hoá tài khoản | Admin | thay đổi trạng thái kích hoạt của tài khoản | kiểm soát quyền truy cập của user | Medium | 2 | Done | | | Toggle trạng thái activated (0/1) của user, ảnh hưởng đến khả năng đăng nhập | 1. Chuyển activated từ 0→1 hoặc 1→0; 2. User inactive không đăng nhập được |
+| Sprint 1 | User Management | US-12 | Gán role cho người dùng | Admin | gán danh sách roles cho một người dùng | phân quyền chính xác cho từng user | Medium | 3 | Done | | | Xoá tất cả roles cũ và gán danh sách roles mới cho user. Hỗ trợ gán nhiều role cùng lúc | 1. Xoá roles cũ trước khi gán mới; 2. Gán nhiều roles cùng lúc; 3. Role không tồn tại trả lỗi |
+| Sprint 1 | User Management | US-13 | Xem role của người dùng | Admin | xem danh sách roles đã gán cho một user | kiểm tra phân quyền hiện tại | Medium | 2 | Done | | | Lấy danh sách roles đã gán cho user theo user_id | 1. Trả về danh sách roles; 2. User không có role trả mảng rỗng |
+| Sprint 1 | Role & Permission | US-14 | Quản lý Role (CRUD) | Admin | tạo, xem, sửa, xoá các role trong hệ thống | định nghĩa các vai trò và phân quyền linh hoạt | Medium | 5 | Done | | | CRUD đầy đủ cho Role: danh sách có phân trang và search, tạo mới, cập nhật, xoá. Mỗi role có name và description | 1. Danh sách role có phân trang; 2. Search theo tên role; 3. Tạo role mới thành công; 4. Cập nhật role thành công; 5. Xoá role thành công; 6. Không xoá role đang được gán |
+| Sprint 1 | Role & Permission | US-15 | Quản lý Permission (CRUD) | Admin | tạo, xem, sửa, xoá các permission trong hệ thống | kiểm soát chi tiết quyền truy cập từng chức năng | Medium | 5 | Done | | | CRUD đầy đủ cho Permission: danh sách có phân trang và search, tạo mới, cập nhật, xoá | 1. Danh sách permission có phân trang; 2. Search theo tên permission; 3. Tạo permission mới thành công; 4. Cập nhật permission thành công; 5. Xoá permission thành công |
+| Sprint 2 | Organization Management | US-16 | Quản lý tổ chức (HTX, Làng nghề) | Admin | tạo, xem, sửa, xoá tổ chức sản xuất | quản lý các hợp tác xã và làng nghề trên hệ thống | Medium | 5 | Done | | | CRUD tổ chức: danh sách có phân trang và search, chi tiết, tạo mới, cập nhật, xoá. Phải xoá thành viên trước khi xoá tổ chức | 1. Danh sách tổ chức có phân trang; 2. Search theo tên tổ chức; 3. Tạo/sửa/xoá tổ chức; 4. Không xoá được tổ chức còn thành viên |
+| Sprint 2 | Organization Management | US-17 | Quản lý thành viên tổ chức | Admin | thêm, xem, xoá thành viên trong tổ chức | quản lý nhân sự thuộc HTX hoặc làng nghề | Medium | 3 | Done | | | Danh sách thành viên của tổ chức, thêm user vào tổ chức, xoá thành viên khỏi tổ chức | 1. Xem danh sách thành viên theo org_id; 2. Thêm user vào tổ chức thành công; 3. Xoá thành viên thành công; 4. User không tồn tại trả lỗi |
+| Sprint 2 | Category Management | US-18 | Quản lý danh mục sản phẩm | Admin | tạo, xem, sửa, xoá danh mục sản phẩm | phân loại sản phẩm theo nhóm ngành hàng | High | 5 | Done | | | CRUD danh mục: danh sách có phân trang, lọc parent_id, is_active, search. Hỗ trợ danh mục con (parent_id). Tự tạo slug từ tên | 1. Danh sách có phân trang và lọc; 2. Tạo danh mục tự sinh slug; 3. Hỗ trợ danh mục cha-con; 4. Không xoá danh mục có danh mục con; 5. Lọc theo is_active |
+| Sprint 2 | Product Management | US-19 | Xem danh sách sản phẩm | User | xem danh sách sản phẩm trên sàn | tìm kiếm và lựa chọn sản phẩm phù hợp | High | 3 | Done | | | Danh sách sản phẩm có phân trang, lọc theo status (PENDING/APPROVED/REJECTED), producer_id, label (CLEAN_AGRICULTURE/TRADITIONAL_CRAFT/OCOP), tìm kiếm theo tên | 1. Phân trang đúng; 2. Lọc theo status; 3. Lọc theo producer_id; 4. Lọc theo label; 5. Search theo tên sản phẩm |
+| Sprint 2 | Product Management | US-20 | Xem chi tiết sản phẩm | User | xem thông tin chi tiết một sản phẩm | đánh giá sản phẩm trước khi mua | High | 2 | Done | | | Lấy chi tiết sản phẩm theo product_id bao gồm tên, mô tả, giá, hình ảnh, nhãn, producer, trạng thái | 1. Trả về đầy đủ thông tin sản phẩm; 2. Sản phẩm không tồn tại trả 404 |
+| Sprint 2 | Product Management | US-21 | Tạo sản phẩm mới | Seller | đăng sản phẩm mới lên sàn | bán hàng và tiếp cận khách hàng | High | 5 | Done | | | Seller tạo sản phẩm với thông tin: tên, mô tả, giá, danh mục, ảnh. Sản phẩm mới có trạng thái PENDING, chờ admin duyệt | 1. Tạo sản phẩm với trạng thái PENDING; 2. Gán producer_id là user hiện tại; 3. Validate thông tin bắt buộc; 4. Sản phẩm chưa được duyệt không hiển thị public |
+| Sprint 2 | Product Management | US-22 | Cập nhật sản phẩm | Seller | cập nhật thông tin sản phẩm đã đăng | điều chỉnh giá, mô tả, hình ảnh khi cần | High | 3 | Done | | | Cập nhật các trường thông tin sản phẩm theo product_id. Chỉ producer sở hữu sản phẩm mới được cập nhật | 1. Cập nhật thành công; 2. Sản phẩm không tồn tại trả 404; 3. Không phải chủ sản phẩm trả 403 |
+| Sprint 2 | Product Management | US-23 | Xoá sản phẩm | Seller | xoá sản phẩm không còn kinh doanh | dọn dẹp sản phẩm không cần thiết | Medium | 2 | Done | | | Xoá sản phẩm theo product_id. Chỉ chủ sản phẩm hoặc admin mới xoá được | 1. Xoá thành công; 2. Không phải chủ sản phẩm trả 403 |
+| Sprint 2 | Product Approval | US-24 | Duyệt/từ chối sản phẩm | Admin | duyệt hoặc từ chối sản phẩm do seller đăng | kiểm soát chất lượng sản phẩm trên sàn | High | 5 | Done | | | Admin duyệt (APPROVED) hoặc từ chối (REJECTED) sản phẩm. Tạo approval record ghi lại người duyệt, thời gian, lý do | 1. Chuyển status PENDING→APPROVED hoặc REJECTED; 2. Tạo approval record; 3. Ghi lại admin_id và thời gian; 4. Sản phẩm APPROVED hiển thị public |
+| Sprint 2 | Product Management | US-25 | Gán nhãn sản phẩm | Admin | gán nhãn chất lượng cho sản phẩm | phân loại sản phẩm theo tiêu chuẩn (Nông nghiệp sạch, Làng nghề, OCOP) | Medium | 2 | Done | | | Gán nhãn CLEAN_AGRICULTURE, TRADITIONAL_CRAFT hoặc OCOP cho sản phẩm. Chỉ admin có quyền | 1. Gán nhãn thành công; 2. Chỉ chấp nhận 3 loại nhãn hợp lệ; 3. Nhãn hiển thị trên sản phẩm |
+| Sprint 3 | Cart | US-26 | Xem giỏ hàng | Customer | xem danh sách sản phẩm trong giỏ hàng | kiểm tra trước khi đặt hàng | High | 3 | Done | | | Lấy giỏ hàng của user đang đăng nhập, bao gồm danh sách items, số lượng, giá, tổng tiền | 1. Trả về giỏ hàng của user hiện tại; 2. Bao gồm thông tin sản phẩm; 3. Giỏ rỗng trả mảng rỗng |
+| Sprint 3 | Cart | US-27 | Thêm sản phẩm vào giỏ hàng | Customer | thêm sản phẩm vào giỏ hàng | lưu sản phẩm muốn mua | High | 3 | Done | | | Thêm sản phẩm vào giỏ hàng. Nếu sản phẩm đã có trong giỏ thì cộng dồn số lượng | 1. Thêm sản phẩm mới vào giỏ; 2. Cộng dồn số lượng nếu đã tồn tại; 3. Sản phẩm không tồn tại trả lỗi |
+| Sprint 3 | Cart | US-28 | Cập nhật số lượng trong giỏ | Customer | thay đổi số lượng sản phẩm trong giỏ hàng | điều chỉnh đơn hàng trước khi thanh toán | High | 2 | Done | | | Cập nhật số lượng sản phẩm trong giỏ theo item_id | 1. Cập nhật số lượng thành công; 2. Số lượng phải > 0; 3. Item không tồn tại trả 404 |
+| Sprint 3 | Cart | US-29 | Xoá sản phẩm khỏi giỏ | Customer | xoá một sản phẩm khỏi giỏ hàng | loại bỏ sản phẩm không muốn mua | Medium | 1 | Done | | | Xoá một item khỏi giỏ hàng theo item_id | 1. Xoá thành công; 2. Item không tồn tại trả 404 |
+| Sprint 3 | Cart | US-30 | Xoá toàn bộ giỏ hàng | Customer | xoá hết sản phẩm trong giỏ hàng | bắt đầu lại việc mua sắm | Medium | 1 | Done | | | Xoá toàn bộ items trong giỏ hàng của user hiện tại | 1. Xoá thành công tất cả items; 2. Giỏ hàng trở thành rỗng |
+| Sprint 3 | Checkout | US-31 | Đặt hàng (Checkout) | Customer | tạo đơn hàng từ giỏ hàng | hoàn tất mua sắm và chờ giao hàng | High | 8 | Done | | | Tạo đơn hàng từ giỏ hàng, tự động tách đơn theo seller (mỗi seller 1 đơn riêng), **tạm giữ (reserve) tồn kho** sản phẩm, tính phí sàn và số tiền seller nhận. Xoá giỏ hàng sau khi đặt | 1. Tạo đơn hàng thành công; 2. Tách đơn theo seller; 3. Tạm giữ tồn kho chính xác; 4. Tính phí sàn đúng; 5. Xoá giỏ hàng sau checkout; 6. Đơn mới có trạng thái chờ xử lý (PENDING) |
+| Sprint 3 | Order Management | US-32 | Xem danh sách đơn hàng | User | xem danh sách đơn hàng liên quan đến mình | theo dõi tình trạng đơn hàng | High | 5 | Done | | | Danh sách đơn hàng có phân quyền: consumer thấy đơn mình mua, producer thấy đơn shop mình, admin thấy tất cả. Phân trang, lọc status | 1. Phân quyền đúng theo vai trò; 2. Phân trang hoạt động; 3. Lọc theo status; 4. Consumer chỉ thấy đơn mình |
+| Sprint 3 | Order Management | US-33 | Xem chi tiết đơn hàng | User | xem thông tin chi tiết một đơn hàng | biết sản phẩm, số lượng, giá, trạng thái | High | 3 | Done | | | Chi tiết đơn hàng theo order_id kèm danh sách order items (sản phẩm, số lượng, đơn giá) | 1. Trả về đầy đủ thông tin đơn; 2. Bao gồm danh sách items; 3. Phân quyền xem |
+| Sprint 3 | Order Management | US-34 | Cập nhật trạng thái đơn hàng | Admin | cập nhật trạng thái đơn hàng | quản lý luồng xử lý đơn | High | 3 | Done | | | Cập nhật trạng thái đơn hàng với phân quyền: PENDING→CONFIRMED→SHIPPING→DELIVERED→CANCELLED | 1. Chuyển trạng thái hợp lệ; 2. Phân quyền theo vai trò; 3. Không chuyển ngược trạng thái |
+| Sprint 3 | Order Management | US-35 | Thống kê đơn hàng | Admin | xem thống kê tổng quan đơn hàng | đánh giá hiệu quả kinh doanh | Medium | 3 | Done | | | Thống kê đơn hàng: tổng số, phân loại theo status, tổng doanh thu | 1. Hiển thị tổng đơn; 2. Phân loại theo trạng thái; 3. Tính tổng revenue |
+| Sprint 4 | Payment – VNPAY | US-36 | Tạo thanh toán VNPAY | Customer | tạo URL thanh toán qua cổng VNPAY | thanh toán đơn hàng trực tuyến | High | 8 | Done | | | Tạo URL thanh toán VNPAY cho đơn hàng. Kiểm tra đơn hàng tồn tại, thuộc quyền user, chưa thanh toán. Lấy IP client, gọi VNPay service tạo payment URL | 1. Trả về payment_url hợp lệ; 2. Đơn không tồn tại trả 404; 3. Đơn không phải của user trả 403; 4. Đơn đã thanh toán trả lỗi 400 |
+| Sprint 4 | Payment – VNPAY | US-37 | Xử lý kết quả thanh toán VNPAY Return | System | xử lý redirect từ VNPAY sau khi khách thanh toán | cập nhật trạng thái đơn hàng và tạo Payment record | High | 5 | Done | | | VNPAY redirect về endpoint, verify chữ ký, kiểm tra response_code. Nếu thành công: cập nhật payment_status=PAID, status=CONFIRMED, tạo Payment record với thông tin phí sàn | 1. Verify chữ ký VNPAY; 2. Cập nhật payment_status đơn hàng; 3. Tạo Payment record; 4. Tính platform_fee đúng |
+| Sprint 4 | Payment – VNPAY | US-38 | VNPAY IPN Webhook | System | nhận thông báo server-to-server từ VNPAY | xác nhận giao dịch chính xác ngay cả khi user không quay lại | High | 5 | Done | | | IPN endpoint nhận notification từ VNPAY, verify chữ ký, cập nhật trạng thái. Trả RspCode theo chuẩn VNPAY. Không tạo duplicate Payment record | 1. Verify chữ ký đúng; 2. Trả RspCode 00 khi thành công; 3. Trả RspCode 02 nếu đã xác nhận; 4. Không duplicate Payment |
+| Sprint 4 | Payment Management | US-39 | Xem danh sách thanh toán | Admin | xem danh sách tất cả giao dịch thanh toán | theo dõi và đối soát giao dịch | Medium | 3 | Done | | | Danh sách payment có phân trang, lọc theo status, customer_id, seller_id | 1. Phân trang đúng; 2. Lọc theo status; 3. Lọc theo customer/seller |
+| Sprint 4 | Payment Management | US-40 | Xem trạng thái thanh toán | User | xem trạng thái thanh toán của một giao dịch | biết thanh toán đã thành công hay chưa | Medium | 2 | Done | | | Lấy trạng thái payment theo payment_id | 1. Trả về thông tin payment đầy đủ; 2. Payment không tồn tại trả 404 |
+| Sprint 4 | Payment Management | US-41 | Đối soát thanh toán | Admin | xem báo cáo đối soát thanh toán | kiểm tra tổng thu, hoa hồng sàn, số tiền seller | Medium | 5 | Done | | | Báo cáo đối soát: tổng customer paid, tổng platform commission, tổng seller amount. Lọc theo khoảng thời gian | 1. Tính tổng đúng; 2. Chỉ tính payment COMPLETED; 3. Hỗ trợ lọc theo ngày |
+| Sprint 4 | Payment Management | US-42 | Hoàn tiền | Admin | hoàn tiền cho khách hàng | xử lý đơn hàng bị huỷ hoặc khiếu nại | Medium | 5 | Done | | | Tạo refund transaction, cập nhật payment status thành REFUNDED. Ghi lại lý do hoàn tiền | 1. Tạo refund transaction; 2. Cập nhật payment status = REFUNDED; 3. Ghi lý do; 4. Payment không tồn tại trả 404 |
+| Sprint 4 | Payment Management | US-43 | Khiếu nại thanh toán | Customer | tạo khiếu nại về thanh toán | giải quyết vấn đề giao dịch bất thường | Low | 3 | In Progress | | | Tạo khiếu nại thanh toán theo mã giao dịch. **Đã xong:** nhận request khiếu nại và trả thông báo thành công. **Chưa xong:** chưa lưu complaint vào database, chưa có bảng riêng cho khiếu nại | 1. Nhận khiếu nại thành công (✅ done); 2. Lưu thông tin khiếu nại vào DB (❌ chưa hoàn thiện) |
+| Sprint 4 | Payment Configuration | US-44 | Cấu hình phí sàn | Admin | cập nhật phần trăm phí sàn | điều chỉnh mô hình kinh doanh | Medium | 3 | In Progress | | | Cập nhật phí sàn toàn hệ thống (0-100%). **Đã xong:** nhận giá trị phí sàn và validate hợp lệ. **Chưa xong:** chưa lưu vào database, chưa có bảng cấu hình hệ thống | 1. Nhận và validate phí sàn (✅ done); 2. Lưu cấu hình vào database (❌ chưa hoàn thiện) |
+| Sprint 4 | Payment Configuration | US-45 | Cấu hình chu kỳ thanh toán | Admin | cập nhật chu kỳ thanh toán cho seller | quản lý lịch chi trả linh hoạt (tuần/tháng) | Medium | 2 | In Progress | | | Cập nhật chu kỳ thanh toán: theo tuần hoặc theo tháng. **Đã xong:** nhận giá trị và validate. **Chưa xong:** chưa lưu vào database | 1. Nhận và validate chu kỳ (✅ done); 2. Lưu cấu hình vào database (❌ chưa hoàn thiện) |
+| Sprint 4 | Shipping – GHN | US-46 | Tính phí vận chuyển | Customer | tính phí vận chuyển trước khi đặt hàng | biết tổng chi phí bao gồm ship | High | 5 | Done | | | Tính phí vận chuyển qua API GHN dựa trên địa chỉ gửi/nhận và trọng lượng hàng | 1. Trả về phí ship từ GHN; 2. Validate địa chỉ; 3. Xử lý lỗi API GHN |
+| Sprint 4 | Shipping – GHN | US-47 | Tạo vận đơn GHN | Seller | tạo vận đơn giao hàng qua GHN | gửi hàng cho khách | High | 8 | Done | | | Tạo vận đơn tại GHN cho đơn hàng, cập nhật status đơn → SHIPPING. Lưu thông tin shipment (tracking code, shipping provider) | 1. Tạo vận đơn GHN thành công; 2. Cập nhật order status = SHIPPING; 3. Lưu tracking code; 4. Ghi nhận shipping provider = GHN |
+| Sprint 4 | Shipping – GHN | US-48 | Tra cứu vận đơn | User | tra cứu trạng thái vận chuyển chi tiết | theo dõi đơn hàng đang giao | High | 3 | Done | | | Tra cứu trạng thái vận đơn qua GHN API theo shipment_id | 1. Trả về trạng thái vận chuyển chi tiết; 2. Shipment không tồn tại trả 404 |
+| Sprint 4 | Shipping – GHN | US-49 | Xem vận đơn theo đơn hàng | User | xem thông tin vận đơn của một đơn hàng | biết đơn hàng đang ở đâu | Medium | 2 | Done | | | Lấy thông tin shipment theo order_id | 1. Trả về shipment của đơn hàng; 2. Đơn chưa có shipment trả thông báo |
+| Sprint 4 | Shipping – GHN | US-50 | GHN Webhook cập nhật trạng thái | System | nhận webhook từ GHN khi trạng thái vận đơn thay đổi | tự động cập nhật trạng thái đơn hàng | High | 5 | Done | | | GHN gọi webhook khi vận đơn thay đổi trạng thái. Hệ thống cập nhật shipment status và order status tương ứng | 1. Nhận webhook thành công; 2. Cập nhật shipment status; 3. Cập nhật order status nếu DELIVERED |
+| Sprint 5 | Seller Dashboard | US-51 | Dashboard seller | Seller | xem thống kê tổng quan shop của mình | nắm bắt tình hình kinh doanh | High | 5 | Done | | | Thống kê cho seller: tổng đơn hàng, doanh thu, số sản phẩm, đơn pending | 1. Hiển thị tổng đơn hàng của seller; 2. Tính doanh thu; 3. Đếm sản phẩm; 4. Chỉ thống kê dữ liệu của seller đang đăng nhập |
+| Sprint 5 | Seller Dashboard | US-52 | Xem đơn hàng của shop | Seller | xem danh sách đơn hàng thuộc shop mình | quản lý đơn hàng cần xử lý | High | 3 | Done | | | Danh sách đơn hàng mà seller_id = user hiện tại, có phân trang | 1. Chỉ hiển thị đơn của seller; 2. Phân trang đúng |
+| Sprint 5 | Seller Order Processing | US-53 | Xác nhận đơn hàng | Seller | xác nhận đơn hàng mới | chính thức xử lý đơn và xác nhận trừ tồn kho | High | 5 | Done | | | Seller xác nhận đơn PENDING → CONFIRMED. Hệ thống **xác nhận chính thức việc trừ kho** (tồn kho đã được tạm giữ từ bước checkout) | 1. Chuyển trạng thái PENDING → CONFIRMED; 2. Xác nhận trừ tồn kho chính thức; 3. Chỉ seller sở hữu đơn mới xác nhận được |
+| Sprint 5 | Seller Order Processing | US-54 | Từ chối/huỷ đơn hàng | Seller | từ chối hoặc huỷ đơn hàng | xử lý đơn không thể thực hiện | High | 5 | Done | | | Seller từ chối/huỷ đơn → CANCELLED. Hoàn trả tồn kho sản phẩm | 1. Chuyển status → CANCELLED; 2. Hoàn tồn kho; 3. Ghi lý do từ chối |
+| Sprint 5 | Seller Order Processing | US-55 | Chuyển trạng thái giao hàng | Seller | đánh dấu đơn hàng đang giao | thông báo cho khách đơn đã gửi | High | 3 | Done | | | Seller đánh dấu đơn hàng → SHIPPING | 1. Chuyển status → SHIPPING; 2. Chỉ chuyển từ CONFIRMED |
+| Sprint 5 | Seller Product | US-56 | Xem sản phẩm của seller | Seller | xem danh sách sản phẩm mình đã đăng | quản lý danh mục sản phẩm | High | 3 | Done | | | Danh sách sản phẩm mà producer_id = user hiện tại | 1. Chỉ hiển thị sản phẩm của seller; 2. Bao gồm tất cả status |
+| Sprint 5 | Seller Product | US-57 | Cập nhật tồn kho | Seller | cập nhật số lượng tồn kho sản phẩm | quản lý hàng tồn chính xác | High | 3 | Done | | | Cập nhật stock_quantity của sản phẩm theo product_id | 1. Cập nhật số lượng thành công; 2. Chỉ chủ sản phẩm được cập nhật; 3. Số lượng >= 0 |
+| Sprint 5 | Seller Profile | US-58 | Xem profile seller | Seller | xem thông tin shop và thống kê | quản lý thông tin kinh doanh | Medium | 3 | Done | | | Thông tin shop/profile kèm thống kê: tổng sản phẩm, đơn hàng | 1. Trả về thông tin shop; 2. Bao gồm thống kê sản phẩm, đơn hàng |
+| Sprint 5 | Seller Onboarding | US-59 | Đăng ký hồ sơ kinh doanh | Seller | nộp hồ sơ kinh doanh để bán hàng trên sàn | được xác minh và bắt đầu bán hàng | High | 8 | Done | | | Seller nộp hồ sơ: CCCD, giấy phép kinh doanh, thông tin ngân hàng. Tạo seller_profile với trạng thái PENDING | 1. Tạo hồ sơ thành công; 2. Lưu CCCD, giấy phép; 3. Lưu thông tin ngân hàng; 4. Trạng thái PENDING |
+| Sprint 5 | Seller Onboarding | US-60 | Xem trạng thái xác minh | Seller | xem trạng thái duyệt hồ sơ kinh doanh | biết hồ sơ đã được duyệt hay chưa | High | 2 | Done | | | Seller xem trạng thái verification (PENDING/APPROVED/REJECTED) | 1. Trả về trạng thái xác minh; 2. Hiển thị lý do từ chối nếu REJECTED |
+| Sprint 5 | Seller Onboarding | US-61 | Admin duyệt hồ sơ seller | Admin | duyệt hoặc từ chối hồ sơ kinh doanh của seller | kiểm soát chất lượng seller trên sàn | High | 5 | Done | | | Admin xác minh/từ chối hồ sơ seller. Nếu duyệt: cập nhật activated=1 cho user | 1. Duyệt → activated=1; 2. Từ chối → ghi lý do; 3. Cập nhật verification_status |
+| Sprint 5 | Seller Onboarding | US-62 | Danh sách hồ sơ chờ duyệt | Admin | xem danh sách hồ sơ seller chờ duyệt | xử lý các hồ sơ đăng ký mới | High | 3 | Done | | | Danh sách seller_profile có status PENDING, có phân trang | 1. Hiển thị hồ sơ PENDING; 2. Phân trang đúng |
+| Sprint 6 | Review | US-63 | Tạo đánh giá sản phẩm | Customer | đánh giá sản phẩm đã mua | chia sẻ trải nghiệm cho người mua khác | High | 5 | Done | | | Tạo đánh giá sản phẩm, yêu cầu đơn hàng phải có status DELIVERED. Bao gồm rating (1-5 sao), comment | 1. Chỉ đánh giá được sản phẩm đã nhận (DELIVERED); 2. Rating 1-5 sao; 3. Mỗi đơn chỉ đánh giá 1 lần |
+| Sprint 6 | Review | US-64 | Xem đánh giá sản phẩm (public) | Guest | xem đánh giá của sản phẩm | tham khảo trước khi mua hàng | High | 3 | Done | | | Lấy reviews kèm thống kê: điểm trung bình, phân bố sao (1-5), tổng số đánh giá. Public endpoint | 1. Hiển thị danh sách reviews; 2. Tính điểm trung bình; 3. Phân bố số sao; 4. Không cần đăng nhập |
+| Sprint 6 | Review | US-65 | Cập nhật đánh giá | Customer | cập nhật đánh giá đã viết | sửa nội dung nếu cần | Medium | 2 | Done | | | Cập nhật rating và comment của đánh giá mình đã tạo | 1. Chỉ chủ review được sửa; 2. Cập nhật thành công |
+| Sprint 6 | Review | US-66 | Xoá đánh giá | Customer | xoá đánh giá của mình | gỡ bỏ đánh giá không phù hợp | Low | 1 | Done | | | Xoá đánh giá theo review_id, chỉ chủ review được xoá | 1. Xoá thành công; 2. Chỉ chủ review được xoá |
+| Sprint 6 | Return/Refund | US-67 | Tạo yêu cầu đổi/trả hàng | Customer | tạo yêu cầu đổi/trả hàng đã nhận | giải quyết khi sản phẩm lỗi hoặc không đúng mô tả | High | 5 | Done | | | Khách hàng tạo yêu cầu đổi/trả cho đơn DELIVERED. Ghi lý do, loại yêu cầu | 1. Chỉ tạo được cho đơn DELIVERED; 2. Ghi lý do chi tiết; 3. Trạng thái PENDING |
+| Sprint 6 | Return/Refund | US-68 | Xem yêu cầu đổi/trả của tôi | Customer | xem danh sách yêu cầu đổi/trả mình đã tạo | theo dõi tiến trình xử lý | Medium | 2 | Done | | | Danh sách yêu cầu return của user hiện tại | 1. Chỉ hiển thị return của user; 2. Bao gồm trạng thái xử lý |
+| Sprint 6 | Return/Refund | US-69 | Admin xem tất cả yêu cầu đổi/trả | Admin | xem tất cả yêu cầu đổi/trả trên hệ thống | quản lý và xử lý yêu cầu | Medium | 3 | Done | | | Danh sách tất cả return requests, có phân trang | 1. Hiển thị tất cả returns; 2. Phân trang đúng |
+| Sprint 6 | Return/Refund | US-70 | Duyệt yêu cầu đổi/trả | Admin | duyệt yêu cầu đổi/trả hàng | chấp nhận yêu cầu hợp lệ của khách | High | 3 | Done | | | Admin duyệt → status APPROVED | 1. Chuyển status → APPROVED; 2. Ghi admin_id duyệt |
+| Sprint 6 | Return/Refund | US-71 | Từ chối yêu cầu đổi/trả | Admin | từ chối yêu cầu đổi/trả không hợp lệ | bảo vệ quyền lợi seller | Medium | 2 | Done | | | Admin từ chối → status REJECTED | 1. Chuyển status → REJECTED; 2. Ghi lý do từ chối |
+| Sprint 6 | Return/Refund | US-72 | Xác nhận đã nhận hàng trả về | Admin | đánh dấu đã nhận hàng trả từ khách | hoàn tất quy trình đổi/trả | Medium | 2 | Done | | | Admin đánh dấu đã nhận hàng → status RECEIVED | 1. Chuyển status → RECEIVED; 2. Ghi thời gian nhận |
+| Sprint 6 | Settlement | US-73 | Xem ví seller | Seller | xem số dư ví: pending, available, đã rút | quản lý tài chính kinh doanh | High | 5 | Done | | | Hiển thị ví seller: pending_amount (chờ đối soát), available_amount (có thể rút), withdrawn_amount (đã rút) | 1. Hiển thị 3 loại số dư; 2. Chỉ seller xem ví mình |
+| Sprint 6 | Settlement | US-74 | Lịch sử đối soát | User | xem lịch sử các kỳ đối soát | theo dõi thu nhập theo kỳ | High | 3 | Done | | | Seller xem lịch sử đối soát của mình, admin xem tất cả. Phân trang | 1. Phân quyền đúng; 2. Phân trang; 3. Hiển thị chi tiết từng kỳ |
+| Sprint 6 | Settlement | US-75 | Tạo kỳ đối soát | Admin | tạo kỳ đối soát cho seller | tổng hợp doanh thu đơn DELIVERED để chi trả | High | 8 | Done | | | Admin tạo kỳ đối soát: tổng hợp đơn DELIVERED trong khoảng thời gian, tính tổng tiền, phí sàn, tiền seller | 1. Tổng hợp đơn DELIVERED đúng; 2. Tính platform_fee; 3. Tính seller_amount; 4. Tạo settlement record |
+| Sprint 6 | Settlement | US-76 | Duyệt kỳ đối soát | Admin | duyệt kỳ đối soát đã tạo | chuyển tiền từ pending sang available cho seller | High | 5 | Done | | | Admin duyệt settlement → chuyển tiền pending → available trong ví seller | 1. Cập nhật settlement status; 2. Chuyển pending → available trong ví |
+| Sprint 6 | Settlement | US-77 | Chi trả cho seller (Payout) | Admin | chi trả tiền cho seller | hoàn tất chu kỳ thanh toán | High | 5 | Done | | | Admin chi trả: trừ available, cộng withdrawn trong ví seller. Tạo payout record | 1. Trừ available_amount; 2. Cộng withdrawn_amount; 3. Tạo payout record |
+| Sprint 6 | Settlement | US-78 | Lịch sử chi trả (Payout History) | User | xem lịch sử các lần chi trả | theo dõi lịch sử nhận tiền | Medium | 3 | Done | | | Seller xem payouts của mình, admin xem tất cả | 1. Phân quyền đúng; 2. Phân trang |
+| Sprint 7 | Traceability | US-79 | Thêm chứng nhận sản phẩm | Seller | thêm chứng nhận chất lượng cho sản phẩm | tăng uy tín và giá trị sản phẩm | High | 5 | Done | | | Seller thêm chứng nhận (VietGAP, OCOP, Organic...) cho sản phẩm. Trạng thái chờ admin xác minh | 1. Tạo certificate với status PENDING; 2. Upload file chứng nhận; 3. Liên kết với product_id |
+| Sprint 7 | Traceability | US-80 | Xem chứng nhận sản phẩm (public) | Guest | xem chứng nhận của sản phẩm | kiểm tra chất lượng trước khi mua | High | 2 | Done | | | Lấy danh sách chứng nhận đã xác minh (VERIFIED) của sản phẩm. Public endpoint | 1. Chỉ hiển thị chứng nhận VERIFIED; 2. Không cần đăng nhập |
+| Sprint 7 | Traceability | US-81 | Admin xác minh chứng nhận | Admin | xác minh hoặc từ chối chứng nhận sản phẩm | đảm bảo tính xác thực chứng nhận | High | 3 | Done | | | Admin xác minh/từ chối certificate. Cập nhật status VERIFIED hoặc REJECTED | 1. Chuyển status thành công; 2. Ghi admin_id và thời gian; 3. Ghi lý do nếu từ chối |
+| Sprint 7 | Traceability | US-82 | Khai báo nguồn gốc sản phẩm | Seller | khai báo thông tin nguồn gốc sản phẩm | minh bạch xuất xứ cho khách hàng | High | 5 | Done | | | Seller khai báo nguồn gốc: địa điểm sản xuất, phương pháp, nguyên liệu. Cập nhật nếu đã có | 1. Tạo hoặc cập nhật origin info; 2. Liên kết product_id; 3. Lưu thông tin đầy đủ |
+| Sprint 7 | Traceability | US-83 | Xem nguồn gốc sản phẩm (public) | Guest | xem thông tin nguồn gốc sản phẩm | biết xuất xứ và phương pháp sản xuất | High | 2 | Done | | | Lấy thông tin nguồn gốc theo product_id. Public endpoint | 1. Trả về thông tin nguồn gốc; 2. Không cần đăng nhập |
+| Sprint 7 | Traceability | US-84 | Xem toàn bộ truy xuất nguồn gốc | Guest | xem tổng hợp thông tin truy xuất nguồn gốc | có cái nhìn toàn diện về sản phẩm | High | 3 | Done | | | Tổng hợp: nguồn gốc + chứng nhận + thông tin sản phẩm trong 1 endpoint | 1. Trả về origin + certificates + product info; 2. Public endpoint |
+| Sprint 7 | Content Management | US-85 | Quản lý nội dung (CRUD) | Admin | tạo, xem, sửa, xoá nội dung trên hệ thống | quản lý bài viết, tin tức, thông báo | Medium | 5 | Done | | | CRUD content: danh sách có phân trang, lọc status/author/type, search. Hỗ trợ type: POST, PRODUCT_DESCRIPTION, NEWS, ANNOUNCEMENT | 1. CRUD đầy đủ; 2. Phân trang và lọc; 3. Search theo tiêu đề; 4. Hỗ trợ 4 loại content |
+| Sprint 7 | Content Management | US-86 | Duyệt nội dung | Admin | duyệt hoặc từ chối nội dung do user đăng | kiểm duyệt nội dung trước khi public | Medium | 3 | Done | | | Admin duyệt/từ chối content. Content đã duyệt mới hiển thị public | 1. Duyệt → status APPROVED; 2. Từ chối → status REJECTED; 3. Ghi lý do |
+| Sprint 7 | Complaint Management | US-87 | Xem danh sách đánh giá & khiếu nại | Admin | xem danh sách đánh giá và khiếu nại | giám sát chất lượng dịch vụ | Medium | 3 | Done | | | Danh sách reviews và complaints có phân trang, lọc status, type | 1. Phân trang đúng; 2. Lọc theo status/type |
+| Sprint 7 | Complaint Management | US-88 | Xử lý khiếu nại | Admin | xử lý khiếu nại từ khách hàng | giải quyết tranh chấp, cải thiện dịch vụ | Medium | 3 | Done | | | Admin xử lý khiếu nại: cập nhật trạng thái, ghi chú kết quả xử lý | 1. Cập nhật status khiếu nại; 2. Ghi chú kết quả |
+| Sprint 7 | Contract Management | US-89 | Quản lý hợp đồng đối tác (CRUD) | Admin | tạo, xem, sửa, xoá hợp đồng đối tác | quản lý quan hệ đối tác kinh doanh | Medium | 5 | Done | | | CRUD hợp đồng: danh sách có phân trang, lọc status/type, search. Type: ADVERTISING, PARTNERSHIP, DISTRIBUTION, OTHER | 1. CRUD đầy đủ; 2. Phân trang và lọc; 3. Hỗ trợ 4 loại hợp đồng |
+| Sprint 8 | Region Management | US-90 | Quản lý vùng miền | Admin | tạo, xem, sửa, xoá vùng miền | phân loại sản phẩm theo vùng địa lý | Medium | 3 | Done | | | CRUD vùng miền: danh sách có phân trang, lọc is_active, search. Tự tạo slug | 1. CRUD đầy đủ; 2. Tự sinh slug; 3. Lọc is_active |
+| Sprint 8 | Media Management | US-91 | Upload file media | User | upload hình ảnh và video | đính kèm media cho sản phẩm và bài viết | High | 5 | Done | | | Upload file (image/video) lên Supabase Storage, trả về public URL. Lưu metadata vào DB | 1. Upload thành công lên Supabase; 2. Trả về public URL; 3. Lưu file_type, size vào DB |
+| Sprint 8 | Media Management | US-92 | Quản lý media (xem, xoá) | User | xem danh sách và xoá file đã upload | quản lý tài nguyên media | Medium | 3 | Done | | | Danh sách media có phân trang, lọc file_type. Xoá media trên cả Supabase Storage và DB | 1. Phân trang; 2. Lọc theo file_type; 3. Xoá cả Storage và DB |
+| Sprint 8 | Admin Dashboard | US-93 | Tổng quan hệ thống | Admin | xem thống kê tổng quan hệ thống | nắm bắt tình hình hoạt động sàn | High | 5 | In Progress | | | Thống kê tổng quan hệ thống. **Đã xong:** đếm người dùng theo loại (admin/producer/consumer), đếm sản phẩm (tổng, chờ duyệt). **Chưa xong:** thống kê đơn hàng và doanh thu đang trả giá trị mặc định | 1. Đếm người dùng theo loại (✅ done); 2. Đếm sản phẩm (✅ done); 3. Thống kê đơn hàng (❌ TODO); 4. Thống kê doanh thu (❌ TODO) |
+| Sprint 8 | Admin Dashboard | US-94 | Thống kê doanh thu | Admin | xem thống kê doanh thu theo thời gian | phân tích hiệu quả kinh doanh | High | 5 | In Progress | | | Thống kê doanh thu theo ngày/tuần/tháng/năm. **Đã xong:** nhận tham số lọc khoảng thời gian. **Chưa xong:** logic truy vấn doanh thu thực và dữ liệu biểu đồ đang trả giá trị mặc định | 1. Lọc theo khoảng thời gian (✅ done); 2. Tính tổng doanh thu thực (❌ TODO); 3. Dữ liệu biểu đồ (❌ TODO) |
+| Sprint 8 | Admin Dashboard | US-95 | Thống kê sản phẩm | Admin | xem thống kê sản phẩm theo trạng thái và nhãn | đánh giá cơ cấu sản phẩm trên sàn | Medium | 3 | Done | | | Thống kê sản phẩm: phân loại theo status (pending/approved/rejected) và label (clean_agriculture/traditional_craft/ocop) | 1. Đếm theo status đúng; 2. Đếm theo label đúng |
+| Sprint 8 | Admin Dashboard | US-96 | Thống kê đơn hàng dashboard | Admin | xem thống kê đơn hàng trên dashboard | giám sát tình trạng đơn hàng | Medium | 3 | In Progress | | | Thống kê đơn hàng theo trạng thái. **Đã xong:** tạo chức năng nhận yêu cầu thống kê. **Chưa xong:** logic đếm đơn theo trạng thái và lấy đơn hàng gần đây đang trả giá trị mặc định | 1. Chức năng tồn tại (✅ done); 2. Phân loại theo trạng thái (❌ TODO); 3. Đơn hàng gần đây (❌ TODO) |
+| Sprint 8 | Admin Dashboard | US-97 | Thống kê người dùng | Admin | xem thống kê người dùng theo loại và trạng thái | đánh giá tăng trưởng người dùng | Medium | 3 | Done | | | Thống kê user: theo type (admin/producer/consumer), theo status (active/inactive), user mới 7 ngày | 1. Đếm theo type đúng; 2. Đếm theo trạng thái; 3. Đếm user mới 7 ngày |
+| Sprint 8 | Statistics | US-98 | Thống kê producer | Admin | xem thống kê người sản xuất | đánh giá quy mô và tăng trưởng seller | Medium | 3 | Done | | | Thống kê producer: total, active, inactive, mới trong tháng | 1. Đếm đúng các trạng thái; 2. Mới trong tháng chính xác |
+| Sprint 8 | Statistics | US-99 | Thống kê consumer | Admin | xem thống kê người tiêu dùng | đánh giá quy mô khách hàng | Medium | 3 | Done | | | Thống kê consumer: total, active, mới trong tháng | 1. Đếm đúng; 2. Mới trong tháng chính xác |
+| Sprint 8 | Statistics | US-100 | Sản phẩm trending | Admin | xem sản phẩm được quan tâm nhiều | phân tích xu hướng thị trường | Low | 3 | In Progress | | | Lấy danh sách sản phẩm nổi bật. **Đã xong:** trả danh sách sản phẩm đã duyệt, sắp xếp theo ngày tạo. **Chưa xong:** sắp xếp theo số lượng đặt hàng và điểm đánh giá thực tế | 1. Trả danh sách sản phẩm (✅ done); 2. Sắp xếp theo lượt đặt hàng (❌ TODO); 3. Sắp xếp theo điểm đánh giá (❌ TODO) |
+| Sprint 8 | Statistics | US-101 | Thống kê theo vùng miền | Admin | xem thống kê sản phẩm theo vùng | phân tích phân bố địa lý sản phẩm | Low | 3 | In Progress | | | Thống kê sản phẩm theo vùng miền. **Đã xong:** tạo chức năng nhận yêu cầu. **Chưa xong:** chưa kết nối bảng vùng miền với sản phẩm, đang trả danh sách rỗng | 1. Chức năng tồn tại (✅ done); 2. Kết nối dữ liệu vùng miền – sản phẩm (❌ TODO) |
+| Sprint 8 | Statistics | US-102 | Thống kê theo danh mục | Admin | xem thống kê sản phẩm theo danh mục | phân tích cơ cấu sản phẩm | Low | 3 | In Progress | | | Thống kê sản phẩm theo danh mục. **Đã xong:** tạo chức năng nhận yêu cầu. **Chưa xong:** chưa kết nối bảng danh mục với sản phẩm, đang trả danh sách rỗng | 1. Chức năng tồn tại (✅ done); 2. Kết nối dữ liệu danh mục – sản phẩm (❌ TODO) |
+| Sprint 8 | Mobile App | US-103 | Xem bài viết công khai | Guest | xem danh sách bài viết đã duyệt trên app | đọc tin tức và thông tin sản phẩm | High | 3 | Done | | | Lấy danh sách bài viết đã duyệt, public endpoint không cần đăng nhập | 1. Chỉ hiển thị bài APPROVED; 2. Không cần auth |
+| Sprint 8 | Mobile App | US-104 | Quản lý bài viết của producer | Seller | tạo, xem, sửa, xoá bài viết trên app | quảng bá sản phẩm và chia sẻ câu chuyện | High | 5 | Done | | | CRUD bài viết: tạo mới hỗ trợ upload ảnh/video multipart, cập nhật (reset status PENDING), xoá | 1. Tạo bài multipart upload; 2. Cập nhật reset PENDING; 3. Xoá bài thành công |
+| Sprint 8 | Mobile App | US-105 | Xem sản phẩm trên app (public) | Guest | xem danh sách và chi tiết sản phẩm đã duyệt | mua sắm trên ứng dụng mobile | High | 3 | Done | | | Danh sách và chi tiết sản phẩm APPROVED, public endpoint | 1. Chỉ sản phẩm APPROVED; 2. Không cần auth; 3. Chi tiết đầy đủ |
+| Sprint 8 | Mobile App | US-106 | Đặt hàng trên app (Mobile Checkout) | Customer | đặt hàng từ giỏ hàng trên app mobile | mua sắm tiện lợi trên điện thoại | High | 8 | Done | | | Tạo đơn từ giỏ hàng, tách đơn theo seller, trừ tồn kho, tính phí sàn. Tương tự checkout web | 1. Tạo đơn thành công; 2. Tách theo seller; 3. Trừ tồn kho; 4. Xoá giỏ sau đặt |
+| Sprint 8 | Mobile App | US-107 | Xem đơn hàng trên app | Customer | xem danh sách và chi tiết đơn hàng trên app | theo dõi đơn hàng di động | High | 3 | Done | | | Danh sách đơn hàng và chi tiết theo mã đơn hàng, kèm danh sách sản phẩm đã mua | 1. Hiển thị đơn của user; 2. Chi tiết kèm danh sách sản phẩm |
+| Sprint 8 | Mobile App | US-108 | Profile người dùng trên app | Customer | xem và cập nhật thông tin cá nhân trên app | quản lý tài khoản di động | Medium | 3 | Done | | | Xem profile và cập nhật tên, giới tính | 1. Hiển thị profile; 2. Cập nhật name, gender |

@@ -36,6 +36,8 @@ _PROJECT_ID   = os.getenv("SUPABASE_PROJECT_ID", "")
 _BUCKET       = os.getenv("SUPABASE_STORAGE_BUCKET", "file_test00")
 _PUBLIC_BASE  = f"https://{_PROJECT_ID}.supabase.co/storage/v1/object/public/{_BUCKET}/"
 _ALLOWED_IMG  = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+_ALLOWED_VID  = {"video/mp4", "video/quicktime", "video/avi", "video/x-msvideo", "video/x-ms-wmv"}
+_ALLOWED_MEDIA = _ALLOWED_IMG | _ALLOWED_VID
 
 def _upload_to_supabase(content: bytes, filename: str, mime: str) -> str:
     """Upload bytes lên Supabase Storage, trả về public URL"""
@@ -221,35 +223,40 @@ async def create_my_post(
     product_id: Optional[int] = Form(None),
     images: Optional[str] = Form(None),   # URL nếu đã upload riêng
     videos: Optional[str] = Form(None),
-    # --- File ảnh (tùy chọn) --- 
-    image_file: Optional[UploadFile] = File(None),
+    # --- File ảnh hoặc video (tùy chọn) --- 
+    media_file: Optional[UploadFile] = File(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Producer tạo bài viết mới (multipart/form-data).
-    - Nếu gửi kèm `image_file`: tự upload lên Supabase rồi lưu URL.
-    - Nếu chỉ gửi `images` (URL text): dùng trực tiếp.
+    - Nếu gửi kèm `media_file` (ảnh hoặc video): tự upload lên Supabase rồi lưu URL.
+    - Nếu chỉ gửi `images`/`videos` (URL text): dùng trực tiếp.
     - Bài viết tạo xong ở trạng thái PENDING chờ admin duyệt.
     """
-    final_image_url = images  # mặc định là URL text nếu có
+    final_image_url = images
+    final_video_url = videos
 
-    # Nếu có file ảnh đính kèm, upload lên Supabase trước
-    if image_file and image_file.filename:
-        if image_file.content_type not in _ALLOWED_IMG:
+    # Nếu có file đính kèm, upload lên Supabase trước
+    if media_file and media_file.filename:
+        mime = media_file.content_type or ""
+        if mime not in _ALLOWED_MEDIA:
             raise HTTPException(
                 status_code=400,
-                detail=f"Chỉ chấp nhận ảnh (JPEG/PNG/GIF/WEBP). Nhận được: {image_file.content_type}"
+                detail=f"Chỉ chấp nhận ảnh (JPEG/PNG/GIF/WEBP) hoặc video (MP4/MOV/AVI). Nhận được: {mime}"
             )
-        file_bytes = await image_file.read()
-        if len(file_bytes) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Ảnh quá lớn, tối đa 10MB")
+        file_bytes = await media_file.read()
+        max_size = 50 * 1024 * 1024 if mime in _ALLOWED_VID else 10 * 1024 * 1024
+        if len(file_bytes) > max_size:
+            raise HTTPException(status_code=400, detail=f"File quá lớn, tối đa {'50MB' if mime in _ALLOWED_VID else '10MB'}")
         try:
-            final_image_url = _upload_to_supabase(
-                file_bytes, image_file.filename, image_file.content_type
-            )
+            url = _upload_to_supabase(file_bytes, media_file.filename, mime)
+            if mime in _ALLOWED_VID:
+                final_video_url = url   # video → lưu vào field videos
+            else:
+                final_image_url = url   # ảnh  → lưu vào field images
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Upload ảnh thất bại: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Upload thất bại: {str(e)}")
 
     new_post = Content(
         title=title,
@@ -259,7 +266,7 @@ async def create_my_post(
         product_id=product_id,
         status=ContentStatus.PENDING,
         images=final_image_url,
-        videos=videos
+        videos=final_video_url
     )
 
     db.add(new_post)
@@ -273,7 +280,8 @@ async def create_my_post(
             "id": new_post.id,
             "title": new_post.title,
             "status": "PENDING",
-            "images": final_image_url
+            "images": final_image_url,
+            "videos": final_video_url
         }
     }
 
@@ -473,116 +481,136 @@ async def create_order(
     db: Session = Depends(get_db)
 ):
     """
-    Tạo đơn hàng từ giỏ hàng
-    Yêu cầu đăng nhập
+    Tạo đơn hàng từ giỏ hàng.
+    - [FIX 1] Kiểm tra & trừ tồn kho khi đặt thành công.
+    - [FIX 3] Tự động tách đơn nếu giỏ có sản phẩm từ nhiều người bán khác nhau.
+    Yêu cầu đăng nhập.
     """
     if not checkout_data.items or len(checkout_data.items) == 0:
         raise HTTPException(status_code=400, detail="Cart is empty")
-    
-    # Validate products and calculate totals
-    subtotal = Decimal("0")
-    order_items = []
-    seller_id = None
-    
+
+    # ── Bước 1: Validate sản phẩm & kiểm tra tồn kho ──────────────────────────
+    # Nhóm items theo seller_id để hỗ trợ multi-seller checkout
+    sellers_map: dict = {}  # {seller_id: [{"product": ..., "quantity": ..., ...}]}
+
     for item in checkout_data.items:
         product = db.query(Product).filter(
             Product.id == item.product_id,
-            Product.status == ProductStatus.APPROVED
+            Product.status == ProductStatus.APPROVED,
+            Product.is_active == True
         ).first()
-        
+
         if not product:
             raise HTTPException(
                 status_code=400,
-                detail=f"Product {item.product_id} not found or not available"
+                detail=f"Sản phẩm ID {item.product_id} không tìm thấy hoặc chưa được duyệt"
             )
-        
-        # Check all products from same seller (for simplicity)
-        if seller_id is None:
-            seller_id = product.producer_id
-        elif seller_id != product.producer_id:
+
+        # [FIX 1] Kiểm tra tồn kho trước khi đặt
+        if product.stock_quantity < item.quantity:
             raise HTTPException(
                 status_code=400,
-                detail="All products must be from the same seller. Please create separate orders."
+                detail=(
+                    f"Sản phẩm '{product.name}' không đủ hàng. "
+                    f"Tồn kho: {product.stock_quantity}, yêu cầu: {item.quantity}"
+                )
             )
-        
-        item_total = product.price * item.quantity
-        subtotal += item_total
-        
-        order_items.append({
+
+        sid = product.producer_id
+        if sid not in sellers_map:
+            sellers_map[sid] = []
+        sellers_map[sid].append({
             "product": product,
             "quantity": item.quantity,
             "unit_price": product.price,
-            "total_price": item_total
+            "total_price": product.price * item.quantity,
         })
-    
-    # Calculate fees
-    shipping_fee = Decimal("30000")  # 30.000 VND flat rate
-    discount_amount = Decimal("0")
-    total_amount = subtotal + shipping_fee - discount_amount
-    
-    # Platform commission (5%)
+
+    # ── Bước 2: Tạo đơn hàng – tách theo từng người bán (FIX 3) ───────────────
     platform_fee_percentage = Decimal("5.0")
-    platform_fee_amount = total_amount * platform_fee_percentage / Decimal("100")
-    seller_amount = total_amount - platform_fee_amount
-    
-    # Generate order number
-    order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
-    
-    # Create order
-    new_order = Order(
-        order_number=order_number,
-        customer_id=current_user.id,
-        customer_name=checkout_data.customer_name,
-        customer_phone=checkout_data.customer_phone,
-        customer_email=checkout_data.customer_email,
-        shipping_address=checkout_data.shipping_address,
-        shipping_province=checkout_data.shipping_province,
-        shipping_district=checkout_data.shipping_district,
-        shipping_ward=checkout_data.shipping_ward,
-        seller_id=seller_id,
-        subtotal=subtotal,
-        shipping_fee=shipping_fee,
-        discount_amount=discount_amount,
-        total_amount=total_amount,
-        platform_fee_percentage=platform_fee_percentage,
-        platform_fee_amount=platform_fee_amount,
-        seller_amount=seller_amount,
-        status=OrderStatus.PENDING,
-        payment_method=checkout_data.payment_method,
-        payment_status="UNPAID",
-        customer_note=checkout_data.customer_note
-    )
-    
-    db.add(new_order)
-    db.flush()  # Get order ID
-    
-    # Create order items
-    for item_data in order_items:
-        order_item = OrderItem(
-            order_id=new_order.id,
-            product_id=item_data["product"].id,
-            product_name=item_data["product"].name,
-            product_image=item_data["product"].images,
-            unit_price=item_data["unit_price"],
-            quantity=item_data["quantity"],
-            total_price=item_data["total_price"]
+    created_orders = []
+
+    for seller_id, items_of_seller in sellers_map.items():
+        subtotal = sum(i["total_price"] for i in items_of_seller)
+        shipping_fee = Decimal("30000")          # 30.000 VND flat rate / đơn
+        discount_amount = Decimal("0")
+        total_amount = subtotal + shipping_fee - discount_amount
+        platform_fee_amount = subtotal * platform_fee_percentage / Decimal("100")
+        seller_amount = subtotal - platform_fee_amount
+
+        order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+
+        new_order = Order(
+            order_number=order_number,
+            customer_id=current_user.id,
+            customer_name=checkout_data.customer_name,
+            customer_phone=checkout_data.customer_phone,
+            customer_email=checkout_data.customer_email,
+            shipping_address=checkout_data.shipping_address,
+            shipping_province=checkout_data.shipping_province,
+            shipping_district=checkout_data.shipping_district,
+            shipping_ward=checkout_data.shipping_ward,
+            seller_id=seller_id,
+            subtotal=subtotal,
+            shipping_fee=shipping_fee,
+            discount_amount=discount_amount,
+            total_amount=total_amount,
+            platform_fee_percentage=platform_fee_percentage,
+            platform_fee_amount=platform_fee_amount,
+            seller_amount=seller_amount,
+            status=OrderStatus.PENDING,
+            payment_method=checkout_data.payment_method,
+            payment_status="UNPAID",
+            customer_note=checkout_data.customer_note,
         )
-        db.add(order_item)
-    
-    db.commit()
-    db.refresh(new_order)
-    
-    return {
-        "success": True,
-        "message": "Order created successfully",
-        "data": {
+        db.add(new_order)
+        db.flush()  # lấy new_order.id trước khi tạo items
+
+        for item_data in items_of_seller:
+            db.add(OrderItem(
+                order_id=new_order.id,
+                product_id=item_data["product"].id,
+                product_name=item_data["product"].name,
+                product_image=item_data["product"].images,
+                unit_price=item_data["unit_price"],
+                quantity=item_data["quantity"],
+                total_price=item_data["total_price"],
+            ))
+            # [FIX 1] Trừ tồn kho ngay khi đặt hàng thành công
+            item_data["product"].stock_quantity -= item_data["quantity"]
+
+        created_orders.append({
             "order_id": new_order.id,
             "order_number": new_order.order_number,
-            "total_amount": str(new_order.total_amount),
-            "status": "PENDING",
-            "payment_method": checkout_data.payment_method
+            "seller_id": seller_id,
+            "total_amount": str(total_amount),
+        })
+
+    db.commit()
+
+    # Trả về 1 đơn nếu chỉ có 1 seller, trả về danh sách nếu nhiều seller
+    if len(created_orders) == 1:
+        order = created_orders[0]
+        return {
+            "success": True,
+            "message": "Đặt hàng thành công",
+            "data": {
+                "order_id": order["order_id"],
+                "order_number": order["order_number"],
+                "total_amount": order["total_amount"],
+                "status": "PENDING",
+                "payment_method": checkout_data.payment_method,
+            },
         }
-    }
+    else:
+        return {
+            "success": True,
+            "message": f"Đặt hàng thành công. Giỏ hàng được tách thành {len(created_orders)} đơn theo từng người bán.",
+            "data": {
+                "orders": created_orders,
+                "payment_method": checkout_data.payment_method,
+            },
+        }
 
 
 @router.get("/orders/my")

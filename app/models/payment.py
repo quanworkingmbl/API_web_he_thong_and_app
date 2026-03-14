@@ -18,7 +18,7 @@ class Payment(Base):
     __tablename__ = "payments"
     
     id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, nullable=False)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
     customer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     seller_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
