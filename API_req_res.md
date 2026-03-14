@@ -3389,8 +3389,10 @@ PUT http://localhost:8000/api/mobile/profile?name=Nguyễn Văn A (Mới)&gender
 
 ## 📌 Ghi Chú
 
-- **Swagger UI:** `http://localhost:8000/docs` (chỉ khi `DEBUG=True`)
-- **ReDoc:** `http://localhost:8000/redoc` (chỉ khi `DEBUG=True`)
+> ⚠️ **Bảo mật:** Tuyệt đối **KHÔNG bật `DEBUG=True` trên môi trường production** vì sẽ lộ thông tin nội bộ (schema, stack trace, cấu hình) cho bên ngoài.
+
+- **Swagger UI:** `http://localhost:8000/docs` (chỉ khi `DEBUG=True` — chỉ dùng khi phát triển)
+- **ReDoc:** `http://localhost:8000/redoc` (chỉ khi `DEBUG=True` — chỉ dùng khi phát triển)
 - **Health Check:** `GET http://localhost:8000/health`
 - Tất cả timestamps ở định dạng **ISO 8601 UTC**
 - Giá tiền ở định dạng **decimal string** (VD: `"150000.00"`)
