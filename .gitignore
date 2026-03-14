@@ -22,12 +22,11 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
+md/
 # Environment
 # .env
 # .env.local
 # .env.*.local
-/md
 # IDE
 .vscode/
 .idea/
