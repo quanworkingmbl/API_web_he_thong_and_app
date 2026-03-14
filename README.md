@@ -134,6 +134,53 @@ Du_an_cms_API/
 └── README.md                    # This file
 ```
 
+## 🛒 Seller: Đăng bài & Đăng sản phẩm — Web hay App?
+
+### ✅ Đăng bài (đăng bài viết / post)
+
+**Seller đăng bài được hỗ trợ trên CẢ HAI nền tảng:**
+
+| Nền tảng | Endpoint | File | Dòng |
+|----------|----------|------|------|
+| **APP (mobile)** | `POST /api/mobile/posts/my` | `app/api/v1/mobile_app.py` | **218** |
+| **WEB** | `POST /api/content` | `app/api/v1/content.py` | **164** |
+
+- **APP**: `app/api/v1/mobile_app.py` — dòng **218** (`@router.post("/posts/my")`)  
+  Endpoint chính cho seller/producer đăng bài qua mobile app. Hỗ trợ upload ảnh/video trực tiếp. Bài viết tạo ra ở trạng thái `PENDING` chờ admin duyệt.
+
+- **WEB**: `app/api/v1/content.py` — dòng **164** (`@router.post("")`)  
+  Endpoint web cho phép tạo nội dung (bài viết, article, v.v.) qua giao diện web. Bài viết cũng ở trạng thái `PENDING` chờ duyệt.
+
+---
+
+### ✅ Đăng sản phẩm (tạo sản phẩm mới)
+
+**Seller đăng sản phẩm chỉ qua WEB:**
+
+| Nền tảng | Endpoint | File | Dòng |
+|----------|----------|------|------|
+| **WEB** | `POST /api/products` | `app/api/v1/products.py` | **162** |
+| ~~APP (mobile)~~ | *(không có — chỉ đọc)* | — | — |
+
+- **WEB**: `app/api/v1/products.py` — dòng **162** (`@router.post("")`)  
+  Đây là endpoint duy nhất để tạo sản phẩm mới. Sản phẩm tạo ra ở trạng thái `PENDING` chờ admin duyệt.
+
+- **Mobile app** chỉ có thể **ĐỌC** (`GET`) danh sách sản phẩm đã được duyệt:  
+  `app/api/v1/mobile_app.py` — `GET /api/mobile/products` (không có `POST`).
+
+---
+
+### Tóm tắt phân chia Web / App
+
+| Chức năng | WEB (`/api/...`) | APP (`/api/mobile/...`) |
+|-----------|-----------------|------------------------|
+| Đăng bài  | ✅ `POST /api/content` (`content.py:164`) | ✅ `POST /api/mobile/posts/my` (`mobile_app.py:218`) |
+| Đăng sản phẩm | ✅ `POST /api/products` (`products.py:162`) | ❌ (chỉ đọc) |
+| Đăng ký seller | ✅ `POST /api/seller/register` (`seller_onboarding.py:58`) | — |
+| Dashboard seller | ✅ `GET /api/seller/dashboard` (`seller.py:58`) | — |
+
+---
+
 ## 🔐 API Endpoints
 
 ### Authentication

@@ -167,7 +167,13 @@ async def create_content(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create new content"""
+    """
+    [WEB endpoint] Tạo nội dung/bài viết mới thông qua WEB.
+    Route: POST /api/content  (file: app/api/v1/content.py)
+    - Đây là endpoint web cho phép tạo bất kỳ loại nội dung (POST, ARTICLE, v.v.).
+    - Seller đăng bài trên web sử dụng endpoint này.
+    - Tương đương mobile: POST /api/mobile/posts/my (app/api/v1/mobile_app.py).
+    """
     # Validate author
     author = db.query(User).filter(User.id == content_data.author_id).first()
     if not author:

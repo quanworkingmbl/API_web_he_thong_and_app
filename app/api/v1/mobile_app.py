@@ -229,7 +229,9 @@ async def create_my_post(
     db: Session = Depends(get_db)
 ):
     """
-    Producer tạo bài viết mới (multipart/form-data).
+    [APP (mobile) endpoint] Seller/Producer đăng bài viết mới thông qua APP.
+    Route: POST /api/mobile/posts/my  (file: app/api/v1/mobile_app.py)
+    - Đây là endpoint chính dành cho mobile app khi seller đăng bài (đăng bài).
     - Nếu gửi kèm `media_file` (ảnh hoặc video): tự upload lên Supabase rồi lưu URL.
     - Nếu chỉ gửi `images`/`videos` (URL text): dùng trực tiếp.
     - Bài viết tạo xong ở trạng thái PENDING chờ admin duyệt.

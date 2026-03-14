@@ -166,8 +166,11 @@ async def create_product(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new product
-    Admin có thể tạo sản phẩm cho bất kỳ producer nào
+    [WEB endpoint] Seller/Producer đăng sản phẩm mới thông qua WEB.
+    Route: POST /api/products  (file: app/api/v1/products.py)
+    - Chỉ dành cho giao diện web (không có endpoint tương đương trên mobile/app).
+    - Mobile app chỉ có thể ĐỌC (GET) sản phẩm đã được duyệt.
+    Admin có thể tạo sản phẩm cho bất kỳ producer nào.
     """
     # Validate producer exists
     producer = db.query(User).filter(User.id == product_data.producer_id).first()
