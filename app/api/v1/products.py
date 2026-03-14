@@ -166,28 +166,37 @@ async def create_product(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new product
-    Admin có thể tạo sản phẩm cho bất kỳ producer nào
+    Tạo sản phẩm mới.
+    - **Admin**: có thể tạo cho bất kỳ producer nào (truyền `producer_id` trong body).
+    - **Seller/Producer**: `producer_id` tự động gán = `current_user.id`, bỏ qua giá trị body.
     """
-    # Validate producer exists
-    producer = db.query(User).filter(User.id == product_data.producer_id).first()
+    is_admin = (current_user.type == "admin")
+
+    if is_admin:
+        # Admin chỉ định producer tùy ý
+        actual_producer_id = product_data.producer_id
+    else:
+        # Seller/Producer chỉ tạo sản phẩm cho chính mình
+        actual_producer_id = current_user.id
+
+    producer = db.query(User).filter(User.id == actual_producer_id).first()
     if not producer:
         raise HTTPException(status_code=400, detail="Producer not found")
-    
+
     new_product = Product(
         name=product_data.name,
         description=product_data.description,
         price=product_data.price,
-        producer_id=product_data.producer_id,
+        producer_id=actual_producer_id,
         status=ProductStatus.PENDING,
         label=product_data.label,
-        images=product_data.images
+        images=product_data.images,
     )
-    
+
     db.add(new_product)
     db.commit()
     db.refresh(new_product)
-    
+
     return ProductResponse(
         id=new_product.id,
         name=new_product.name,
@@ -210,20 +219,34 @@ async def update_product(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update a product"""
-    product = db.query(Product).filter(Product.id == product_id).first()
+    """
+    Cập nhật sản phẩm.
+    - **Admin**: cập nhật bất kỳ sản phẩm nào.
+    - **Seller/Producer**: chỉ được cập nhật sản phẩm của **chính mình** (ownership check).
+    """
+    is_admin = (current_user.type == "admin")
+
+    query = db.query(Product).filter(Product.id == product_id)
+    if not is_admin:
+        # Seller chỉ sửa sản phẩm của mình
+        query = query.filter(Product.producer_id == current_user.id)
+
+    product = query.first()
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found" if is_admin else "Sản phẩm không tồn tại hoặc bạn không có quyền chỉnh sửa"
+        )
+
     update_data = product_data.dict(exclude_unset=True)
     for key, value in update_data.items():
         setattr(product, key, value)
-    
+
     db.commit()
     db.refresh(product)
-    
+
     producer = db.query(User).filter(User.id == product.producer_id).first()
-    
+
     return ProductResponse(
         id=product.id,
         name=product.name,
