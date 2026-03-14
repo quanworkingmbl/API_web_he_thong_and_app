@@ -2,13 +2,16 @@
 Seller API – Dành riêng cho người bán (producer/seller)
 
 Endpoints:
-- GET  /seller/dashboard     – Thống kê tổng quan (đơn, doanh thu, sản phẩm)
-- GET  /seller/orders        – Danh sách đơn hàng của seller
-- PUT  /seller/orders/{id}/confirm – Xác nhận đơn → CONFIRMED
-- PUT  /seller/orders/{id}/reject  – Từ chối đơn   → CANCELLED
-- GET  /seller/products      – Sản phẩm của seller
-- PUT  /seller/products/{id}/stock – Cập nhật tồn kho
-- GET  /seller/profile       – Thông tin shop / profile
+- GET  /seller/dashboard              – Thống kê tổng quan (đơn, doanh thu, sản phẩm)
+- GET  /seller/orders                 – Danh sách đơn hàng của seller
+- PUT  /seller/orders/{id}/confirm    – Xác nhận đơn → CONFIRMED
+- PUT  /seller/orders/{id}/reject     – Từ chối đơn   → CANCELLED
+- PUT  /seller/orders/{id}/ship       – Chuyển sang Đang giao hàng → SHIPPING
+- GET  /seller/products               – Danh sách sản phẩm của seller
+- POST /seller/products               – [MỚI] Tạo sản phẩm mới (auto producer_id)
+- PUT  /seller/products/{id}          – [MỚI] Chỉnh sửa sản phẩm đầy đủ (ownership check)
+- PUT  /seller/products/{id}/stock    – Cập nhật tồn kho nhanh
+- GET  /seller/profile                – Thông tin shop / profile
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -49,6 +52,27 @@ class StockUpdateRequest(BaseModel):
 
 class RejectOrderRequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=500)
+
+
+class CreateSellerProductRequest(BaseModel):
+    """Schema tạo sản phẩm mới – dùng tại Web Seller Portal"""
+    name: str = Field(..., min_length=2, max_length=255)
+    description: Optional[str] = None
+    price: Decimal = Field(..., ge=0)
+    label: Optional[str] = Field(None, pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT|OCOP)$")
+    images: Optional[str] = None   # JSON array of image URLs
+    stock_quantity: int = Field(default=0, ge=0)
+
+
+class UpdateSellerProductRequest(BaseModel):
+    """Schema chỉnh sửa sản phẩm – dùng tại Web Seller Portal"""
+    name: Optional[str] = Field(None, min_length=2, max_length=255)
+    description: Optional[str] = None
+    price: Optional[Decimal] = Field(None, ge=0)
+    label: Optional[str] = Field(None, pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT|OCOP)$")
+    images: Optional[str] = None
+    stock_quantity: Optional[int] = Field(None, ge=0)
+    is_active: Optional[bool] = None
 
 
 # ==============================================================================
@@ -375,6 +399,107 @@ async def get_seller_products(
             "limit": limit,
             "total_pages": (total + limit - 1) // limit
         }
+    }
+
+
+@router.post("/products", summary="Seller tạo sản phẩm mới (Web)")
+async def create_seller_product(
+    product_data: CreateSellerProductRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Seller tạo sản phẩm mới từ Web Seller Portal.
+    - `producer_id` tự động gán = `current_user.id` (không nhập tay).
+    - Sản phẩm tạo xong ở trạng thái **PENDING** chờ Admin duyệt.
+    """
+    _require_seller(current_user)
+
+    new_product = Product(
+        name=product_data.name,
+        description=product_data.description,
+        price=product_data.price,
+        producer_id=current_user.id,          # ← auto gán, không để client truyền
+        status=ProductStatus.PENDING,
+        label=product_data.label,
+        images=product_data.images,
+        stock_quantity=product_data.stock_quantity,
+        is_active=True,
+    )
+    db.add(new_product)
+    db.commit()
+    db.refresh(new_product)
+
+    return {
+        "success": True,
+        "message": "Sản phẩm đã được tạo. Chờ Admin duyệt.",
+        "data": {
+            "id": new_product.id,
+            "name": new_product.name,
+            "price": str(new_product.price),
+            "stock_quantity": new_product.stock_quantity,
+            "label": new_product.label,
+            "status": "PENDING",
+            "images": new_product.images,
+            "created_at": new_product.created_at.isoformat() if new_product.created_at else None,
+        },
+    }
+
+
+@router.put("/products/{product_id}", summary="Seller chỉnh sửa sản phẩm (Web)")
+async def update_seller_product(
+    product_id: int,
+    product_data: UpdateSellerProductRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Seller chỉnh sửa thông tin đầy đủ sản phẩm của mình từ Web Seller Portal.
+    - Chỉ được sửa sản phẩm của **chính mình** (ownership check).
+    - Sau khi sửa nội dung (name/description/price/images), trạng thái reset về **PENDING** để Admin duyệt lại.
+    - Chỉ cập nhật stock/is_active sẽ KHÔNG reset trạng thái.
+    """
+    _require_seller(current_user)
+
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.producer_id == current_user.id   # ← ownership check
+    ).first()
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Sản phẩm không tồn tại hoặc bạn không có quyền chỉnh sửa"
+        )
+
+    update_data = product_data.dict(exclude_unset=True)
+
+    # Các field nội dung khi thay đổi cần duyệt lại
+    content_fields = {"name", "description", "price", "images", "label"}
+    needs_reapproval = bool(content_fields & update_data.keys())
+
+    for key, value in update_data.items():
+        setattr(product, key, value)
+
+    if needs_reapproval:
+        product.status = ProductStatus.PENDING
+
+    db.commit()
+    db.refresh(product)
+
+    return {
+        "success": True,
+        "message": "Đã cập nhật sản phẩm." + (" Chờ Admin duyệt lại." if needs_reapproval else ""),
+        "data": {
+            "id": product.id,
+            "name": product.name,
+            "price": str(product.price),
+            "stock_quantity": product.stock_quantity,
+            "is_active": product.is_active,
+            "label": product.label,
+            "status": product.status.value if hasattr(product.status, "value") else str(product.status),
+            "images": product.images,
+            "updated_at": product.updated_at.isoformat() if product.updated_at else None,
+        },
     }
 
 
