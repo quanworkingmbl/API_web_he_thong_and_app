@@ -31,174 +31,156 @@ DELETE FROM organizations;
 -- 1. ORGANIZATIONS
 -- ============================================================================
 INSERT INTO organizations (id, name, description, created_at) VALUES
-(1, 'H„p t·c x„ NÙng nghi«p H‡ NŸi', 'H„p t·c x„ chuyÍn s£n xu•t nÙng s£n s°ch t°i H‡ NŸi', NOW()),
-(2, 'L‡ng ngh¡ truy¡n th—ng B·t Tr‡ng', 'L‡ng ngh¡ g—m sÈ truy¡n th—ng B·t Tr‡ng', NOW()),
-(3, 'HŸi nÙng d‚n ‡ Nµng', 'T’ chÈc h◊ tr„ nÙng d‚n ph·t tri√n s£n xu•t', NOW()),
-(4, 'Hi«p hŸi ThÁ cÙng m˘ ngh« Vi«t Nam', 'Hi«p hŸi qu£n l˝ v‡ ph·t tri√n ngh¡ thÁ cÙng m˘ ngh«', NOW());
+(1, 'H·ª£p t√°c x√£ N√¥ng nghi·ªáp H√† N·ªôi', 'H·ª£p t√°c x√£ chuy√™n s·∫£n xu·∫•t n√¥ng s·∫£n s·∫°ch t·∫°i H√† N·ªôi', NOW()),
+(2, 'L√†ng ngh·ªÅ truy·ªÅn th·ªëng B√°t Tr√†ng', 'L√†ng ngh·ªÅ g·ªëm s·ª© truy·ªÅn th·ªëng B√°t Tr√†ng', NOW()),
+(3, 'H·ªôi n√¥ng d√¢n ƒê√† N·∫µng', 'T·ªï ch·ª©c h·ªó tr·ª£ n√¥ng d√¢n ph√°t tri·ªÉn s·∫£n xu·∫•t', NOW()),
+(4, 'Hi·ªáp h·ªôi Th·ªß c√¥ng m·ªπ ngh·ªá Vi·ªát Nam', 'Hi·ªáp h·ªôi qu·∫£n l√Ω v√† ph√°t tri·ªÉn ngh·ªÅ th·ªß c√¥ng m·ªπ ngh·ªá', NOW());
 
 -- ============================================================================
 -- 2. ROLES
 -- ============================================================================
 INSERT INTO roles (id, role_name, description, created_at) VALUES
-(1, 'admin', 'Qu£n trÀ viÍn h« th—ng', NOW()),
-(2, 'content_manager', 'Qu£n l˝ nŸi dung', NOW()),
-(3, 'seller', 'Ng∞›i b·n h‡ng/Nh‡ s£n xu•t', NOW()),
-(4, 'customer', 'Kh·ch h‡ng', NOW());
+(1, 'admin', 'Qu·∫£n tr·ªã vi√™n h·ªá th·ªëng', NOW()),
+(2, 'content_manager', 'Qu·∫£n l√Ω n·ªôi dung', NOW()),
+(3, 'seller', 'Ng∆∞·ªùi b√°n h√†ng/Nh√† s·∫£n xu·∫•t', NOW()),
+(4, 'customer', 'Kh√°ch h√†ng', NOW());
 
 -- ============================================================================
 -- 3. PERMISSIONS
 -- ============================================================================
 INSERT INTO permissions (id, parent_id, name, label, type, route, status, "order", icon, component, hide, hide_tab, new_feature, created_at) VALUES
-(1, NULL, 'dashboard', 'T’ng quan', 'MENU', '/dashboard', 'active', 1, 'dashboard', 'Dashboard', false, false, false, NOW()),
-(2, NULL, 'products', 'Qu£n l˝ s£n ph©m', 'CATALOGUE', NULL, 'active', 2, 'shopping', NULL, false, false, false, NOW()),
-(3, 2, 'products.list', 'Danh s·ch s£n ph©m', 'MENU', '/products', 'active', 1, 'list', 'ProductList', false, false, false, NOW()),
-(4, 2, 'products.create', 'T°o s£n ph©m', 'MENU', '/products/create', 'active', 2, 'plus', 'ProductCreate', false, false, false, NOW()),
-(5, 2, 'products.approve', 'Duy«t s£n ph©m', 'MENU', '/products/approve', 'active', 3, 'check', 'ProductApprove', false, false, false, NOW()),
-(6, NULL, 'orders', 'Qu£n l˝ °n h‡ng', 'MENU', '/orders', 'active', 3, 'shopping-cart', 'Orders', false, false, false, NOW()),
-(7, NULL, 'categories', 'Danh mÂc s£n ph©m', 'MENU', '/categories', 'active', 4, 'tags', 'Categories', false, false, false, NOW()),
-(8, NULL, 'users', 'Qu£n l˝ ng∞›i d˘ng', 'MENU', '/users', 'active', 5, 'users', 'Users', false, false, false, NOW()),
-(9, NULL, 'contents', 'Qu£n l˝ nŸi dung', 'MENU', '/contents', 'active', 6, 'file-text', 'Contents', false, false, false, NOW()),
-(10, NULL, 'reports', 'B·o c·o th—ng kÍ', 'MENU', '/reports', 'active', 7, 'bar-chart', 'Reports', false, false, false, NOW());
+(1, NULL, 'dashboard', 'T·ªïng quan', 'MENU', '/dashboard', 'active', 1, 'dashboard', 'Dashboard', false, false, false, NOW()),
+(2, NULL, 'products', 'Qu·∫£n l√Ω s·∫£n ph·∫©m', 'CATALOGUE', NULL, 'active', 2, 'shopping', NULL, false, false, false, NOW()),
+(3, 2, 'products.list', 'Danh s√°ch s·∫£n ph·∫©m', 'MENU', '/products', 'active', 1, 'list', 'ProductList', false, false, false, NOW()),
+(4, 2, 'products.create', 'T·∫°o s·∫£n ph·∫©m', 'MENU', '/products/create', 'active', 2, 'plus', 'ProductCreate', false, false, false, NOW()),
+(5, 2, 'products.approve', 'Duy·ªát s·∫£n ph·∫©m', 'MENU', '/products/approve', 'active', 3, 'check', 'ProductApprove', false, false, false, NOW()),
+(6, NULL, 'orders', 'Qu·∫£n l√Ω ƒë∆°n h√†ng', 'MENU', '/orders', 'active', 3, 'shopping-cart', 'Orders', false, false, false, NOW()),
+(7, NULL, 'categories', 'Danh m·ª•c s·∫£n ph·∫©m', 'MENU', '/categories', 'active', 4, 'tags', 'Categories', false, false, false, NOW()),
+(8, NULL, 'users', 'Qu·∫£n l√Ω ng∆∞·ªùi d√πng', 'MENU', '/users', 'active', 5, 'users', 'Users', false, false, false, NOW()),
+(9, NULL, 'contents', 'Qu·∫£n l√Ω n·ªôi dung', 'MENU', '/contents', 'active', 6, 'file-text', 'Contents', false, false, false, NOW()),
+(10, NULL, 'reports', 'B√°o c√°o th·ªëng k√™', 'MENU', '/reports', 'active', 7, 'bar-chart', 'Reports', false, false, false, NOW());
 
 -- ============================================================================
 -- 4. ROLE_PERMISSIONS
 -- ============================================================================
--- Admin has all permissions
 INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
-(1, 1, NOW()), (1, 2, NOW()), (1, 3, NOW()), (1, 4, NOW()), (1, 5, NOW()),
-(1, 6, NOW()), (1, 7, NOW()), (1, 8, NOW()), (1, 9, NOW()), (1, 10, NOW());
+(1,1,NOW()),(1,2,NOW()),(1,3,NOW()),(1,4,NOW()),(1,5,NOW()),
+(1,6,NOW()),(1,7,NOW()),(1,8,NOW()),(1,9,NOW()),(1,10,NOW());
 
--- Content manager has content and product approval permissions
 INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
-(2, 1, NOW()), (2, 2, NOW()), (2, 3, NOW()), (2, 5, NOW()), (2, 9, NOW());
+(2,1,NOW()),(2,2,NOW()),(2,3,NOW()),(2,5,NOW()),(2,9,NOW());
 
--- Seller has product and order permissions
 INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
-(3, 1, NOW()), (3, 2, NOW()), (3, 3, NOW()), (3, 4, NOW()), (3, 6, NOW());
+(3,1,NOW()),(3,2,NOW()),(3,3,NOW()),(3,4,NOW()),(3,6,NOW());
 
--- Customer has basic view permissions
 INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
-(4, 1, NOW()), (4, 3, NOW()), (4, 6, NOW());
+(4,1,NOW()),(4,3,NOW()),(4,6,NOW());
 
 -- ============================================================================
 -- 5. USERS
 -- ============================================================================
--- Password for all users: "password123" (hashed with bcrypt)
--- Hash: $2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS
 INSERT INTO users (id, email, password_hash, name, gender, activated, type, created_at) VALUES
-(1, 'admin@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS', 'Qu£n trÀ viÍn', 'male', 1, 'admin', NOW()),
-(2, 'content@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS', 'Nguy≈n Vn A', 'male', 1, 'content_manager', NOW()),
-(3, 'seller1@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS', 'Trßn ThÀ B', 'female', 1, 'seller', NOW()),
-(4, 'seller2@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS', 'LÍ Vn C', 'male', 1, 'seller', NOW()),
-(5, 'seller3@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS', 'Ph°m ThÀ D', 'female', 1, 'seller', NOW()),
-(6, 'customer1@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS', 'Ho‡ng Vn E', 'male', 1, 'customer', NOW()),
-(7, 'customer2@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5lWQJz1fLZvOS', '◊ ThÀ F', 'female', 1, 'customer', NOW());
+(1,'admin@example.com','$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO','Qu·∫£n tr·ªã vi√™n','male',1,'admin',NOW()),
+(2,'content@example.com','$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO','Nguy·ªÖn VƒÉn A','male',1,'content_manager',NOW()),
+(3,'seller1@example.com','$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO','Tr·∫ßn Th·ªã B','female',1,'seller',NOW()),
+(4,'seller2@example.com','$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO','L√™ VƒÉn C','male',1,'seller',NOW()),
+(5,'seller3@example.com','$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO','Ph·∫°m Th·ªã D','female',1,'seller',NOW()),
+(6,'customer1@example.com','$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO','Ho√†ng VƒÉn E','male',1,'customer',NOW()),
+(7,'customer2@example.com','$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO','ƒê·ªó Th·ªã F','female',1,'customer',NOW());
 
 -- ============================================================================
 -- 6. USER_ROLES
 -- ============================================================================
 INSERT INTO user_roles (user_id, role_id, created_at) VALUES
-(1, 1, NOW()),
-(2, 2, NOW()),
-(3, 3, NOW()),
-(4, 3, NOW()),
-(5, 3, NOW()),
-(6, 4, NOW()),
-(7, 4, NOW());
+(1,1,NOW()),(2,2,NOW()),(3,3,NOW()),(4,3,NOW()),(5,3,NOW()),(6,4,NOW()),(7,4,NOW());
 
 -- ============================================================================
 -- 7. USER_ORGANIZATIONS
 -- ============================================================================
 INSERT INTO user_organizations (user_id, organization_id, created_at) VALUES
-(3, 1, NOW()),
-(4, 2, NOW()),
-(5, 3, NOW());
+(3,1,NOW()),(4,2,NOW()),(5,3,NOW());
 
 -- ============================================================================
 -- 8. CATEGORIES
 -- ============================================================================
--- NOTE: Categories have an 'image' field - please manually add images
-INSERT INTO categories (id, name, slug, description, icon, parent_id, "order", is_active, created_at) VALUES
-(1, 'Rau cÁ qu£', 'rau-cu-qua', 'C·c lo°i rau cÁ qu£ t∞°i s°ch', 'leaf', NULL, 1, true, NOW()),
-(2, 'Tr·i c‚y', 'trai-cay', 'C·c lo°i tr·i c‚y t∞°i ngon', 'apple', NULL, 2, true, NOW()),
-(3, 'ThÁ cÙng m˘ ngh«', 'thu-cong-my-nghe', 'S£n ph©m thÁ cÙng m˘ ngh« truy¡n th—ng', 'scissors', NULL, 3, true, NOW()),
-(4, 'NÙng s£n khÙ', 'nong-san-kho', 'C·c lo°i nÙng s£n „ qua chø biøn, s•y khÙ', 'package', NULL, 4, true, NOW()),
-(5, 'Gia vÀ', 'gia-vi', 'C·c lo°i gia vÀ ∞€p n•u n', 'coffee', NULL, 5, true, NOW()),
-(6, 'G—m sÈ', 'gom-su', 'S£n ph©m g—m sÈ thÁ cÙng', 'coffee', 3, 1, true, NOW()),
-(7, 'an l·t', 'dan-lat', 'S£n ph©m an l·t truy¡n th—ng', 'gift', 3, 2, true, NOW()),
-(8, 'ThÍu tay', 'theu-tay', 'S£n ph©m thÍu tay tinh x£o', 'heart', 3, 3, true, NOW());
+INSERT INTO categories (id,name,slug,description,icon,parent_id,"order",is_active,created_at) VALUES
+(1,'Rau c·ªß qu·∫£','rau-cu-qua','C√°c lo·∫°i rau c·ªß qu·∫£ t∆∞∆°i s·∫°ch','leaf',NULL,1,true,NOW()),
+(2,'Tr√°i c√¢y','trai-cay','C√°c lo·∫°i tr√°i c√¢y t∆∞∆°i ngon','apple',NULL,2,true,NOW()),
+(3,'Th·ªß c√¥ng m·ªπ ngh·ªá','thu-cong-my-nghe','S·∫£n ph·∫©m th·ªß c√¥ng m·ªπ ngh·ªá truy·ªÅn th·ªëng','scissors',NULL,3,true,NOW()),
+(4,'N√¥ng s·∫£n kh√¥','nong-san-kho','C√°c lo·∫°i n√¥ng s·∫£n ƒë√£ qua ch·∫ø bi·∫øn, s·∫•y kh√¥','package',NULL,4,true,NOW()),
+(5,'Gia v·ªã','gia-vi','C√°c lo·∫°i gia v·ªã ph·ª•c v·ª• n·∫•u ƒÉn','coffee',NULL,5,true,NOW()),
+(6,'G·ªëm s·ª©','gom-su','S·∫£n ph·∫©m g·ªëm s·ª© th·ªß c√¥ng','coffee',3,1,true,NOW()),
+(7,'ƒêan l√°t','dan-lat','S·∫£n ph·∫©m ƒëan l√°t truy·ªÅn th·ªëng','gift',3,2,true,NOW()),
+(8,'Th√™u tay','theu-tay','S·∫£n ph·∫©m th√™u tay tinh x·∫£o','heart',3,3,true,NOW());
 
 -- ============================================================================
 -- 9. REGIONS
 -- ============================================================================
--- NOTE: Regions have an 'image' field - please manually add images
-INSERT INTO regions (id, name, slug, description, latitude, longitude, "order", is_active, created_at) VALUES
-(1, 'H‡ NŸi', 'ha-noi', 'ThÁ Ù H‡ NŸi', '21.0285', '105.8542', 1, true, NOW()),
-(2, '‡ Nµng', 'da-nang', 'Th‡nh ph— ‡ Nµng', '16.0544', '108.2022', 2, true, NOW()),
-(3, 'H” ChÌ Minh', 'ho-chi-minh', 'Th‡nh ph— H” ChÌ Minh', '10.8231', '106.6297', 3, true, NOW()),
-(4, 'Huø', 'hue', 'Th‡nh ph— Huø', '16.4637', '107.5909', 4, true, NOW()),
-(5, 'HŸi An', 'hoi-an', 'Ph— c’ HŸi An', '15.8801', '108.3380', 5, true, NOW());
+INSERT INTO regions (id,name,slug,description,latitude,longitude,"order",is_active,created_at) VALUES
+(1,'H√† N·ªôi','ha-noi','Th·ªß ƒë√¥ H√† N·ªôi','21.0285','105.8542',1,true,NOW()),
+(2,'ƒê√† N·∫µng','da-nang','Th√†nh ph·ªë ƒê√† N·∫µng','16.0544','108.2022',2,true,NOW()),
+(3,'H·ªì Ch√≠ Minh','ho-chi-minh','Th√†nh ph·ªë H·ªì Ch√≠ Minh','10.8231','106.6297',3,true,NOW()),
+(4,'Hu·∫ø','hue','Th√†nh ph·ªë Hu·∫ø','16.4637','107.5909',4,true,NOW()),
+(5,'H·ªôi An','hoi-an','Ph·ªë c·ªï H·ªôi An','15.8801','108.3380',5,true,NOW());
 
 -- ============================================================================
 -- 10. PRODUCTS
 -- ============================================================================
--- NOTE: Products have an 'images' field - please manually add images
-INSERT INTO products (id, name, description, price, producer_id, category_id, status, label, stock_quantity, is_active, created_at) VALUES
-(1, 'Rau c£i xanh hÔu c°', 'Rau c£i xanh tr”ng theo ph∞°ng ph·p hÔu c°, khÙng sÌ dÂng thu—c trÎ s‚u', 25000.00, 3, 1, 'APPROVED', 'CLEAN_AGRICULTURE', 100, true, NOW()),
-(2, 'C‡ chua bi ‡ L°t', 'C‡ chua bi ‡ L°t ngÕt tÒ nhiÍn, gi‡u vitamin', 35000.00, 3, 1, 'APPROVED', 'CLEAN_AGRICULTURE', 50, true, NOW()),
-(3, 'Cam s‡nh H‡ Giang', 'Cam s‡nh H‡ Giang ngÕt thanh, Ìt h°t', 50000.00, 3, 2, 'APPROVED', 'OCOP', 80, true, NOW()),
-(4, 'Xo‡i c·t HÚa LŸc', 'Xo‡i c·t HÚa LŸc th°m ngon ∑c s£n Ti¡n Giang', 120000.00, 3, 2, 'APPROVED', 'OCOP', 30, true, NOW()),
-(5, 'BÏnh g—m B·t Tr‡ng', 'BÏnh g—m thÁ cÙng tÎ l‡ng ngh¡ B·t Tr‡ng', 350000.00, 4, 6, 'APPROVED', 'TRADITIONAL_CRAFT', 20, true, NOW()),
-(6, 'ChÈn tr‡ g—m xanh', 'BŸ chÈn tr‡ g—m xanh thÁ cÙng, hÕa tiøt hoa sen', 280000.00, 4, 6, 'APPROVED', 'TRADITIONAL_CRAFT', 15, true, NOW()),
-(7, 'Giœ an tre truy¡n th—ng', 'Giœ an tre thÁ cÙng tinh x£o', 150000.00, 5, 7, 'PENDING', 'TRADITIONAL_CRAFT', 25, true, NOW()),
-(8, 'Khn thÍu tay Huø', 'Khn thÍu tay truy¡n th—ng cÁa Huø, hÕa tiøt tinh x£o', 450000.00, 5, 8, 'APPROVED', 'TRADITIONAL_CRAFT', 10, true, NOW()),
-(9, 'N•m h∞°ng khÙ ‡ L°t', 'N•m h∞°ng ‡ L°t s•y khÙ tÒ nhiÍn', 180000.00, 3, 4, 'APPROVED', 'CLEAN_AGRICULTURE', 40, true, NOW()),
-(10, 'TiÍu en Ph˙ Qu—c', 'TiÍu en h°t nguyÍn ch•t Ph˙ Qu—c', 250000.00, 4, 5, 'APPROVED', 'OCOP', 60, true, NOW());
+INSERT INTO products (id,name,description,price,producer_id,category_id,status,label,created_at) VALUES
+(1,'Rau c·∫£i xanh h·ªØu c∆°','Rau c·∫£i xanh tr·ªìng theo ph∆∞∆°ng ph√°p h·ªØu c∆°, kh√¥ng s·ª≠ d·ª•ng thu·ªëc tr·ª´ s√¢u',25000.00,3,1,'APPROVED','CLEAN_AGRICULTURE',NOW()),
+(2,'C√† chua bi ƒê√† L·∫°t','C√† chua bi ƒê√† L·∫°t ng·ªçt t·ª± nhi√™n, gi√†u vitamin',35000.00,3,1,'APPROVED','CLEAN_AGRICULTURE',NOW()),
+(3,'Cam s√†nh H√† Giang','Cam s√†nh H√† Giang ng·ªçt thanh, √≠t h·∫°t',50000.00,3,2,'APPROVED','OCOP',NOW()),
+(4,'Xo√†i c√°t H√≤a L·ªôc','Xo√†i c√°t H√≤a L·ªôc th∆°m ngon ƒë·∫∑c s·∫£n Ti·ªÅn Giang',120000.00,3,2,'APPROVED','OCOP',NOW()),
+(5,'B√¨nh g·ªëm B√°t Tr√†ng','B√¨nh g·ªëm th·ªß c√¥ng t·ª´ l√†ng ngh·ªÅ B√°t Tr√†ng',350000.00,4,6,'APPROVED','TRADITIONAL_CRAFT',NOW()),
+(6,'Ch√©n tr√† g·ªëm xanh','B·ªô ch√©n tr√† g·ªëm xanh th·ªß c√¥ng, h·ªça ti·∫øt hoa sen',280000.00,4,6,'APPROVED','TRADITIONAL_CRAFT',NOW()),
+(7,'Gi·ªè ƒëan tre truy·ªÅn th·ªëng','Gi·ªè ƒëan tre th·ªß c√¥ng tinh x·∫£o',150000.00,5,7,'PENDING','TRADITIONAL_CRAFT',NOW()),
+(8,'KhƒÉn th√™u tay Hu·∫ø','KhƒÉn th√™u tay truy·ªÅn th·ªëng c·ªßa Hu·∫ø, h·ªça ti·∫øt tinh x·∫£o',450000.00,5,8,'APPROVED','TRADITIONAL_CRAFT',NOW()),
+(9,'N·∫•m h∆∞∆°ng kh√¥ ƒê√† L·∫°t','N·∫•m h∆∞∆°ng ƒê√† L·∫°t s·∫•y kh√¥ t·ª± nhi√™n',180000.00,3,4,'APPROVED','CLEAN_AGRICULTURE',NOW()),
+(10,'Ti√™u ƒëen Ph√∫ Qu·ªëc','Ti√™u ƒëen h·∫°t nguy√™n ch·∫•t Ph√∫ Qu·ªëc',250000.00,4,5,'APPROVED','OCOP',NOW());
 
 -- ============================================================================
 -- 11. PRODUCT_APPROVALS
 -- ============================================================================
 INSERT INTO product_approvals (product_id, approver_id, status, notes, checked_description, checked_price, checked_images, created_at) VALUES
-(1, 2, 'APPROVED', 'S£n ph©m °t chu©n, mÙ t£ chi tiøt', true, true, true, NOW()),
-(2, 2, 'APPROVED', 'S£n ph©m ch•t l∞„ng t—t', true, true, true, NOW()),
-(3, 2, 'APPROVED', '∑c s£n v˘ng mi¡n, °t chu©n OCOP', true, true, true, NOW()),
-(4, 1, 'APPROVED', 'S£n ph©m cao c•p, gi· h„p l˝', true, true, true, NOW()),
-(5, 2, 'APPROVED', 'S£n ph©m thÁ cÙng m˘ ngh« ch•t l∞„ng', true, true, true, NOW()),
-(6, 2, 'APPROVED', 'G—m sÈ πp, gi· c°nh tranh', true, true, true, NOW()),
-(8, 1, 'APPROVED', 'ThÍu tay tinh x£o', true, true, true, NOW()),
-(9, 2, 'APPROVED', 'NÙng s£n khÙ £m b£o ch•t l∞„ng', true, true, true, NOW()),
-(10, 2, 'APPROVED', 'Gia vÀ ∑c s£n Ph˙ Qu—c', true, true, true, NOW());
+(1, 2, 'APPROVED', 'S·∫£n ph·∫©m ƒë·∫°t chu·∫©n, m√¥ t·∫£ chi ti·∫øt', true, true, true, NOW()),
+(2, 2, 'APPROVED', 'S·∫£n ph·∫©m ch·∫•t l∆∞·ª£ng t·ªët', true, true, true, NOW()),
+(3, 2, 'APPROVED', 'ƒê·∫∑c s·∫£n v√πng mi·ªÅn, ƒë·∫°t chu·∫©n OCOP', true, true, true, NOW()),
+(4, 1, 'APPROVED', 'S·∫£n ph·∫©m cao c·∫•p, gi√° h·ª£p l√Ω', true, true, true, NOW()),
+(5, 2, 'APPROVED', 'S·∫£n ph·∫©m th·ªß c√¥ng m·ªπ ngh·ªá ch·∫•t l∆∞·ª£ng', true, true, true, NOW()),
+(6, 2, 'APPROVED', 'G·ªëm s·ª© ƒë·∫πp, gi√° c·∫°nh tranh', true, true, true, NOW()),
+(8, 1, 'APPROVED', 'Th√™u tay tinh x·∫£o', true, true, true, NOW()),
+(9, 2, 'APPROVED', 'N√¥ng s·∫£n kh√¥ ƒë·∫£m b·∫£o ch·∫•t l∆∞·ª£ng', true, true, true, NOW()),
+(10, 2, 'APPROVED', 'Gia v·ªã ƒë·∫∑c s·∫£n Ph√∫ Qu·ªëc', true, true, true, NOW());
 
 -- ============================================================================
 -- 12. REVIEWS
 -- ============================================================================
 INSERT INTO reviews (product_id, user_id, rating, comment, created_at) VALUES
-(1, 6, 5, 'Rau r•t t∞°i v‡ s°ch, giao h‡ng nhanh!', NOW()),
-(1, 7, 4, 'Ch•t l∞„ng t—t, sΩ mua tiøp', NOW()),
-(2, 6, 5, 'C‡ chua ngÕt lØm, con nhœ nh‡ tÙi r•t thÌch', NOW()),
-(3, 7, 5, 'Cam ngÕt thanh, r•t ngon', NOW()),
-(4, 6, 5, 'Xo‡i th°m ngon, ˙ng chu©n HÚa LŸc', NOW()),
-(5, 7, 4, 'BÏnh g—m πp, ch•t l∞„ng t—t nh∞ng gi· h°i cao', NOW()),
-(6, 6, 5, 'ChÈn tr‡ r•t πp, thÌch h„p l‡m qu‡ t∑ng', NOW()),
-(8, 7, 5, 'ThÍu tay r•t tinh x£o, ·ng ”ng ti¡n b·t g°o', NOW());
+(1, 6, 5, 'Rau r·∫•t t∆∞∆°i v√† s·∫°ch, giao h√†ng nhanh!', NOW()),
+(1, 7, 4, 'Ch·∫•t l∆∞·ª£ng t·ªët, s·∫Ω mua ti·∫øp', NOW()),
+(2, 6, 5, 'C√† chua ng·ªçt l·∫Øm, con nh√† t√¥i r·∫•t th√≠ch', NOW()),
+(3, 7, 5, 'Cam ng·ªçt thanh, r·∫•t ngon', NOW()),
+(4, 6, 5, 'Xo√†i th∆°m ngon, ƒë√∫ng chu·∫©n H√≤a L·ªôc', NOW()),
+(5, 7, 4, 'B√¨nh g·ªëm ƒë·∫πp, ch·∫•t l∆∞·ª£ng t·ªët nh∆∞ng gi√° h∆°i cao', NOW()),
+(6, 6, 5, 'Ch√©n tr√† r·∫•t ƒë·∫πp, th√≠ch h·ª£p l√†m qu√† t·∫∑ng', NOW()),
+(8, 7, 5, 'Th√™u tay r·∫•t tinh x·∫£o, ƒë√°ng ƒë·ªìng ti·ªÅn b√°t g·∫°o', NOW());
 
 -- ============================================================================
 -- 13. ORDERS
 -- ============================================================================
 INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, customer_email, shipping_address, shipping_province, shipping_district, shipping_ward, seller_id, subtotal, shipping_fee, discount_amount, total_amount, platform_fee_percentage, platform_fee_amount, seller_amount, status, payment_method, payment_status, created_at) VALUES
-(1, 'ORD-2026-001', 6, 'Ho‡ng Vn E', '0912345678', 'customer1@example.com', '123 ∞›ng ABC, Ph∞›ng XYZ', 'H‡ NŸi', 'Ho‡n Kiøm', 'H‡ng B°c', 3, 60000.00, 25000.00, 0.00, 85000.00, 5.00, 4250.00, 80750.00, 'DELIVERED', 'COD', 'paid', NOW()),
-(2, 'ORD-2026-002', 7, '◊ ThÀ F', '0987654321', 'customer2@example.com', '456 ∞›ng DEF, Ph∞›ng UVW', 'H” ChÌ Minh', 'Qu≠n 1', 'Bøn NghÈ', 4, 350000.00, 30000.00, 10000.00, 370000.00, 5.00, 18500.00, 351500.00, 'SHIPPING', 'BANK_TRANSFER', 'paid', NOW()),
-(3, 'ORD-2026-003', 6, 'Ho‡ng Vn E', '0912345678', 'customer1@example.com', '123 ∞›ng ABC, Ph∞›ng XYZ', 'H‡ NŸi', 'Ho‡n Kiøm', 'H‡ng B°c', 5, 450000.00, 25000.00, 0.00, 475000.00, 5.00, 23750.00, 451250.00, 'PROCESSING', 'MOMO', 'paid', NOW());
+(1, 'ORD-2026-001', 6, 'Ho√†ng VƒÉn E', '0912345678', 'customer1@example.com', '123 ƒê∆∞·ªùng ABC, Ph∆∞·ªùng XYZ', 'H√† N·ªôi', 'Ho√†n Ki·∫øm', 'H√†ng B·∫°c', 3, 60000.00, 25000.00, 0.00, 85000.00, 5.00, 4250.00, 80750.00, 'DELIVERED', 'COD', 'paid', NOW()),
+(2, 'ORD-2026-002', 7, 'ƒê·ªó Th·ªã F', '0987654321', 'customer2@example.com', '456 ƒê∆∞·ªùng DEF, Ph∆∞·ªùng UVW', 'H·ªì Ch√≠ Minh', 'Qu·∫≠n 1', 'B·∫øn Ngh√©', 4, 350000.00, 30000.00, 10000.00, 370000.00, 5.00, 18500.00, 351500.00, 'SHIPPING', 'BANK_TRANSFER', 'paid', NOW()),
+(3, 'ORD-2026-003', 6, 'Ho√†ng VƒÉn E', '0912345678', 'customer1@example.com', '123 ƒê∆∞·ªùng ABC, Ph∆∞·ªùng XYZ', 'H√† N·ªôi', 'Ho√†n Ki·∫øm', 'H√†ng B·∫°c', 5, 450000.00, 25000.00, 0.00, 475000.00, 5.00, 23750.00, 451250.00, 'PROCESSING', 'MOMO', 'paid', NOW());
 
 -- ============================================================================
 -- 14. ORDER_ITEMS
 -- ============================================================================
--- NOTE: Order items have 'product_image' field - should reference products table
 INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity, total_price, created_at) VALUES
-(1, 1, 'Rau c£i xanh hÔu c°', 25000.00, 2, 50000.00, NOW()),
-(1, 2, 'C‡ chua bi ‡ L°t', 35000.00, 1, 35000.00, NOW() - INTERVAL '1 minute'),
-(2, 5, 'BÏnh g—m B·t Tr‡ng', 350000.00, 1, 350000.00, NOW()),
-(3, 8, 'Khn thÍu tay Huø', 450000.00, 1, 450000.00, NOW());
+(1, 1, 'Rau c·∫£i xanh h·ªØu c∆°', 25000.00, 2, 50000.00, NOW()),
+(1, 2, 'C√† chua bi ƒê√† L·∫°t', 35000.00, 1, 35000.00, NOW() - INTERVAL '1 minute'),
+(2, 5, 'B√¨nh g·ªëm B√°t Tr√†ng', 350000.00, 1, 350000.00, NOW()),
+(3, 8, 'KhƒÉn th√™u tay Hu·∫ø', 450000.00, 1, 450000.00, NOW());
 
 -- ============================================================================
 -- 15. PAYMENTS
@@ -212,32 +194,31 @@ INSERT INTO payments (id, order_id, customer_id, seller_id, amount, platform_fee
 -- 16. PAYMENT_TRANSACTIONS
 -- ============================================================================
 INSERT INTO payment_transactions (payment_id, transaction_type, amount, status, notes, created_at) VALUES
-(1, 'payment', 85000.00, 'COMPLETED', 'Thanh to·n COD °n h‡ng ORD-2026-001', NOW()),
-(2, 'payment', 370000.00, 'COMPLETED', 'Thanh to·n chuy√n kho£n °n h‡ng ORD-2026-002', NOW()),
-(3, 'payment', 475000.00, 'PENDING', 'Thanh to·n MoMo °n h‡ng ORD-2026-003', NOW());
+(1, 'payment', 85000.00, 'COMPLETED', 'Thanh to√°n COD ƒë∆°n h√†ng ORD-2026-001', NOW()),
+(2, 'payment', 370000.00, 'COMPLETED', 'Thanh to√°n chuy·ªÉn kho·∫£n ƒë∆°n h√†ng ORD-2026-002', NOW()),
+(3, 'payment', 475000.00, 'PENDING', 'Thanh to√°n MoMo ƒë∆°n h√†ng ORD-2026-003', NOW());
 
 -- ============================================================================
 -- 17. PARTNER_CONTRACTS
 -- ============================================================================
 INSERT INTO partner_contracts (id, contract_number, partner_id, contract_type, start_date, end_date, amount, status, terms, created_by, created_at) VALUES
-(1, 'CTR-2026-001', 3, 'SELLER_AGREEMENT', NOW(), NOW() + INTERVAL '1 year', 1000000.00, 'ACTIVE', 'H„p ”ng h„p t·c b·n h‡ng trÍn n¡n t£ng, cam køt £m b£o ch•t l∞„ng s£n ph©m', 1, NOW()),
-(2, 'CTR-2026-002', 4, 'SELLER_AGREEMENT', NOW(), NOW() + INTERVAL '1 year', 1500000.00, 'ACTIVE', 'H„p ”ng b·n s£n ph©m thÁ cÙng m˘ ngh«', 1, NOW()),
-(3, 'CTR-2026-003', 5, 'SELLER_AGREEMENT', NOW(), NOW() + INTERVAL '6 months', 800000.00, 'ACTIVE', 'H„p ”ng thÌ nghi«m 6 th·ng', 1, NOW());
+(1, 'CTR-2026-001', 3, 'SELLER_AGREEMENT', NOW(), NOW() + INTERVAL '1 year', 1000000.00, 'ACTIVE', 'H·ª£p ƒë·ªìng h·ª£p t√°c b√°n h√†ng tr√™n n·ªÅn t·∫£ng, cam k·∫øt ƒë·∫£m b·∫£o ch·∫•t l∆∞·ª£ng s·∫£n ph·∫©m', 1, NOW()),
+(2, 'CTR-2026-002', 4, 'SELLER_AGREEMENT', NOW(), NOW() + INTERVAL '1 year', 1500000.00, 'ACTIVE', 'H·ª£p ƒë·ªìng b√°n s·∫£n ph·∫©m th·ªß c√¥ng m·ªπ ngh·ªá', 1, NOW()),
+(3, 'CTR-2026-003', 5, 'SELLER_AGREEMENT', NOW(), NOW() + INTERVAL '6 months', 800000.00, 'ACTIVE', 'H·ª£p ƒë·ªìng th·ª≠ nghi·ªám 6 th√°ng', 1, NOW());
 
 -- ============================================================================
 -- 18. COMPLAINTS
 -- ============================================================================
 INSERT INTO complaints (product_id, order_id, user_id, complaint_type, title, description, status, handled_by, resolution, created_at) VALUES
-(7, NULL, 6, 'PRODUCT_QUALITY', 'S£n ph©m giœ an tre ch∞a ∞„c duy«t', 'TÙi mu—n mua s£n ph©m giœ an tre nh∞ng s£n ph©m ch∞a ∞„c duy«t', 'RESOLVED', 2, '„ liÍn h« v€i ng∞›i b·n √ ho‡n thi«n thÙng tin s£n ph©m', NOW());
+(7, NULL, 6, 'PRODUCT_QUALITY', 'S·∫£n ph·∫©m gi·ªè ƒëan tre ch∆∞a ƒë∆∞·ª£c duy·ªát', 'T√¥i mu·ªën mua s·∫£n ph·∫©m gi·ªè ƒëan tre nh∆∞ng s·∫£n ph·∫©m ch∆∞a ƒë∆∞·ª£c duy·ªát', 'RESOLVED', 2, 'ƒê√£ li√™n h·ªá v·ªõi ng∆∞·ªùi b√°n ƒë·ªÉ ho√†n thi·ªán th√¥ng tin s·∫£n ph·∫©m', NOW());
 
 -- ============================================================================
 -- 19. CONTENTS
 -- ============================================================================
--- NOTE: Contents have 'images' and 'videos' fields - please manually add media
 INSERT INTO contents (id, title, content, content_type, author_id, product_id, status, approved_by, approved_at, created_at) VALUES
-(1, 'H∞€ng d´n chÕn rau s°ch', 'B‡i viøt h∞€ng d´n c·ch nh≠n biøt v‡ chÕn rau s°ch an to‡n cho sÈc khœe...', 'ARTICLE', 3, 1, 'APPROVED', 2, NOW(), NOW()),
-(2, 'Gi€i thi«u g—m B·t Tr‡ng', 'B‡i viøt gi€i thi«u v¡ ngh¡ l‡m g—m truy¡n th—ng B·t Tr‡ng...', 'ARTICLE', 4, 5, 'APPROVED', 2, NOW(), NOW()),
-(3, 'Video quy trÏnh s£n xu•t khn thÍu', 'Video gi€i thi«u quy trÏnh thÍu tay truy¡n th—ng...', 'VIDEO', 5, 8, 'PENDING', NULL, NULL, NOW());
+(1, 'H∆∞·ªõng d·∫´n ch·ªçn rau s·∫°ch', 'B√†i vi·∫øt h∆∞·ªõng d·∫´n c√°ch nh·∫≠n bi·∫øt v√† ch·ªçn rau s·∫°ch an to√†n cho s·ª©c kh·ªèe...', 'ARTICLE', 3, 1, 'APPROVED', 2, NOW(), NOW()),
+(2, 'Gi·ªõi thi·ªáu g·ªëm B√°t Tr√†ng', 'B√†i vi·∫øt gi·ªõi thi·ªáu v·ªÅ ngh·ªÅ l√†m g·ªëm truy·ªÅn th·ªëng B√°t Tr√†ng...', 'ARTICLE', 4, 5, 'APPROVED', 2, NOW(), NOW()),
+(3, 'Video quy tr√¨nh s·∫£n xu·∫•t khƒÉn th√™u', 'Video gi·ªõi thi·ªáu quy tr√¨nh th√™u tay truy·ªÅn th·ªëng...', 'VIDEO', 5, 8, 'PENDING', NULL, NULL, NOW());
 
 -- ============================================================================
 -- 20. MEDIAS
@@ -248,18 +229,8 @@ INSERT INTO contents (id, title, content, content_type, author_id, product_id, s
 -- ('product1.jpg', '/uploads/products/product1.jpg', 'image', 245678, 'image/jpeg', 3, NOW());
 
 -- ============================================================================
--- SUMMARY OF TABLES WITH IMAGE FIELDS (MANUAL DATA ENTRY REQUIRED)
--- ============================================================================
--- 1. categories (image field)
--- 2. regions (image field)
--- 3. products (images field - JSON array)
--- 4. contents (images, videos fields - JSON arrays)
--- 5. medias (entire table - stores uploaded media files)
--- 6. order_items (product_image field - can reference products.images)
--- ============================================================================
-
 -- Reset sequences (for PostgreSQL)
--- For MySQL/MariaDB, AUTO_INCREMENT will handle this automatically
+-- ============================================================================
 SELECT setval('organizations_id_seq', (SELECT MAX(id) FROM organizations));
 SELECT setval('roles_id_seq', (SELECT MAX(id) FROM roles));
 SELECT setval('permissions_id_seq', (SELECT MAX(id) FROM permissions));
