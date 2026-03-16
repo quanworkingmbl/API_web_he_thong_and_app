@@ -4,6 +4,7 @@ from typing import Optional, List
 from datetime import datetime
 from app.core.database import get_db
 from app.models.product import Product, ProductApproval, ProductStatus, ProductLabel
+from app.models.category import Category
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.core.permissions import check_product_approve_access
@@ -24,6 +25,8 @@ class ProductResponse(BaseModel):
     price: Decimal
     producer_id: int
     producer_name: Optional[str] = None
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     status: str
     label: Optional[str]
     images: Optional[str]
@@ -44,6 +47,7 @@ class CreateProductRequest(BaseModel):
     description: Optional[str] = None
     price: Decimal = Field(..., ge=0)
     producer_id: int
+    category_id: Optional[int] = None
     label: Optional[str] = None
     images: Optional[str] = None  # JSON array of image URLs
 
@@ -52,6 +56,7 @@ class UpdateProductRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=255)
     description: Optional[str] = None
     price: Optional[Decimal] = Field(None, ge=0)
+    category_id: Optional[int] = None
     label: Optional[str] = None
     images: Optional[str] = None
 
@@ -75,6 +80,7 @@ async def get_products(
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     producer_id: Optional[int] = Query(None),
+    category_id: Optional[int] = Query(None),
     label: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user_optional),
@@ -84,11 +90,13 @@ async def get_products(
     Get list of products with pagination and filters
     """
     query = db.query(Product)
-    
+
     if status:
         query = query.filter(Product.status == status)
     if producer_id:
         query = query.filter(Product.producer_id == producer_id)
+    if category_id:
+        query = query.filter(Product.category_id == category_id)
     if label:
         query = query.filter(Product.label == label)
     if search:
@@ -98,10 +106,11 @@ async def get_products(
     skip = (page - 1) * limit
     products = query.order_by(Product.created_at.desc()).offset(skip).limit(limit).all()
     
-    # Get producer names
+    # Get producer names and category names
     product_list = []
     for p in products:
         producer = db.query(User).filter(User.id == p.producer_id).first()
+        category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
         product_list.append(ProductResponse(
             id=p.id,
             name=p.name,
@@ -109,6 +118,8 @@ async def get_products(
             price=p.price,
             producer_id=p.producer_id,
             producer_name=producer.name if producer else None,
+            category_id=p.category_id,
+            category_name=category.name if category else None,
             status=p.status.value if hasattr(p.status, 'value') else str(p.status),
             label=p.label,
             images=p.images,
@@ -137,9 +148,10 @@ async def get_product_by_id(
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    
+
     producer = db.query(User).filter(User.id == product.producer_id).first()
-    
+    category = db.query(Category).filter(Category.id == product.category_id).first() if product.category_id else None
+
     return ProductResponse(
         id=product.id,
         name=product.name,
@@ -147,6 +159,8 @@ async def get_product_by_id(
         price=product.price,
         producer_id=product.producer_id,
         producer_name=producer.name if producer else None,
+        category_id=product.category_id,
+        category_name=category.name if category else None,
         status=product.status.value if hasattr(product.status, 'value') else str(product.status),
         label=product.label,
         images=product.images,
@@ -183,11 +197,18 @@ async def create_product(
     if not producer:
         raise HTTPException(status_code=400, detail="Producer not found")
 
+    # Validate category if provided
+    if product_data.category_id:
+        category = db.query(Category).filter(Category.id == product_data.category_id).first()
+        if not category:
+            raise HTTPException(status_code=400, detail="Category not found")
+
     new_product = Product(
         name=product_data.name,
         description=product_data.description,
         price=product_data.price,
         producer_id=actual_producer_id,
+        category_id=product_data.category_id,
         status=ProductStatus.PENDING,
         label=product_data.label,
         images=product_data.images,
@@ -197,6 +218,8 @@ async def create_product(
     db.commit()
     db.refresh(new_product)
 
+    category = db.query(Category).filter(Category.id == new_product.category_id).first() if new_product.category_id else None
+
     return ProductResponse(
         id=new_product.id,
         name=new_product.name,
@@ -204,6 +227,8 @@ async def create_product(
         price=new_product.price,
         producer_id=new_product.producer_id,
         producer_name=producer.name,
+        category_id=new_product.category_id,
+        category_name=category.name if category else None,
         status=new_product.status.value if hasattr(new_product.status, 'value') else str(new_product.status),
         label=new_product.label,
         images=new_product.images,
@@ -238,6 +263,12 @@ async def update_product(
             detail="Product not found" if is_admin else "Sản phẩm không tồn tại hoặc bạn không có quyền chỉnh sửa"
         )
 
+    # Validate category if provided in update
+    if product_data.category_id is not None:
+        category = db.query(Category).filter(Category.id == product_data.category_id).first()
+        if not category:
+            raise HTTPException(status_code=400, detail="Category not found")
+
     update_data = product_data.dict(exclude_unset=True)
     for key, value in update_data.items():
         setattr(product, key, value)
@@ -246,6 +277,7 @@ async def update_product(
     db.refresh(product)
 
     producer = db.query(User).filter(User.id == product.producer_id).first()
+    category = db.query(Category).filter(Category.id == product.category_id).first() if product.category_id else None
 
     return ProductResponse(
         id=product.id,
@@ -254,6 +286,8 @@ async def update_product(
         price=product.price,
         producer_id=product.producer_id,
         producer_name=producer.name if producer else None,
+        category_id=product.category_id,
+        category_name=category.name if category else None,
         status=product.status.value if hasattr(product.status, 'value') else str(product.status),
         label=product.label,
         images=product.images,
