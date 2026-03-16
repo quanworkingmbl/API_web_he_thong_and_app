@@ -23,6 +23,6 @@ class Category(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Self-referencing relationship for subcategories
-    # products = relationship("Product", back_populates="category")
+
+    # Relationship with products
+    products = relationship("Product", back_populates="category")
