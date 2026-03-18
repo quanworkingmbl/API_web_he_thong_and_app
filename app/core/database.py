@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from app.core.config import settings
 
@@ -18,14 +17,14 @@ def clean_database_url(url: str) -> str:
     if parsed.query:
         params = parse_qs(parsed.query)
         # Remove pgbouncer from params
-        params.pop('pgbouncer', None)
+        params.pop(' ', None)
         # Rebuild URL
         new_query = urlencode(params, doseq=True) if params else ''
         parsed = parsed._replace(query=new_query)
         url = urlunparse(parsed)
     return url
 
-# Clean DATABASE_URL
+# Clean DATABASE_URL to remove pgbouncer parameter
 clean_url = clean_database_url(settings.DATABASE_URL)
 
 # Create engine

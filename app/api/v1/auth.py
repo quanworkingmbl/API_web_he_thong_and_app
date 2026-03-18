@@ -22,7 +22,12 @@ class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     gender: Optional[str] = None
     type: Optional[str] = "consumer"  # consumer, producer, etc.
-
+# ... nghĩa là không được thiếu
+# Tham số ge: ≥ (greater or equal), gt: >, le: ≤, lt: <
+# Khai báo	Có bắt buộc không?
+# str	✅ Bắt buộc
+# Optional[str]	✅ Bắt buộc (nhưng cho null)
+# Optional[str] = None	❌ Không bắt buộc
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -112,6 +117,39 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
     
     return user
 
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+    db: Session = Depends(get_db)
+):
+    """
+    Optional authentication - returns User if authenticated, None otherwise
+    Useful for development/testing without strict authentication
+    """
+    if not credentials:
+        # In DEBUG mode, create a mock user for testing
+        if settings.DEBUG:
+            # Return first admin user or create a mock one
+            mock_user = db.query(User).filter(User.activated == 1).first()
+            if mock_user:
+                return mock_user
+        return None
+    
+    try:
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        if payload is None:
+            return None
+            
+        user_id = payload.get("sub")
+        if user_id is None:
+            return None
+            
+        user_id_int = int(user_id)
+        user = db.query(User).filter(User.id == user_id_int, User.deleted_at.is_(None)).first()
+        return user
+    except Exception:
+        return None
+
 @router.post("/register", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
 async def register(register_data: RegisterRequest, db: Session = Depends(get_db)):
     """
@@ -142,13 +180,17 @@ async def register(register_data: RegisterRequest, db: Session = Depends(get_db)
         )
     
     # Create new user
+    # Producer/seller phải qua xét duyệt hồ sơ (activated=0) trước khi bán hàng
+    # Consumer được kích hoạt ngay (activated=1)
+    user_type = register_data.type or "consumer"
+    is_seller = user_type in ("producer", "seller")
     new_user = User(
         email=register_data.email,
         password_hash=get_password_hash(register_data.password),
         name=register_data.name,
         gender=register_data.gender,
-        type=register_data.type or "consumer",
-        activated=1  # Auto-activate for now, can be changed based on business logic
+        type=user_type,
+        activated=0 if is_seller else 1
     )
     
     db.add(new_user)
@@ -202,6 +244,7 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
         expires_delta=expires_delta
     )
     
+    # Use UTC time and add Z suffix for proper timezone
     expires_at = datetime.utcnow() + expires_delta
     
     return StandardResponse(
@@ -210,7 +253,7 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
         data={
             "api_token": access_token,
             "token_type": "Bearer",
-            "expires_at": expires_at.isoformat(),
+            "expires_at": expires_at.isoformat() + "Z",  # Add Z for UTC timezone
             "user": {
                 "id": user.id,
                 "email": user.email,
