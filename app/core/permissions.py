@@ -209,20 +209,20 @@ def check_payment_reconciliation_access(user: User, db: Session) -> bool:
 def check_content_approve_access(user: User, db: Session) -> bool:
     """Check if user can approve content"""
     roles = get_user_roles(user, db)
-    # Content Manager has full access
-    return RoleType.CONTENT_MANAGER in roles
+    # Admin and Content Manager have full access
+    return RoleType.ADMIN in roles or RoleType.CONTENT_MANAGER in roles
 
 def check_contract_manage_access(user: User, db: Session) -> bool:
     """Check if user can manage contracts"""
     roles = get_user_roles(user, db)
-    # Operation Coordinator has full access
-    return RoleType.OPERATION_COORDINATOR in roles
+    # Admin and Operation Coordinator have full access
+    return RoleType.ADMIN in roles or RoleType.OPERATION_COORDINATOR in roles
 
 def check_complaint_handle_access(user: User, db: Session) -> bool:
     """Check if user can handle complaints"""
     roles = get_user_roles(user, db)
-    # Operation Coordinator has full access
-    return RoleType.OPERATION_COORDINATOR in roles
+    # Admin and Operation Coordinator have full access
+    return RoleType.ADMIN in roles or RoleType.OPERATION_COORDINATOR in roles
 
 def check_system_control_access(user: User, db: Session) -> bool:
     """Check if user has system control access"""
