@@ -22,13 +22,18 @@ class Product(Base):
     description = Column(Text, nullable=True)
     price = Column(Numeric(10, 2), nullable=False)
     producer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     status = Column(SQLEnum(ProductStatus), default=ProductStatus.PENDING)
     label = Column(String(50), nullable=True)  # CLEAN_AGRICULTURE, TRADITIONAL_CRAFT, OCOP
     images = Column(Text, nullable=True)  # JSON array of image URLs
+    # Inventory management
+    stock_quantity = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     producer = relationship("User", foreign_keys=[producer_id])
+    category = relationship("Category", foreign_keys=[category_id], back_populates="products")
 
 class ProductApproval(Base):
     __tablename__ = "product_approvals"

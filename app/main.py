@@ -15,9 +15,11 @@ from app.core.logging_config import setup_logging
 setup_logging()
 
 app = FastAPI(
+    # title, version information API
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    docs_url="/docs" if settings.DEBUG else None,  # Hide docs in production
+    
+    docs_url="/docs" if settings.DEBUG else None,  # path Swagger UI 
     redoc_url="/redoc" if settings.DEBUG else None,  # Hide redoc in production
     openapi_url="/openapi.json" if settings.DEBUG else None,  # Hide openapi in production
 )

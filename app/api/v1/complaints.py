@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from app.core.database import get_db
 from app.models.complaint import Complaint, Review, ComplaintStatus
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from pydantic import BaseModel
+from datetime import datetime
 
 router = APIRouter()
 
@@ -15,10 +16,16 @@ class ReviewResponse(BaseModel):
     user_id: int
     rating: int
     comment: Optional[str]
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
+
+class PaginatedReviewResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    data: List[ReviewResponse]
 
 class ComplaintResponse(BaseModel):
     id: int
@@ -31,19 +38,27 @@ class ComplaintResponse(BaseModel):
     status: str
     handled_by: Optional[int]
     resolution: Optional[str]
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
-@router.get("/reviews", response_model=List[ReviewResponse])
+class PaginatedComplaintResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    data: List[ComplaintResponse]
+
+@router.get("/reviews", response_model=PaginatedReviewResponse)
 async def get_reviews(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     product_id: Optional[int] = Query(None),
     user_id: Optional[int] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get product reviews"""
+    """Get product reviews with pagination"""
     query = db.query(Review)
     
     if product_id:
@@ -51,17 +66,30 @@ async def get_reviews(
     if user_id:
         query = query.filter(Review.user_id == user_id)
     
-    reviews = query.all()
-    return [ReviewResponse.from_orm(r) for r in reviews]
+    # Get total count
+    total = query.count()
+    
+    # Apply pagination
+    skip = (page - 1) * limit
+    reviews = query.offset(skip).limit(limit).all()
+    
+    return PaginatedReviewResponse(
+        total=total,
+        page=page,
+        limit=limit,
+        data=[ReviewResponse.from_orm(r) for r in reviews]
+    )
 
-@router.get("/complaints", response_model=List[ComplaintResponse])
+@router.get("/complaints", response_model=PaginatedComplaintResponse)
 async def get_complaints(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     complaint_type: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get product complaints"""
+    """Get product complaints with pagination"""
     query = db.query(Complaint)
     
     if status:
@@ -69,8 +97,19 @@ async def get_complaints(
     if complaint_type:
         query = query.filter(Complaint.complaint_type == complaint_type)
     
-    complaints = query.all()
-    return [ComplaintResponse.from_orm(c) for c in complaints]
+    # Get total count
+    total = query.count()
+    
+    # Apply pagination
+    skip = (page - 1) * limit
+    complaints = query.offset(skip).limit(limit).all()
+    
+    return PaginatedComplaintResponse(
+        total=total,
+        page=page,
+        limit=limit,
+        data=[ComplaintResponse.from_orm(c) for c in complaints]
+    )
 
 @router.put("/complaints/{complaint_id}/handle")
 async def handle_complaint(

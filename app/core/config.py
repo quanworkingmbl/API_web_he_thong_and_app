@@ -20,6 +20,27 @@ class Settings(BaseSettings):
     APP_NAME: str = "CMS API"
     APP_VERSION: str = "1.0.0"
     DEBUG: Union[bool, str] = True
+
+    # Supabase Storage (S3-compatible)
+    SUPABASE_PROJECT_ID: str = ""
+    SUPABASE_S3_ENDPOINT: str = ""
+    SUPABASE_S3_ACCESS_KEY: str = ""
+    SUPABASE_S3_SECRET_KEY: str = ""
+    SUPABASE_S3_REGION: str = "ap-south-1"
+    SUPABASE_STORAGE_BUCKET: str = "file_test00"
+
+    # VNPAY Payment Gateway
+    VNPAY_TMN_CODE: str = ""
+    VNPAY_HASH_SECRET: str = ""
+    VNPAY_URL: str = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"
+    VNPAY_RETURN_URL: str = "http://localhost:8000/api/payments/vnpay/return"
+    VNPAY_IPN_URL: str = "http://localhost:8000/api/payments/vnpay/ipn"
+
+    # GHN Shipping
+    GHN_TOKEN: str = ""
+    GHN_SHOP_ID: str = ""
+    GHN_URL: str = "https://dev-online-gateway.ghn.vn/shiip/public-api"
+
     
     @field_validator('DEBUG', mode='before')
     @classmethod
