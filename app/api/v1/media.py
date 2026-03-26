@@ -5,47 +5,41 @@ from app.core.database import get_db
 from app.models.media import Media
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.core.config import settings
 from pydantic import BaseModel
 import os
 import uuid
 import boto3
 from botocore.client import Config
-from dotenv import load_dotenv
-
-load_dotenv()
 
 router = APIRouter()
 
 # ==============================================================================
-# Supabase S3-compatible Storage config
+# AWS S3 Storage config
 # ==============================================================================
 
-SUPABASE_S3_ENDPOINT  = os.getenv("SUPABASE_S3_ENDPOINT", "")
-SUPABASE_S3_ACCESS_KEY = os.getenv("SUPABASE_S3_ACCESS_KEY", "")
-SUPABASE_S3_SECRET_KEY = os.getenv("SUPABASE_S3_SECRET_KEY", "")
-SUPABASE_S3_REGION     = os.getenv("SUPABASE_S3_REGION", "ap-south-1")
-SUPABASE_PROJECT_ID    = os.getenv("SUPABASE_PROJECT_ID", "")
-SUPABASE_BUCKET        = os.getenv("SUPABASE_STORAGE_BUCKET", "images")
+AWS_ACCESS_KEY_ID     = settings.AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY = settings.AWS_SECRET_ACCESS_KEY
+AWS_REGION            = settings.AWS_REGION
+AWS_S3_BUCKET         = settings.AWS_S3_BUCKET
 
-# Public URL base: https://<project>.supabase.co/storage/v1/object/public/<bucket>/
-SUPABASE_PUBLIC_URL_BASE = (
-    f"https://{SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/{SUPABASE_BUCKET}/"
-)
+# Public URL base: https://<bucket>.s3.<region>.amazonaws.com/<key>
+AWS_S3_PUBLIC_URL_BASE = f"https://{AWS_S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/"
 
-ALLOWED_TYPES  = {"image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/quicktime"}
-MAX_FILE_SIZE  = 10 * 1024 * 1024  # 10 MB
+ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/quicktime"}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 def get_s3_client():
-    """Trả về boto3 S3 client trỏ vào Supabase Storage"""
+    """Trả về boto3 S3 client kết nối AWS S3"""
     return boto3.client(
         "s3",
-        endpoint_url=SUPABASE_S3_ENDPOINT,
-        aws_access_key_id=SUPABASE_S3_ACCESS_KEY,
-        aws_secret_access_key=SUPABASE_S3_SECRET_KEY,
-        region_name=SUPABASE_S3_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        region_name=AWS_REGION,
         config=Config(signature_version="s3v4"),
     )
+
 
 
 # ==============================================================================
@@ -123,7 +117,7 @@ async def upload_file(
     db: Session = Depends(get_db),
 ):
     """
-    Upload file (image/video) lên Supabase Storage.
+    Upload file (image/video) lên AWS S3.
     Trả về public URL để dùng trong trường `images` của content/product.
     """
     # Validate MIME type
@@ -154,11 +148,11 @@ async def upload_file(
     else:
         file_type = "document"
 
-    # Upload lên Supabase Storage (S3-compatible)
+    # Upload lên AWS S3
     try:
         s3 = get_s3_client()
         s3.put_object(
-            Bucket=SUPABASE_BUCKET,
+            Bucket=AWS_S3_BUCKET,
             Key=unique_key,
             Body=content,
             ContentType=file.content_type or "application/octet-stream",
@@ -166,7 +160,7 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload thất bại: {str(e)}")
 
-    public_url = SUPABASE_PUBLIC_URL_BASE + unique_key
+    public_url = AWS_S3_PUBLIC_URL_BASE + unique_key
 
     # Lưu record vào DB
     new_media = Media(
@@ -197,17 +191,17 @@ async def delete_media(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Xóa media (cả trên Supabase Storage và DB)"""
+    """Xóa media (cả trên AWS S3 và DB)"""
     media = db.query(Media).filter(Media.id == media_id).first()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
 
-    # Xóa trên Supabase Storage
+    # Xóa trên AWS S3
     try:
         # Lấy key từ URL
-        key = media.file_path.split(f"/{SUPABASE_BUCKET}/")[-1]
+        key = media.file_path.split(f".amazonaws.com/")[-1]
         s3  = get_s3_client()
-        s3.delete_object(Bucket=SUPABASE_BUCKET, Key=key)
+        s3.delete_object(Bucket=AWS_S3_BUCKET, Key=key)
     except Exception:
         pass  # không chặn nếu file không tồn tại trên storage
 
