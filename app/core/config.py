@@ -21,13 +21,14 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: Union[bool, str] = True
 
-    # Supabase Storage (S3-compatible)
-    SUPABASE_PROJECT_ID: str = ""
-    SUPABASE_S3_ENDPOINT: str = ""
-    SUPABASE_S3_ACCESS_KEY: str = ""
-    SUPABASE_S3_SECRET_KEY: str = ""
-    SUPABASE_S3_REGION: str = "ap-south-1"
-    SUPABASE_STORAGE_BUCKET: str = "file_test00"
+    # AWS S3 Storage
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_REGION: str = "us-east-1"
+    AWS_S3_BUCKET: str = ""
+
+    # SSL for AWS RDS
+    DB_SSL_CERT: str = ""  # Path to RDS global-bundle.pem
 
     # VNPAY Payment Gateway
     VNPAY_TMN_CODE: str = ""
