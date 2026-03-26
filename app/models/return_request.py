@@ -14,9 +14,11 @@ class ReturnStatus(str, enum.Enum):
     PENDING = "PENDING"           # Chờ xét duyệt
     APPROVED = "APPROVED"         # Đã duyệt – cần gửi hàng về
     REJECTED = "REJECTED"         # Từ chối
+    CANCELLED = "CANCELLED"       # Khách hàng đã hủy
     RECEIVED = "RECEIVED"         # Đã nhận hàng trả về
     REFUNDED = "REFUNDED"         # Đã hoàn tiền (cho RETURN)
     EXCHANGED = "EXCHANGED"       # Đã gửi hàng đổi (cho EXCHANGE)
+
 
 
 class ReturnRequest(Base):

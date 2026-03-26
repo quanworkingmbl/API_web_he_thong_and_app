@@ -1,8 +1,8 @@
 # API Request/Response Documentation
 
-- **Generated at:** 2026-03-14 13:15:56
+- **Generated at:** 2026-03-26 03:25:00
 - **Base URL (local):** `http://localhost:8000`
-- **Tổng số API endpoints:** `147` (bao gồm `/` và `/health`)
+- **Tổng số API endpoints:** `177` (bao gồm `/` và `/health`)
 
 ## 1) Tổng hợp toàn bộ endpoint
 
@@ -11,150 +11,172 @@
 | 1 | auth | POST | `/api/auth/login` | Required |
 | 2 | auth | POST | `/api/auth/logout` | Required |
 | 3 | auth | GET | `/api/auth/me` | Required |
-| 4 | auth | POST | `/api/auth/refresh` | Required |
-| 5 | auth | POST | `/api/auth/register` | Required |
-| 6 | cart | DELETE | `/api/cart` | Required |
-| 7 | cart | GET | `/api/cart` | Required |
-| 8 | cart | POST | `/api/cart/items` | Required |
-| 9 | cart | DELETE | `/api/cart/items/{item_id}` | Required |
-| 10 | cart | PUT | `/api/cart/items/{item_id}` | Required |
-| 11 | categories | GET | `/api/categories` | Required |
-| 12 | categories | POST | `/api/categories` | Required |
-| 13 | categories | DELETE | `/api/categories/{category_id}` | Required |
-| 14 | categories | GET | `/api/categories/{category_id}` | Required |
-| 15 | categories | PUT | `/api/categories/{category_id}` | Required |
-| 16 | complaints | GET | `/api/complaints/complaints` | Optional |
-| 17 | complaints | PUT | `/api/complaints/complaints/{complaint_id}/handle` | Required |
-| 18 | complaints | GET | `/api/complaints/reviews` | Optional |
-| 19 | content | GET | `/api/content` | Optional |
-| 20 | content | POST | `/api/content` | Required |
-| 21 | content | DELETE | `/api/content/{content_id}` | Required |
-| 22 | content | GET | `/api/content/{content_id}` | Optional |
-| 23 | content | PUT | `/api/content/{content_id}` | Required |
-| 24 | content | POST | `/api/content/{content_id}/approve` | Required |
-| 25 | contracts | GET | `/api/contracts` | Optional |
-| 26 | contracts | POST | `/api/contracts` | Required |
-| 27 | contracts | DELETE | `/api/contracts/{contract_id}` | Required |
-| 28 | contracts | GET | `/api/contracts/{contract_id}` | Required |
-| 29 | contracts | PUT | `/api/contracts/{contract_id}` | Required |
-| 30 | dashboard | GET | `/api/dashboard/orders` | Required |
-| 31 | dashboard | GET | `/api/dashboard/overview` | Required |
-| 32 | dashboard | GET | `/api/dashboard/products` | Required |
-| 33 | dashboard | GET | `/api/dashboard/revenue` | Required |
-| 34 | dashboard | GET | `/api/dashboard/users` | Required |
-| 35 | media | GET | `/api/medias` | Required |
-| 36 | media | POST | `/api/medias/uploads` | Required |
-| 37 | media | DELETE | `/api/medias/{media_id}` | Required |
-| 38 | media | GET | `/api/medias/{media_id}` | Required |
-| 39 | mobile_app | POST | `/api/mobile/checkout` | Required |
-| 40 | mobile_app | GET | `/api/mobile/orders/my` | Required |
-| 41 | mobile_app | GET | `/api/mobile/orders/my/{order_id}` | Required |
-| 42 | mobile_app | GET | `/api/mobile/posts` | Required |
-| 43 | mobile_app | GET | `/api/mobile/posts/my` | Required |
-| 44 | mobile_app | POST | `/api/mobile/posts/my` | Required |
-| 45 | mobile_app | DELETE | `/api/mobile/posts/my/{post_id}` | Required |
-| 46 | mobile_app | PUT | `/api/mobile/posts/my/{post_id}` | Required |
-| 47 | mobile_app | GET | `/api/mobile/posts/{post_id}` | Required |
-| 48 | mobile_app | GET | `/api/mobile/products` | Required |
-| 49 | mobile_app | GET | `/api/mobile/products/{product_id}` | Required |
-| 50 | mobile_app | GET | `/api/mobile/profile` | Required |
-| 51 | mobile_app | PUT | `/api/mobile/profile` | Required |
-| 52 | orders | GET | `/api/orders` | Required |
-| 53 | orders | GET | `/api/orders/stats/overview` | Required |
-| 54 | orders | GET | `/api/orders/{order_id}` | Required |
-| 55 | orders | PUT | `/api/orders/{order_id}/status` | Required |
-| 56 | organizations | GET | `/api/org` | Required |
-| 57 | organizations | POST | `/api/org` | Required |
-| 58 | organizations | DELETE | `/api/org/{org_id}` | Required |
-| 59 | organizations | GET | `/api/org/{org_id}` | Required |
-| 60 | organizations | PUT | `/api/org/{org_id}` | Required |
-| 61 | organizations | GET | `/api/org/{org_id}/members` | Required |
-| 62 | organizations | POST | `/api/org/{org_id}/members` | Required |
-| 63 | organizations | DELETE | `/api/org/{org_id}/members/{user_id}` | Required |
-| 64 | payments | GET | `/api/payments` | Optional |
-| 65 | payments | POST | `/api/payments/complaint` | Required |
-| 66 | payments | PUT | `/api/payments/config/cycle` | Required |
-| 67 | payments | PUT | `/api/payments/config/fee` | Required |
-| 68 | payments | GET | `/api/payments/reconciliation` | Optional |
-| 69 | payments | POST | `/api/payments/refund` | Required |
-| 70 | payments | POST | `/api/payments/vnpay/create` | Required |
-| 71 | payments | POST | `/api/payments/vnpay/ipn` | Required |
-| 72 | payments | GET | `/api/payments/vnpay/return` | Required |
-| 73 | payments | GET | `/api/payments/{payment_id}/status` | Required |
-| 74 | permissions | GET | `/api/admin/permissions` | Required |
-| 75 | permissions | POST | `/api/admin/permissions` | Required |
-| 76 | permissions | DELETE | `/api/admin/permissions/{permission_id}` | Required |
-| 77 | permissions | PUT | `/api/admin/permissions/{permission_id}` | Required |
-| 78 | products | GET | `/api/products` | Optional |
-| 79 | products | POST | `/api/products` | Required |
-| 80 | products | DELETE | `/api/products/{product_id}` | Required |
-| 81 | products | GET | `/api/products/{product_id}` | Optional |
-| 82 | products | PUT | `/api/products/{product_id}` | Required |
-| 83 | products | POST | `/api/products/{product_id}/approve` | Required |
-| 84 | products | PUT | `/api/products/{product_id}/label` | Required |
-| 85 | regions | GET | `/api/regions` | Required |
-| 86 | regions | POST | `/api/regions` | Required |
-| 87 | regions | DELETE | `/api/regions/{region_id}` | Required |
-| 88 | regions | GET | `/api/regions/{region_id}` | Required |
-| 89 | regions | PUT | `/api/regions/{region_id}` | Required |
-| 90 | returns | GET | `/api/returns` | Required |
-| 91 | returns | POST | `/api/returns` | Required |
-| 92 | returns | GET | `/api/returns/my` | Required |
-| 93 | returns | PUT | `/api/returns/{return_id}/approve` | Required |
-| 94 | returns | PUT | `/api/returns/{return_id}/received` | Required |
-| 95 | returns | PUT | `/api/returns/{return_id}/reject` | Required |
-| 96 | reviews | POST | `/api/reviews` | Required |
-| 97 | reviews | GET | `/api/reviews/product/{product_id}` | Required |
-| 98 | reviews | DELETE | `/api/reviews/{review_id}` | Required |
-| 99 | reviews | PUT | `/api/reviews/{review_id}` | Required |
-| 100 | roles | GET | `/api/admin/roles` | Required |
-| 101 | roles | POST | `/api/admin/roles` | Required |
-| 102 | roles | DELETE | `/api/admin/roles/{role_id}` | Required |
-| 103 | roles | PUT | `/api/admin/roles/{role_id}` | Required |
-| 104 | seller | GET | `/api/seller/dashboard` | Required |
-| 105 | seller | GET | `/api/seller/orders` | Required |
-| 106 | seller | PUT | `/api/seller/orders/{order_id}/confirm` | Required |
-| 107 | seller | PUT | `/api/seller/orders/{order_id}/reject` | Required |
-| 108 | seller | PUT | `/api/seller/orders/{order_id}/ship` | Required |
-| 109 | seller | GET | `/api/seller/products` | Required |
-| 110 | seller | PUT | `/api/seller/products/{product_id}/stock` | Required |
-| 111 | seller | GET | `/api/seller/profile` | Required |
-| 112 | seller_onboarding | GET | `/api/seller/applications` | Required |
-| 113 | seller_onboarding | POST | `/api/seller/register` | Required |
-| 114 | seller_onboarding | GET | `/api/seller/verification-status` | Required |
-| 115 | seller_onboarding | PUT | `/api/seller/verify/{user_id}` | Required |
-| 116 | settlement | POST | `/api/settlement/create` | Required |
-| 117 | settlement | GET | `/api/settlement/history` | Required |
-| 118 | settlement | GET | `/api/settlement/payouts` | Required |
-| 119 | settlement | GET | `/api/settlement/wallet` | Required |
-| 120 | settlement | POST | `/api/settlement/{settlement_id}/approve` | Required |
-| 121 | settlement | POST | `/api/settlement/{settlement_id}/payout` | Required |
-| 122 | shipping | POST | `/api/shipping/create` | Required |
-| 123 | shipping | POST | `/api/shipping/fee` | Required |
-| 124 | shipping | GET | `/api/shipping/order/{order_id}` | Required |
-| 125 | shipping | POST | `/api/shipping/webhook` | Required |
-| 126 | shipping | GET | `/api/shipping/{shipment_id}/track` | Required |
-| 127 | stats | GET | `/api/stats/categories` | Required |
-| 128 | stats | GET | `/api/stats/consumers` | Required |
-| 129 | stats | GET | `/api/stats/producers` | Required |
-| 130 | stats | GET | `/api/stats/regions` | Required |
-| 131 | stats | GET | `/api/stats/trending` | Required |
-| 132 | system | GET | `/` | Public |
-| 133 | system | GET | `/health` | Public |
-| 134 | traceability | POST | `/api/traceability/certificates` | Required |
-| 135 | traceability | GET | `/api/traceability/certificates/product/{product_id}` | Required |
-| 136 | traceability | PUT | `/api/traceability/certificates/{cert_id}/verify` | Required |
-| 137 | traceability | POST | `/api/traceability/origins` | Required |
-| 138 | traceability | GET | `/api/traceability/origins/product/{product_id}` | Required |
-| 139 | traceability | GET | `/api/traceability/product/{product_id}` | Required |
-| 140 | users | GET | `/api/users` | Required |
-| 141 | users | POST | `/api/users` | Required |
-| 142 | users | DELETE | `/api/users/{user_id}` | Required |
-| 143 | users | GET | `/api/users/{user_id}` | Required |
-| 144 | users | PUT | `/api/users/{user_id}` | Required |
-| 145 | users | PUT | `/api/users/{user_id}/activate` | Required |
-| 146 | users | GET | `/api/users/{user_id}/roles` | Required |
-| 147 | users | POST | `/api/users/{user_id}/roles` | Required |
+| 4 | auth | PUT | `/api/auth/profile` | Required |
+| 5 | auth | POST | `/api/auth/refresh` | Required |
+| 6 | auth | POST | `/api/auth/register` | Required |
+| 7 | cart | DELETE | `/api/cart` | Required |
+| 8 | cart | GET | `/api/cart` | Required |
+| 9 | cart | POST | `/api/cart/items` | Required |
+| 10 | cart | DELETE | `/api/cart/items/{item_id}` | Required |
+| 11 | cart | PUT | `/api/cart/items/{item_id}` | Required |
+| 12 | categories | GET | `/api/categories` | Required |
+| 13 | categories | POST | `/api/categories` | Required |
+| 14 | categories | DELETE | `/api/categories/{category_id}` | Required |
+| 15 | categories | GET | `/api/categories/{category_id}` | Required |
+| 16 | categories | PUT | `/api/categories/{category_id}` | Required |
+| 17 | complaints | GET | `/api/complaints/complaints` | Optional |
+| 18 | complaints | POST | `/api/complaints/complaints` | Required |
+| 19 | complaints | DELETE | `/api/complaints/complaints/{complaint_id}` | Required |
+| 20 | complaints | PUT | `/api/complaints/complaints/{complaint_id}/handle` | Required |
+| 21 | complaints | GET | `/api/complaints/reviews` | Optional |
+| 22 | content | GET | `/api/content` | Optional |
+| 23 | content | POST | `/api/content` | Required |
+| 24 | content | DELETE | `/api/content/{content_id}` | Required |
+| 25 | content | GET | `/api/content/{content_id}` | Optional |
+| 26 | content | PUT | `/api/content/{content_id}` | Required |
+| 27 | content | POST | `/api/content/{content_id}/approve` | Required |
+| 28 | contracts | GET | `/api/contracts` | Optional |
+| 29 | contracts | POST | `/api/contracts` | Required |
+| 30 | contracts | DELETE | `/api/contracts/{contract_id}` | Required |
+| 31 | contracts | GET | `/api/contracts/{contract_id}` | Required |
+| 32 | contracts | PUT | `/api/contracts/{contract_id}` | Required |
+| 33 | dashboard | GET | `/api/dashboard/orders` | Required |
+| 34 | dashboard | GET | `/api/dashboard/overview` | Required |
+| 35 | dashboard | GET | `/api/dashboard/products` | Required |
+| 36 | dashboard | GET | `/api/dashboard/revenue` | Required |
+| 37 | dashboard | GET | `/api/dashboard/users` | Required |
+| 38 | media | GET | `/api/medias` | Required |
+| 39 | media | POST | `/api/medias/uploads` | Required |
+| 40 | media | DELETE | `/api/medias/{media_id}` | Required |
+| 41 | media | GET | `/api/medias/{media_id}` | Required |
+| 42 | mobile_app | POST | `/api/mobile/checkout` | Required |
+| 43 | mobile_app | GET | `/api/mobile/orders/my` | Required |
+| 44 | mobile_app | GET | `/api/mobile/orders/my/{order_id}` | Required |
+| 45 | mobile_app | GET | `/api/mobile/posts` | Required |
+| 46 | mobile_app | GET | `/api/mobile/posts/my` | Required |
+| 47 | mobile_app | POST | `/api/mobile/posts/my` | Required |
+| 48 | mobile_app | DELETE | `/api/mobile/posts/my/{post_id}` | Required |
+| 49 | mobile_app | PUT | `/api/mobile/posts/my/{post_id}` | Required |
+| 50 | mobile_app | GET | `/api/mobile/posts/{post_id}` | Required |
+| 51 | mobile_app | GET | `/api/mobile/products` | Required |
+| 52 | mobile_app | GET | `/api/mobile/products/{product_id}` | Required |
+| 53 | mobile_app | GET | `/api/mobile/profile` | Required |
+| 54 | mobile_app | PUT | `/api/mobile/profile` | Required |
+| 55 | orders | GET | `/api/orders` | Required |
+| 56 | orders | POST | `/api/orders` | Required |
+| 57 | orders | GET | `/api/orders/stats/overview` | Required |
+| 58 | orders | DELETE | `/api/orders/{order_id}` | Required |
+| 59 | orders | GET | `/api/orders/{order_id}` | Required |
+| 60 | orders | PUT | `/api/orders/{order_id}/status` | Required |
+| 61 | organizations | GET | `/api/org` | Required |
+| 62 | organizations | POST | `/api/org` | Required |
+| 63 | organizations | DELETE | `/api/org/{org_id}` | Required |
+| 64 | organizations | GET | `/api/org/{org_id}` | Required |
+| 65 | organizations | PUT | `/api/org/{org_id}` | Required |
+| 66 | organizations | GET | `/api/org/{org_id}/members` | Required |
+| 67 | organizations | POST | `/api/org/{org_id}/members` | Required |
+| 68 | organizations | DELETE | `/api/org/{org_id}/members/{user_id}` | Required |
+| 69 | payments | GET | `/api/payments` | Optional |
+| 70 | payments | POST | `/api/payments/complaint` | Required |
+| 71 | payments | PUT | `/api/payments/config/cycle` | Required |
+| 72 | payments | PUT | `/api/payments/config/fee` | Required |
+| 73 | payments | GET | `/api/payments/reconciliation` | Optional |
+| 74 | payments | POST | `/api/payments/refund` | Required |
+| 75 | payments | POST | `/api/payments/vnpay/create` | Required |
+| 76 | payments | POST | `/api/payments/vnpay/ipn` | Required |
+| 77 | payments | GET | `/api/payments/vnpay/return` | Required |
+| 78 | payments | GET | `/api/payments/{payment_id}/status` | Required |
+| 79 | products | GET | `/api/products` | Optional |
+| 80 | products | POST | `/api/products` | Required |
+| 81 | products | DELETE | `/api/products/{product_id}` | Required |
+| 82 | products | GET | `/api/products/{product_id}` | Optional |
+| 83 | products | PUT | `/api/products/{product_id}` | Required |
+| 84 | products | POST | `/api/products/{product_id}/approve` | Required |
+| 85 | products | PUT | `/api/products/{product_id}/label` | Required |
+| 86 | promotions | GET | `/api/promotions` | Required |
+| 87 | promotions | POST | `/api/promotions` | Required |
+| 88 | promotions | GET | `/api/promotions/public` | Optional |
+| 89 | promotions | DELETE | `/api/promotions/{promotion_id}` | Required |
+| 90 | promotions | GET | `/api/promotions/{promotion_id}` | Required |
+| 91 | promotions | PUT | `/api/promotions/{promotion_id}` | Required |
+| 92 | regions | GET | `/api/regions` | Required |
+| 93 | regions | POST | `/api/regions` | Required |
+| 94 | regions | DELETE | `/api/regions/{region_id}` | Required |
+| 95 | regions | GET | `/api/regions/{region_id}` | Required |
+| 96 | regions | PUT | `/api/regions/{region_id}` | Required |
+| 97 | returns | GET | `/api/returns` | Required |
+| 98 | returns | POST | `/api/returns` | Required |
+| 99 | returns | GET | `/api/returns/my` | Required |
+| 100 | returns | PUT | `/api/returns/{return_id}/approve` | Required |
+| 101 | returns | PUT | `/api/returns/{return_id}/cancel` | Required |
+| 102 | returns | PUT | `/api/returns/{return_id}/received` | Required |
+| 103 | returns | PUT | `/api/returns/{return_id}/reject` | Required |
+| 104 | reviews | POST | `/api/reviews` | Required |
+| 105 | reviews | GET | `/api/reviews/product/{product_id}` | Required |
+| 106 | reviews | DELETE | `/api/reviews/{review_id}` | Required |
+| 107 | reviews | PUT | `/api/reviews/{review_id}` | Required |
+| 108 | roles | GET | `/api/admin/roles` | Required |
+| 109 | roles | POST | `/api/admin/roles` | Required |
+| 110 | roles | DELETE | `/api/admin/roles/{role_id}` | Required |
+| 111 | roles | PUT | `/api/admin/roles/{role_id}` | Required |
+| 112 | seller | GET | `/api/seller/contracts` | Required |
+| 113 | seller | POST | `/api/seller/contracts` | Required |
+| 114 | seller | DELETE | `/api/seller/contracts/{contract_id}` | Required |
+| 115 | seller | PUT | `/api/seller/contracts/{contract_id}` | Required |
+| 116 | seller | GET | `/api/seller/dashboard` | Required |
+| 117 | seller | GET | `/api/seller/orders` | Required |
+| 118 | seller | PUT | `/api/seller/orders/{order_id}/confirm` | Required |
+| 119 | seller | PUT | `/api/seller/orders/{order_id}/reject` | Required |
+| 120 | seller | PUT | `/api/seller/orders/{order_id}/ship` | Required |
+| 121 | seller | GET | `/api/seller/posts` | Required |
+| 122 | seller | POST | `/api/seller/posts` | Required |
+| 123 | seller | DELETE | `/api/seller/posts/{post_id}` | Required |
+| 124 | seller | PUT | `/api/seller/posts/{post_id}` | Required |
+| 125 | seller | GET | `/api/seller/products` | Required |
+| 126 | seller | POST | `/api/seller/products` | Required |
+| 127 | seller | DELETE | `/api/seller/products/{product_id}` | Required |
+| 128 | seller | PUT | `/api/seller/products/{product_id}` | Required |
+| 129 | seller | PUT | `/api/seller/products/{product_id}/stock` | Required |
+| 130 | seller | GET | `/api/seller/profile` | Required |
+| 131 | seller | PUT | `/api/seller/profile` | Required |
+| 132 | seller | GET | `/api/seller/returns` | Required |
+| 133 | seller | PUT | `/api/seller/returns/{return_id}` | Required |
+| 134 | seller_onboarding | GET | `/api/seller/applications` | Required |
+| 135 | seller_onboarding | POST | `/api/seller/register` | Required |
+| 136 | seller_onboarding | GET | `/api/seller/verification-status` | Required |
+| 137 | seller_onboarding | PUT | `/api/seller/verify/{user_id}` | Required |
+| 138 | settlement | POST | `/api/settlement/create` | Required |
+| 139 | settlement | GET | `/api/settlement/history` | Required |
+| 140 | settlement | GET | `/api/settlement/payouts` | Required |
+| 141 | settlement | GET | `/api/settlement/wallet` | Required |
+| 142 | settlement | POST | `/api/settlement/{settlement_id}/approve` | Required |
+| 143 | settlement | POST | `/api/settlement/{settlement_id}/payout` | Required |
+| 144 | shipping | POST | `/api/shipping/create` | Required |
+| 145 | shipping | POST | `/api/shipping/fee` | Required |
+| 146 | shipping | GET | `/api/shipping/order/{order_id}` | Required |
+| 147 | shipping | POST | `/api/shipping/webhook` | Required |
+| 148 | shipping | GET | `/api/shipping/{shipment_id}/track` | Required |
+| 149 | stats | GET | `/api/stats/categories` | Required |
+| 150 | stats | GET | `/api/stats/consumers` | Required |
+| 151 | stats | GET | `/api/stats/producers` | Required |
+| 152 | stats | GET | `/api/stats/regions` | Required |
+| 153 | stats | GET | `/api/stats/trending` | Required |
+| 154 | system | GET | `/` | Public |
+| 155 | system | GET | `/health` | Public |
+| 156 | traceability | POST | `/api/traceability/certificates` | Required |
+| 157 | traceability | GET | `/api/traceability/certificates/product/{product_id}` | Required |
+| 158 | traceability | PUT | `/api/traceability/certificates/{cert_id}/verify` | Required |
+| 159 | traceability | POST | `/api/traceability/origins` | Required |
+| 160 | traceability | GET | `/api/traceability/origins/product/{product_id}` | Required |
+| 161 | traceability | GET | `/api/traceability/product/{product_id}` | Required |
+| 162 | users | GET | `/api/users` | Required |
+| 163 | users | POST | `/api/users` | Required |
+| 164 | users | DELETE | `/api/users/{user_id}` | Required |
+| 165 | users | GET | `/api/users/{user_id}` | Required |
+| 166 | users | PUT | `/api/users/{user_id}` | Required |
+| 167 | users | PUT | `/api/users/{user_id}/activate` | Required |
+| 168 | users | GET | `/api/users/{user_id}/roles` | Required |
+| 169 | users | POST | `/api/users/{user_id}/roles` | Required |
 
 ## 2) Chi tiết từng API (đúng format yêu cầu)
 
@@ -9960,3 +9982,1416 @@ Content-Type: application/json
 
 **Real use case trong project:**  
 Được frontend/backoffice gọi trực tiếp để thao tác nghiệp vụ tương ứng trong CMS và app mobile.
+
+---
+
+## 3) API mới bổ sung (Sprint 2-3)
+
+> Các API bên dưới được bổ sung sau khi loại bỏ module Permissions và tái cấu trúc phân quyền theo `user.type`.
+
+---
+
+### 148. Update Profile
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/auth/profile
+
+**Description:**  
+Cập nhật thông tin cá nhân của user đang đăng nhập (dùng chung cho Admin, Seller, Consumer).
+
+**Use case trong hệ thống:**  
+User cập nhật tên, giới tính trên trang cá nhân. Không cần phân biệt role.
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý thông tin profile người dùng.
+
+**Liên kết với API khác:**
+- GET /api/auth/me
+- POST /api/auth/login
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/auth/profile
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "name": "Nguyễn Văn A",
+  "gender": "male"
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Cập nhật thông tin cá nhân thành công",
+  "data": {
+    "id": 1,
+    "email": "user@example.com",
+    "name": "Nguyễn Văn A",
+    "gender": "male",
+    "type": "consumer"
+  }
+}
+```
+
+---
+
+### 149. [Admin] Create Order
+
+**Method:** POST  
+**URL:** http://localhost:8000/api/orders
+
+**Description:**  
+Admin tạo đơn hàng thủ công (ví dụ đơn offline).
+
+**Use case trong hệ thống:**  
+Admin tạo đơn hàng cho khách offline hoặc đơn đặc biệt.
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý đơn hàng – tạo mới.
+
+**Liên kết với API khác:**
+- GET /api/orders
+- GET /api/orders/{order_id}
+- PUT /api/orders/{order_id}/status
+
+---
+
+**Postman - Method**
+
+POST
+
+**Postman - URL**
+
+http://localhost:8000/api/orders
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "customer_name": "Nguyễn Văn B",
+  "customer_phone": "0901234567",
+  "customer_email": "customer@example.com",
+  "shipping_address": "123 Đường ABC, Quận 1, TP.HCM",
+  "seller_id": 2,
+  "payment_method": "COD",
+  "customer_note": "Giao giờ hành chính",
+  "items": [
+    {"product_id": 1, "quantity": 2},
+    {"product_id": 3, "quantity": 1}
+  ]
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã tạo đơn hàng",
+  "data": {
+    "id": 15,
+    "order_number": "ORD-A1B2C3D4",
+    "total_amount": "450000.00",
+    "status": "PENDING"
+  }
+}
+```
+
+---
+
+### 150. [Admin] Delete Order
+
+**Method:** DELETE  
+**URL:** http://localhost:8000/api/orders/{order_id}
+
+**Description:**  
+Admin xóa đơn hàng. Chỉ xóa được đơn ở trạng thái PENDING hoặc CANCELLED.
+
+**Use case trong hệ thống:**  
+Admin dọn dẹp đơn hàng rác hoặc đơn bị hủy.
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý đơn hàng – xóa.
+
+**Liên kết với API khác:**
+- GET /api/orders
+- POST /api/orders
+- PUT /api/orders/{order_id}/status
+
+---
+
+**Postman - Method**
+
+DELETE
+
+**Postman - URL**
+
+http://localhost:8000/api/orders/{order_id}
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã xóa đơn hàng"
+}
+```
+
+---
+
+### 151. Customer Cancel Return Request
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/returns/{return_id}/cancel
+
+**Description:**  
+Khách hàng hủy yêu cầu đổi/trả. Chỉ hủy được khi yêu cầu đang ở trạng thái PENDING.
+
+**Use case trong hệ thống:**  
+Khách hàng đổi ý không muốn đổi/trả nữa.
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý đổi trả hàng.
+
+**Liên kết với API khác:**
+- POST /api/returns
+- GET /api/returns/my
+- PUT /api/returns/{return_id}/approve
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/returns/{return_id}/cancel
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã hủy yêu cầu đổi/trả",
+  "return_id": 5,
+  "status": "CANCELLED"
+}
+```
+
+---
+
+### 152. Create Complaint
+
+**Method:** POST  
+**URL:** http://localhost:8000/api/complaints/complaints
+
+**Description:**  
+Tạo khiếu nại mới (có thể về sản phẩm hoặc đơn hàng).
+
+**Use case trong hệ thống:**  
+Người dùng gửi khiếu nại khi gặp vấn đề với sản phẩm hoặc dịch vụ.
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý khiếu nại.
+
+**Liên kết với API khác:**
+- GET /api/complaints/complaints
+- PUT /api/complaints/complaints/{complaint_id}/handle
+- DELETE /api/complaints/complaints/{complaint_id}
+
+---
+
+**Postman - Method**
+
+POST
+
+**Postman - URL**
+
+http://localhost:8000/api/complaints/complaints
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "product_id": 5,
+  "order_id": 12,
+  "complaint_type": "PRODUCT",
+  "title": "Sản phẩm không đúng mô tả",
+  "description": "Sản phẩm nhận được khác hoàn toàn với hình ảnh trên web."
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Khiếu nại đã được gửi",
+  "data": {
+    "id": 10,
+    "product_id": 5,
+    "order_id": 12,
+    "user_id": 3,
+    "complaint_type": "PRODUCT",
+    "title": "Sản phẩm không đúng mô tả",
+    "description": "Sản phẩm nhận được khác hoàn toàn với hình ảnh trên web.",
+    "status": "PENDING",
+    "handled_by": null,
+    "resolution": null,
+    "created_at": "2026-03-26T03:00:00"
+  }
+}
+```
+
+---
+
+### 153. [Admin] Delete Complaint
+
+**Method:** DELETE  
+**URL:** http://localhost:8000/api/complaints/complaints/{complaint_id}
+
+**Description:**  
+Admin xóa khiếu nại.
+
+**Use case trong hệ thống:**  
+Admin dọn dẹp khiếu nại trùng lặp hoặc không hợp lệ.
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý khiếu nại.
+
+**Liên kết với API khác:**
+- GET /api/complaints/complaints
+- POST /api/complaints/complaints
+- PUT /api/complaints/complaints/{complaint_id}/handle
+
+---
+
+**Postman - Method**
+
+DELETE
+
+**Postman - URL**
+
+http://localhost:8000/api/complaints/complaints/{complaint_id}
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã xóa khiếu nại"
+}
+```
+
+---
+
+### 154. [Admin] Get All Promotions
+
+**Method:** GET  
+**URL:** http://localhost:8000/api/promotions
+
+**Description:**  
+Admin xem danh sách tất cả mã khuyến mãi (có phân trang, tìm kiếm).
+
+**Use case trong hệ thống:**  
+Admin quản lý chương trình khuyến mãi trên CMS.
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý khuyến mãi / mã giảm giá.
+
+**Liên kết với API khác:**
+- POST /api/promotions
+- PUT /api/promotions/{promotion_id}
+- DELETE /api/promotions/{promotion_id}
+- GET /api/promotions/public
+
+**Biến thể API:**
+- `?page=1&limit=20` – phân trang
+- `?search=SUMMER` – tìm theo code hoặc tên
+
+---
+
+**Postman - Method**
+
+GET
+
+**Postman - URL**
+
+http://localhost:8000/api/promotions?page=1&limit=20&search=SUMMER
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "code": "SUMMER2026",
+      "name": "Giảm giá mùa hè",
+      "promotion_type": "PERCENTAGE",
+      "discount_value": "15.00",
+      "max_discount_amount": "100000.00",
+      "min_order_amount": "200000.00",
+      "usage_limit": 500,
+      "used_count": 123,
+      "status": "ACTIVE",
+      "start_date": "2026-06-01T00:00:00",
+      "end_date": "2026-08-31T23:59:59",
+      "created_at": "2026-03-20T10:00:00"
+    }
+  ],
+  "meta": {"total": 5, "page": 1, "limit": 20}
+}
+```
+
+---
+
+### 155. [Admin] Create Promotion
+
+**Method:** POST  
+**URL:** http://localhost:8000/api/promotions
+
+**Description:**  
+Admin tạo mã khuyến mãi mới.
+
+**Use case trong hệ thống:**  
+Admin tạo chương trình giảm giá (theo % hoặc số tiền cố định).
+
+**API này phục vụ mục đích gì trong dự án:**  
+Quản lý khuyến mãi.
+
+---
+
+**Postman - Method**
+
+POST
+
+**Postman - URL**
+
+http://localhost:8000/api/promotions
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "code": "NEWYEAR2026",
+  "name": "Giảm giá Tết 2026",
+  "description": "Áp dụng cho tất cả đơn hàng từ 300k",
+  "promotion_type": "PERCENTAGE",
+  "discount_value": 20,
+  "max_discount_amount": 150000,
+  "min_order_amount": 300000,
+  "usage_limit": 1000,
+  "start_date": "2026-01-20T00:00:00",
+  "end_date": "2026-02-10T23:59:59"
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Tạo mã khuyến mãi thành công",
+  "data": {
+    "id": 6,
+    "code": "NEWYEAR2026",
+    "status": "ACTIVE"
+  }
+}
+```
+
+---
+
+### 156. Get Promotion Detail
+
+**Method:** GET  
+**URL:** http://localhost:8000/api/promotions/{promotion_id}
+
+**Description:**  
+Xem chi tiết một mã khuyến mãi theo ID.
+
+---
+
+**Postman - Method**
+
+GET
+
+**Postman - URL**
+
+http://localhost:8000/api/promotions/1
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "code": "SUMMER2026",
+    "name": "Giảm giá mùa hè",
+    "promotion_type": "PERCENTAGE",
+    "discount_value": "15.00",
+    "max_discount_amount": "100000.00",
+    "min_order_amount": "200000.00",
+    "usage_limit": 500,
+    "used_count": 123,
+    "status": "ACTIVE",
+    "start_date": "2026-06-01T00:00:00",
+    "end_date": "2026-08-31T23:59:59"
+  }
+}
+```
+
+---
+
+### 157. [Admin] Update Promotion
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/promotions/{promotion_id}
+
+**Description:**  
+Admin cập nhật thông tin mã khuyến mãi.
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/promotions/1
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "name": "Giảm giá mùa hè - Gia hạn",
+  "end_date": "2026-09-30T23:59:59",
+  "usage_limit": 800
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Cập nhật mã khuyến mãi thành công"
+}
+```
+
+---
+
+### 158. [Admin] Delete Promotion
+
+**Method:** DELETE  
+**URL:** http://localhost:8000/api/promotions/{promotion_id}
+
+**Description:**  
+Admin xóa mã khuyến mãi.
+
+---
+
+**Postman - Method**
+
+DELETE
+
+**Postman - URL**
+
+http://localhost:8000/api/promotions/1
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã xóa mã khuyến mãi"
+}
+```
+
+---
+
+### 159. Get Public Promotions
+
+**Method:** GET  
+**URL:** http://localhost:8000/api/promotions/public
+
+**Description:**  
+Consumer xem danh sách mã khuyến mãi đang hoạt động và còn hạn.
+
+**Use case trong hệ thống:**  
+Hiển thị trên trang checkout hoặc trang khuyến mãi cho khách hàng.
+
+---
+
+**Postman - Method**
+
+GET
+
+**Postman - URL**
+
+http://localhost:8000/api/promotions/public
+
+**Headers**
+
+```http
+accept: application/json
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "code": "SUMMER2026",
+      "name": "Giảm giá mùa hè",
+      "promotion_type": "PERCENTAGE",
+      "discount_value": "15.00",
+      "max_discount_amount": "100000.00",
+      "min_order_amount": "200000.00",
+      "end_date": "2026-08-31T23:59:59"
+    }
+  ]
+}
+```
+
+---
+
+### 160. [Seller] Get My Posts
+
+**Method:** GET  
+**URL:** http://localhost:8000/api/seller/posts
+
+**Description:**  
+Seller xem danh sách bài đăng của mình (có phân trang, tìm kiếm).
+
+**Use case trong hệ thống:**  
+Seller quản lý các bài đăng giới thiệu sản phẩm trên Seller Portal.
+
+**Liên kết với API khác:**
+- POST /api/seller/posts
+- PUT /api/seller/posts/{post_id}
+- DELETE /api/seller/posts/{post_id}
+
+**Biến thể API:**
+- `?page=1&limit=20` – phân trang
+- `?search=...` – tìm theo tiêu đề
+
+---
+
+**Postman - Method**
+
+GET
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/posts?page=1&limit=20
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 3,
+      "title": "Giới thiệu cà phê đặc biệt",
+      "content_type": "POST",
+      "status": "APPROVED",
+      "created_at": "2026-03-20T10:00:00"
+    }
+  ],
+  "meta": {"total": 5, "page": 1, "limit": 20}
+}
+```
+
+---
+
+### 161. [Seller] Create Post
+
+**Method:** POST  
+**URL:** http://localhost:8000/api/seller/posts
+
+**Description:**  
+Seller tạo bài đăng mới (mặc định trạng thái PENDING chờ Admin duyệt).
+
+---
+
+**Postman - Method**
+
+POST
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/posts
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "title": "Bài giới thiệu sản phẩm mới",
+  "content": "Nội dung chi tiết bài đăng...",
+  "content_type": "POST",
+  "product_id": 10,
+  "images": "[\"https://example.com/img1.jpg\"]"
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã tạo bài đăng, chờ admin duyệt",
+  "data": {
+    "id": 15,
+    "title": "Bài giới thiệu sản phẩm mới",
+    "status": "PENDING"
+  }
+}
+```
+
+---
+
+### 162. [Seller] Update Post
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/seller/posts/{post_id}
+
+**Description:**  
+Seller cập nhật bài đăng (chỉ bài của mình).
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/posts/15
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "title": "Bài giới thiệu sản phẩm mới (cập nhật)",
+  "content": "Nội dung cập nhật..."
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã cập nhật bài đăng"
+}
+```
+
+---
+
+### 163. [Seller] Delete Post
+
+**Method:** DELETE  
+**URL:** http://localhost:8000/api/seller/posts/{post_id}
+
+**Description:**  
+Seller xóa bài đăng (chỉ bài của mình).
+
+---
+
+**Postman - Method**
+
+DELETE
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/posts/15
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã xóa bài đăng"
+}
+```
+
+---
+
+### 164. [Seller] Get My Contracts
+
+**Method:** GET  
+**URL:** http://localhost:8000/api/seller/contracts
+
+**Description:**  
+Seller xem danh sách hợp đồng quảng cáo của mình.
+
+---
+
+**Postman - Method**
+
+GET
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/contracts?page=1&limit=20
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 2,
+      "contract_number": "CTR-001",
+      "contract_type": "ADVERTISING",
+      "status": "ACTIVE",
+      "start_date": "2026-01-01T00:00:00",
+      "end_date": "2026-12-31T23:59:59",
+      "amount": "5000000.00"
+    }
+  ],
+  "meta": {"total": 1, "page": 1, "limit": 20}
+}
+```
+
+---
+
+### 165. [Seller] Create Contract
+
+**Method:** POST  
+**URL:** http://localhost:8000/api/seller/contracts
+
+**Description:**  
+Seller tạo hợp đồng quảng cáo mới (mặc định DRAFT).
+
+---
+
+**Postman - Method**
+
+POST
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/contracts
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "contract_type": "ADVERTISING",
+  "start_date": "2026-04-01T00:00:00",
+  "end_date": "2026-06-30T23:59:59",
+  "amount": 3000000,
+  "terms": "Điều khoản hợp đồng quảng cáo..."
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã tạo hợp đồng quảng cáo",
+  "data": {
+    "id": 5,
+    "contract_number": "CTR-A1B2C3D4",
+    "status": "DRAFT"
+  }
+}
+```
+
+---
+
+### 166. [Seller] Update Contract
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/seller/contracts/{contract_id}
+
+**Description:**  
+Seller cập nhật hợp đồng (chỉ hợp đồng DRAFT).
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/contracts/5
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "amount": 4000000,
+  "terms": "Điều khoản cập nhật..."
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã cập nhật hợp đồng"
+}
+```
+
+---
+
+### 167. [Seller] Delete Contract
+
+**Method:** DELETE  
+**URL:** http://localhost:8000/api/seller/contracts/{contract_id}
+
+**Description:**  
+Seller xóa hợp đồng (chỉ hợp đồng DRAFT).
+
+---
+
+**Postman - Method**
+
+DELETE
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/contracts/5
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã xóa hợp đồng"
+}
+```
+
+---
+
+### 168. [Seller] Delete Product
+
+**Method:** DELETE  
+**URL:** http://localhost:8000/api/seller/products/{product_id}
+
+**Description:**  
+Seller xóa sản phẩm (chỉ sản phẩm do mình sở hữu).
+
+---
+
+**Postman - Method**
+
+DELETE
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/products/10
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã xóa sản phẩm"
+}
+```
+
+---
+
+### 169. [Seller] Update Profile
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/seller/profile
+
+**Description:**  
+Seller cập nhật thông tin cá nhân (tên, giới tính).
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/profile
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "name": "Trần Văn C",
+  "gender": "male"
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Cập nhật thông tin thành công",
+  "data": {
+    "id": 5,
+    "email": "seller@example.com",
+    "name": "Trần Văn C",
+    "gender": "male"
+  }
+}
+```
+
+---
+
+### 170. [Seller] Get Returns
+
+**Method:** GET  
+**URL:** http://localhost:8000/api/seller/returns
+
+**Description:**  
+Seller xem danh sách yêu cầu đổi/trả liên quan đến đơn hàng của mình.
+
+**Biến thể API:**
+- `?page=1&limit=20` – phân trang
+- `?status=PENDING` – lọc theo trạng thái
+
+---
+
+**Postman - Method**
+
+GET
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/returns?page=1&limit=20
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+```
+
+**Request Body**
+
+```json
+{}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 3,
+      "order_id": 12,
+      "return_type": "RETURN",
+      "reason": "Sản phẩm bị lỗi",
+      "status": "PENDING",
+      "created_at": "2026-03-25T14:00:00"
+    }
+  ],
+  "meta": {"total": 2, "page": 1, "limit": 20}
+}
+```
+
+---
+
+### 171. [Seller] Handle Return Request
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/seller/returns/{return_id}
+
+**Description:**  
+Seller xử lý yêu cầu đổi/trả (ACCEPT hoặc REJECT).
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/returns/3
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "action": "ACCEPT",
+  "note": "Đồng ý đổi hàng cho khách"
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã xử lý yêu cầu đổi/trả"
+}
+```
+
+---
+
+### 172. [Seller] Create Product
+
+**Method:** POST  
+**URL:** http://localhost:8000/api/seller/products
+
+**Description:**  
+Seller tạo sản phẩm mới (mặc định PENDING chờ Admin duyệt).
+
+---
+
+**Postman - Method**
+
+POST
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/products
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "name": "Cà phê đặc sản Đắk Lắk",
+  "description": "Cà phê Arabica 100% từ Đắk Lắk",
+  "price": 250000,
+  "stock_quantity": 100,
+  "category_id": 3,
+  "images": "[\"https://example.com/coffee.jpg\"]",
+  "unit": "gói 500g"
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã tạo sản phẩm, chờ admin duyệt",
+  "data": {
+    "id": 25,
+    "name": "Cà phê đặc sản Đắk Lắk",
+    "status": "PENDING"
+  }
+}
+```
+
+---
+
+### 173. [Seller] Update Product
+
+**Method:** PUT  
+**URL:** http://localhost:8000/api/seller/products/{product_id}
+
+**Description:**  
+Seller cập nhật sản phẩm (chỉ sản phẩm do mình sở hữu).
+
+---
+
+**Postman - Method**
+
+PUT
+
+**Postman - URL**
+
+http://localhost:8000/api/seller/products/25
+
+**Headers**
+
+```http
+accept: application/json
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**
+
+```json
+{
+  "name": "Cà phê đặc sản Đắk Lắk (Cập nhật)",
+  "price": 230000,
+  "stock_quantity": 150
+}
+```
+
+**Example Response**
+
+```json
+{
+  "success": true,
+  "message": "Đã cập nhật sản phẩm"
+}
+```

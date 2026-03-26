@@ -1,6 +1,5 @@
 from app.models.user import User, UserRole, UserOrganization
 from app.models.role import Role
-from app.models.permission import Permission
 from app.models.organization import Organization
 from app.models.media import Media
 from app.models.product import Product, ProductApproval
@@ -17,13 +16,13 @@ from app.models.return_request import ReturnRequest, ReturnType, ReturnStatus
 from app.models.settlement import SellerWallet, Settlement, Payout, SettlementStatus, PayoutStatus
 from app.models.traceability import ProductCertificate, ProductOrigin, CertificateStatus
 from app.models.seller_profile import SellerProfile, VerificationStatus, BusinessType
+from app.models.promotion import Promotion, PromotionType, PromotionStatus
 
 __all__ = [
     "User",
     "UserRole",
     "UserOrganization",
     "Role",
-    "Permission",
     "Organization",
     "Media",
     "Product",
@@ -65,6 +64,10 @@ __all__ = [
     "SellerProfile",
     "VerificationStatus",
     "BusinessType",
+    # Promotion
+    "Promotion",
+    "PromotionType",
+    "PromotionStatus",
 ]
 
 
