@@ -3,7 +3,6 @@ from app.api.v1 import (
     auth,
     users,
     roles,
-    permissions,
     organizations,
     dashboard,
     media,
@@ -25,6 +24,7 @@ from app.api.v1 import (
     settlement,
     traceability,
     seller_onboarding,
+    promotions,
 )
 
 api_router = APIRouter()
@@ -35,7 +35,6 @@ api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 # API routes
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(roles.router, prefix="/admin/roles", tags=["Roles"])
-api_router.include_router(permissions.router, prefix="/admin/permissions", tags=["Permissions"])
 api_router.include_router(organizations.router, prefix="/org", tags=["Organizations"])
 api_router.include_router(dashboard.router, tags=["Dashboard"])
 api_router.include_router(media.router, prefix="/medias", tags=["Media"])
@@ -70,6 +69,9 @@ api_router.include_router(settlement.router, prefix="/settlement", tags=["💰 S
 
 # Traceability / Certificate
 api_router.include_router(traceability.router, prefix="/traceability", tags=["🔍 Traceability"])
+
+# Promotions
+api_router.include_router(promotions.router, prefix="/promotions", tags=["🎁 Promotions"])
 
 # Mobile App API
 api_router.include_router(mobile_app.router, prefix="/mobile", tags=["Mobile App"])

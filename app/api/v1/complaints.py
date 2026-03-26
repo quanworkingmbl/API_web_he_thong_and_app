@@ -86,16 +86,19 @@ async def get_complaints(
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     complaint_type: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo tiêu đề khiếu nại"),
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get product complaints with pagination"""
+    """Get product complaints with pagination and search"""
     query = db.query(Complaint)
     
     if status:
         query = query.filter(Complaint.status == status)
     if complaint_type:
         query = query.filter(Complaint.complaint_type == complaint_type)
+    if search:
+        query = query.filter(Complaint.title.ilike(f"%{search}%"))
     
     # Get total count
     total = query.count()
@@ -110,6 +113,42 @@ async def get_complaints(
         limit=limit,
         data=[ComplaintResponse.from_orm(c) for c in complaints]
     )
+
+
+class CreateComplaintRequest(BaseModel):
+    product_id: Optional[int] = None
+    order_id: Optional[int] = None
+    complaint_type: str
+    title: str
+    description: str
+
+
+@router.post("/complaints")
+async def create_complaint(
+    complaint_data: CreateComplaintRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Tạo khiếu nại mới"""
+    new_complaint = Complaint(
+        product_id=complaint_data.product_id,
+        order_id=complaint_data.order_id,
+        user_id=current_user.id,
+        complaint_type=complaint_data.complaint_type,
+        title=complaint_data.title,
+        description=complaint_data.description,
+        status=ComplaintStatus.PENDING,
+    )
+    db.add(new_complaint)
+    db.commit()
+    db.refresh(new_complaint)
+
+    return {
+        "success": True,
+        "message": "Khiếu nại đã được gửi",
+        "data": ComplaintResponse.from_orm(new_complaint)
+    }
+
 
 @router.put("/complaints/{complaint_id}/handle")
 async def handle_complaint(
@@ -133,3 +172,22 @@ async def handle_complaint(
     
     return {"message": "Complaint handled successfully"}
 
+
+@router.delete("/complaints/{complaint_id}")
+async def delete_complaint(
+    complaint_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """[Admin] Xóa khiếu nại"""
+    if current_user.type != "admin":
+        raise HTTPException(status_code=403, detail="Chỉ admin mới có quyền xóa khiếu nại")
+
+    complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Khiếu nại không tồn tại")
+
+    db.delete(complaint)
+    db.commit()
+
+    return {"success": True, "message": "Đã xóa khiếu nại"}

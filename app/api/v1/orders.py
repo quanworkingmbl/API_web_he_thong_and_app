@@ -301,3 +301,135 @@ async def get_order_stats(
             }
         }
     }
+
+
+# ==============================================================================
+# CREATE & DELETE ORDERS
+# ==============================================================================
+
+class CreateOrderItemRequest(BaseModel):
+    product_id: int
+    quantity: int = Field(..., ge=1)
+
+class CreateOrderRequest(BaseModel):
+    customer_name: str
+    customer_phone: str
+    customer_email: Optional[str] = None
+    shipping_address: str
+    seller_id: int
+    payment_method: str = Field(default="COD", pattern="^(COD|VNPAY|BANK_TRANSFER)$")
+    customer_note: Optional[str] = None
+    items: List[CreateOrderItemRequest]
+
+
+@router.post("")
+async def create_order(
+    order_data: CreateOrderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    [Admin] Tạo đơn hàng thủ công (ví dụ: đơn offline).
+    """
+    if current_user.type != "admin":
+        raise HTTPException(status_code=403, detail="Chỉ admin mới có quyền tạo đơn hàng thủ công")
+
+    from app.models.product import Product
+
+    # Validate seller
+    seller = db.query(User).filter(User.id == order_data.seller_id).first()
+    if not seller:
+        raise HTTPException(status_code=400, detail="Seller không tồn tại")
+
+    # Calculate totals
+    subtotal = Decimal("0")
+    order_items = []
+    for item_data in order_data.items:
+        product = db.query(Product).filter(Product.id == item_data.product_id).first()
+        if not product:
+            raise HTTPException(status_code=400, detail=f"Sản phẩm ID {item_data.product_id} không tồn tại")
+        item_total = product.price * item_data.quantity
+        subtotal += item_total
+        order_items.append({
+            "product_id": product.id,
+            "product_name": product.name,
+            "product_image": product.images,
+            "unit_price": product.price,
+            "quantity": item_data.quantity,
+            "total_price": item_total,
+        })
+
+    platform_fee_pct = Decimal("10")
+    platform_fee_amount = subtotal * platform_fee_pct / 100
+    seller_amount = subtotal - platform_fee_amount
+
+    order_number = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+    new_order = Order(
+        order_number=order_number,
+        customer_id=current_user.id,
+        customer_name=order_data.customer_name,
+        customer_phone=order_data.customer_phone,
+        customer_email=order_data.customer_email,
+        shipping_address=order_data.shipping_address,
+        seller_id=order_data.seller_id,
+        subtotal=subtotal,
+        shipping_fee=Decimal("0"),
+        discount_amount=Decimal("0"),
+        total_amount=subtotal,
+        platform_fee_percentage=platform_fee_pct,
+        platform_fee_amount=platform_fee_amount,
+        seller_amount=seller_amount,
+        status=OrderStatus.PENDING,
+        payment_method=order_data.payment_method,
+        payment_status="UNPAID",
+        customer_note=order_data.customer_note,
+    )
+    db.add(new_order)
+    db.commit()
+    db.refresh(new_order)
+
+    for item in order_items:
+        oi = OrderItem(order_id=new_order.id, **item)
+        db.add(oi)
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã tạo đơn hàng",
+        "data": {
+            "id": new_order.id,
+            "order_number": new_order.order_number,
+            "total_amount": str(new_order.total_amount),
+            "status": "PENDING",
+        }
+    }
+
+
+@router.delete("/{order_id}")
+async def delete_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """[Admin] Xóa đơn hàng (chỉ đơn đã hủy hoặc pending)."""
+    if current_user.type != "admin":
+        raise HTTPException(status_code=403, detail="Chỉ admin mới có quyền xóa đơn hàng")
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    deletable_statuses = {OrderStatus.PENDING, OrderStatus.CANCELLED}
+    if order.status not in deletable_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ xóa được đơn hàng ở trạng thái PENDING hoặc CANCELLED. Hiện tại: {order.status.value}"
+        )
+
+    # Xóa order items trước
+    db.query(OrderItem).filter(OrderItem.order_id == order.id).delete()
+    db.delete(order)
+    db.commit()
+
+    return {"success": True, "message": "Đã xóa đơn hàng"}
+

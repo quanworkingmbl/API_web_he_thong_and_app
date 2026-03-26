@@ -8,10 +8,22 @@ Endpoints:
 - PUT  /seller/orders/{id}/reject     – Từ chối đơn   → CANCELLED
 - PUT  /seller/orders/{id}/ship       – Chuyển sang Đang giao hàng → SHIPPING
 - GET  /seller/products               – Danh sách sản phẩm của seller
-- POST /seller/products               – [MỚI] Tạo sản phẩm mới (auto producer_id)
-- PUT  /seller/products/{id}          – [MỚI] Chỉnh sửa sản phẩm đầy đủ (ownership check)
+- POST /seller/products               – Tạo sản phẩm mới (auto producer_id)
+- PUT  /seller/products/{id}          – Chỉnh sửa sản phẩm đầy đủ (ownership check)
+- DELETE /seller/products/{id}        – Xóa sản phẩm (ownership check)
 - PUT  /seller/products/{id}/stock    – Cập nhật tồn kho nhanh
 - GET  /seller/profile                – Thông tin shop / profile
+- PUT  /seller/profile                – Cập nhật thông tin cá nhân
+- GET  /seller/posts                  – Danh sách bài đăng
+- POST /seller/posts                  – Tạo bài đăng
+- PUT  /seller/posts/{id}             – Cập nhật bài đăng
+- DELETE /seller/posts/{id}           – Xóa bài đăng
+- GET  /seller/contracts              – Danh sách hợp đồng QC
+- POST /seller/contracts              – Tạo hợp đồng QC
+- PUT  /seller/contracts/{id}         – Cập nhật hợp đồng QC
+- DELETE /seller/contracts/{id}       – Xóa hợp đồng QC
+- GET  /seller/returns                – Xem yêu cầu đổi trả thuộc đơn của seller
+- PUT  /seller/returns/{id}           – Cập nhật yêu cầu đổi trả
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,6 +35,10 @@ from decimal import Decimal
 from app.core.database import get_db
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.product import Product, ProductStatus
+from app.models.content import Content, ContentStatus
+from app.models.partner_contract import PartnerContract, ContractStatus
+from app.models.return_request import ReturnRequest, ReturnStatus
+from app.models.category import Category
 from app.models.user import User
 from app.api.v1.auth import get_current_user
 from pydantic import BaseModel, Field
@@ -363,6 +379,7 @@ async def get_seller_products(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo tên sản phẩm"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -372,6 +389,8 @@ async def get_seller_products(
     query = db.query(Product).filter(Product.producer_id == current_user.id)
     if status:
         query = query.filter(Product.status == status)
+    if search:
+        query = query.filter(Product.name.ilike(f"%{search}%"))
 
     total = query.count()
     skip = (page - 1) * limit
@@ -563,4 +582,513 @@ async def get_seller_profile(
             },
             "member_since": current_user.created_at.isoformat() if current_user.created_at else None
         }
+    }
+
+
+# ==============================================================================
+# DELETE PRODUCT
+# ==============================================================================
+
+@router.delete("/products/{product_id}", summary="Seller xóa sản phẩm")
+async def delete_seller_product(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller xóa sản phẩm của mình."""
+    _require_seller(current_user)
+
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.producer_id == current_user.id
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không có quyền xóa")
+
+    db.delete(product)
+    db.commit()
+
+    return {"success": True, "message": "Đã xóa sản phẩm"}
+
+
+# ==============================================================================
+# UPDATE PROFILE
+# ==============================================================================
+
+class UpdateSellerProfileRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=255)
+    gender: Optional[str] = None
+
+
+@router.put("/profile", summary="Seller cập nhật thông tin cá nhân")
+async def update_seller_profile(
+    profile_data: UpdateSellerProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller cập nhật thông tin cá nhân."""
+    _require_seller(current_user)
+
+    update_data = profile_data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(current_user, key, value)
+
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "success": True,
+        "message": "Đã cập nhật thông tin cá nhân",
+        "data": {
+            "id": current_user.id,
+            "name": current_user.name,
+            "email": current_user.email,
+            "gender": current_user.gender,
+        }
+    }
+
+
+# ==============================================================================
+# SELLER POSTS (Bài đăng)
+# ==============================================================================
+
+class CreateSellerPostRequest(BaseModel):
+    title: str = Field(..., min_length=2, max_length=255)
+    content: Optional[str] = None
+    content_type: str = Field(default="POST", pattern="^(POST|PRODUCT_DESCRIPTION|NEWS|ANNOUNCEMENT)$")
+    product_id: Optional[int] = None
+    images: Optional[str] = None
+    videos: Optional[str] = None
+
+
+class UpdateSellerPostRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=2, max_length=255)
+    content: Optional[str] = None
+    content_type: Optional[str] = None
+    images: Optional[str] = None
+    videos: Optional[str] = None
+
+
+@router.get("/posts", summary="Danh sách bài đăng của seller")
+async def get_seller_posts(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo tiêu đề"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Lấy danh sách bài đăng của seller đang đăng nhập."""
+    _require_seller(current_user)
+
+    query = db.query(Content).filter(Content.author_id == current_user.id)
+    if status:
+        query = query.filter(Content.status == status)
+    if search:
+        query = query.filter(Content.title.ilike(f"%{search}%"))
+
+    total = query.count()
+    skip = (page - 1) * limit
+    posts = query.order_by(Content.created_at.desc()).offset(skip).limit(limit).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "content": p.content,
+                "content_type": p.content_type,
+                "product_id": p.product_id,
+                "status": p.status.value if hasattr(p.status, 'value') else str(p.status),
+                "images": p.images,
+                "videos": p.videos,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            }
+            for p in posts
+        ],
+        "meta": {"total": total, "page": page, "limit": limit, "total_pages": (total + limit - 1) // limit}
+    }
+
+
+@router.post("/posts", summary="Seller tạo bài đăng mới")
+async def create_seller_post(
+    post_data: CreateSellerPostRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller tạo bài đăng mới. Bài đăng ở trạng thái PENDING chờ Admin duyệt."""
+    _require_seller(current_user)
+
+    new_post = Content(
+        title=post_data.title,
+        content=post_data.content,
+        content_type=post_data.content_type,
+        author_id=current_user.id,
+        product_id=post_data.product_id,
+        status=ContentStatus.PENDING,
+        images=post_data.images,
+        videos=post_data.videos,
+    )
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+
+    return {
+        "success": True,
+        "message": "Bài đăng đã được tạo. Chờ Admin duyệt.",
+        "data": {
+            "id": new_post.id,
+            "title": new_post.title,
+            "status": "PENDING",
+            "created_at": new_post.created_at.isoformat() if new_post.created_at else None,
+        }
+    }
+
+
+@router.put("/posts/{post_id}", summary="Seller cập nhật bài đăng")
+async def update_seller_post(
+    post_id: int,
+    post_data: UpdateSellerPostRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller cập nhật bài đăng của mình. Reset trạng thái về PENDING nếu sửa nội dung."""
+    _require_seller(current_user)
+
+    post = db.query(Content).filter(
+        Content.id == post_id,
+        Content.author_id == current_user.id
+    ).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Bài đăng không tồn tại hoặc không có quyền chỉnh sửa")
+
+    update_data = post_data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(post, key, value)
+
+    # Reset trạng thái về PENDING khi sửa nội dung
+    content_fields = {"title", "content", "images", "videos"}
+    if content_fields & update_data.keys():
+        post.status = ContentStatus.PENDING
+
+    db.commit()
+    db.refresh(post)
+
+    return {
+        "success": True,
+        "message": "Đã cập nhật bài đăng",
+        "data": {
+            "id": post.id,
+            "title": post.title,
+            "status": post.status.value if hasattr(post.status, 'value') else str(post.status),
+            "updated_at": post.updated_at.isoformat() if post.updated_at else None,
+        }
+    }
+
+
+@router.delete("/posts/{post_id}", summary="Seller xóa bài đăng")
+async def delete_seller_post(
+    post_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller xóa bài đăng của mình."""
+    _require_seller(current_user)
+
+    post = db.query(Content).filter(
+        Content.id == post_id,
+        Content.author_id == current_user.id
+    ).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Bài đăng không tồn tại hoặc không có quyền xóa")
+
+    db.delete(post)
+    db.commit()
+
+    return {"success": True, "message": "Đã xóa bài đăng"}
+
+
+# ==============================================================================
+# SELLER CONTRACTS (Hợp đồng quảng cáo)
+# ==============================================================================
+
+class CreateSellerContractRequest(BaseModel):
+    contract_number: str = Field(..., min_length=2, max_length=50)
+    contract_type: str = Field(default="ADVERTISING", pattern="^(ADVERTISING|PARTNERSHIP|DISTRIBUTION|OTHER)$")
+    start_date: datetime
+    end_date: Optional[datetime] = None
+    amount: Optional[Decimal] = Field(None, ge=0)
+    terms: Optional[str] = None
+
+
+class UpdateSellerContractRequest(BaseModel):
+    contract_type: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    amount: Optional[Decimal] = Field(None, ge=0)
+    terms: Optional[str] = None
+
+
+@router.get("/contracts", summary="Danh sách hợp đồng QC của seller")
+async def get_seller_contracts(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo số hợp đồng"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller xem hợp đồng quảng cáo của mình."""
+    _require_seller(current_user)
+
+    query = db.query(PartnerContract).filter(PartnerContract.partner_id == current_user.id)
+    if status:
+        query = query.filter(PartnerContract.status == status)
+    if search:
+        query = query.filter(PartnerContract.contract_number.ilike(f"%{search}%"))
+
+    total = query.count()
+    skip = (page - 1) * limit
+    contracts = query.order_by(PartnerContract.created_at.desc()).offset(skip).limit(limit).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": c.id,
+                "contract_number": c.contract_number,
+                "contract_type": c.contract_type,
+                "start_date": c.start_date.isoformat(),
+                "end_date": c.end_date.isoformat() if c.end_date else None,
+                "amount": str(c.amount) if c.amount else None,
+                "status": c.status.value if hasattr(c.status, 'value') else str(c.status),
+                "terms": c.terms,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in contracts
+        ],
+        "meta": {"total": total, "page": page, "limit": limit, "total_pages": (total + limit - 1) // limit}
+    }
+
+
+@router.post("/contracts", summary="Seller tạo hợp đồng QC")
+async def create_seller_contract(
+    contract_data: CreateSellerContractRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller tạo yêu cầu hợp đồng quảng cáo. Trạng thái DRAFT chờ admin duyệt."""
+    _require_seller(current_user)
+
+    existing = db.query(PartnerContract).filter(
+        PartnerContract.contract_number == contract_data.contract_number
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Số hợp đồng đã tồn tại")
+
+    new_contract = PartnerContract(
+        contract_number=contract_data.contract_number,
+        partner_id=current_user.id,
+        contract_type=contract_data.contract_type,
+        start_date=contract_data.start_date,
+        end_date=contract_data.end_date,
+        amount=contract_data.amount,
+        status=ContractStatus.DRAFT,
+        terms=contract_data.terms,
+        created_by=current_user.id,
+    )
+    db.add(new_contract)
+    db.commit()
+    db.refresh(new_contract)
+
+    return {
+        "success": True,
+        "message": "Hợp đồng đã được tạo (DRAFT). Chờ admin duyệt.",
+        "data": {
+            "id": new_contract.id,
+            "contract_number": new_contract.contract_number,
+            "status": "DRAFT",
+            "created_at": new_contract.created_at.isoformat() if new_contract.created_at else None,
+        }
+    }
+
+
+@router.put("/contracts/{contract_id}", summary="Seller cập nhật hợp đồng QC")
+async def update_seller_contract(
+    contract_id: int,
+    contract_data: UpdateSellerContractRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller cập nhật hợp đồng QC của mình (chỉ khi DRAFT)."""
+    _require_seller(current_user)
+
+    contract = db.query(PartnerContract).filter(
+        PartnerContract.id == contract_id,
+        PartnerContract.partner_id == current_user.id
+    ).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Hợp đồng không tồn tại hoặc không có quyền")
+
+    if contract.status != ContractStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Chỉ được chỉnh sửa hợp đồng ở trạng thái DRAFT")
+
+    update_data = contract_data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(contract, key, value)
+
+    db.commit()
+    db.refresh(contract)
+
+    return {
+        "success": True,
+        "message": "Đã cập nhật hợp đồng",
+        "data": {
+            "id": contract.id,
+            "contract_number": contract.contract_number,
+            "status": contract.status.value if hasattr(contract.status, 'value') else str(contract.status),
+        }
+    }
+
+
+@router.delete("/contracts/{contract_id}", summary="Seller xóa hợp đồng QC")
+async def delete_seller_contract(
+    contract_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller xóa hợp đồng QC (chỉ khi DRAFT)."""
+    _require_seller(current_user)
+
+    contract = db.query(PartnerContract).filter(
+        PartnerContract.id == contract_id,
+        PartnerContract.partner_id == current_user.id
+    ).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Hợp đồng không tồn tại hoặc không có quyền")
+
+    if contract.status != ContractStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Chỉ được xóa hợp đồng ở trạng thái DRAFT")
+
+    db.delete(contract)
+    db.commit()
+
+    return {"success": True, "message": "Đã xóa hợp đồng"}
+
+
+# ==============================================================================
+# SELLER RETURNS (Yêu cầu đổi trả thuộc đơn hàng của seller)
+# ==============================================================================
+
+@router.get("/returns", summary="Seller xem yêu cầu đổi trả")
+async def get_seller_returns(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo mã đơn hàng"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Seller xem danh sách yêu cầu đổi trả thuộc đơn hàng của mình."""
+    _require_seller(current_user)
+
+    # Lấy danh sách order_id của seller
+    seller_order_ids = [
+        o.id for o in db.query(Order.id).filter(Order.seller_id == current_user.id).all()
+    ]
+
+    query = db.query(ReturnRequest).filter(ReturnRequest.order_id.in_(seller_order_ids))
+    if status:
+        query = query.filter(ReturnRequest.status == status)
+
+    if search:
+        matching_orders = db.query(Order.id).filter(
+            Order.seller_id == current_user.id,
+            Order.order_number.ilike(f"%{search}%")
+        ).all()
+        matching_ids = [o.id for o in matching_orders]
+        query = query.filter(ReturnRequest.order_id.in_(matching_ids))
+
+    total = query.count()
+    skip = (page - 1) * limit
+    requests = query.order_by(ReturnRequest.created_at.desc()).offset(skip).limit(limit).all()
+
+    result = []
+    for r in requests:
+        user = db.query(User).filter(User.id == r.user_id).first()
+        order = db.query(Order).filter(Order.id == r.order_id).first()
+        result.append({
+            "id": r.id,
+            "order_id": r.order_id,
+            "order_number": order.order_number if order else None,
+            "customer_name": user.name if user else None,
+            "return_type": r.return_type.value if hasattr(r.return_type, "value") else r.return_type,
+            "reason": r.reason,
+            "status": r.status.value if hasattr(r.status, "value") else r.status,
+            "admin_note": r.admin_note,
+            "created_at": r.created_at.isoformat(),
+            "handled_at": r.handled_at.isoformat() if r.handled_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": result,
+        "meta": {"total": total, "page": page, "limit": limit, "total_pages": (total + limit - 1) // limit}
+    }
+
+
+class SellerReturnUpdateRequest(BaseModel):
+    note: Optional[str] = Field(None, max_length=500)
+    action: str = Field(..., pattern="^(ACCEPT|REJECT)$")
+
+
+@router.put("/returns/{return_id}", summary="Seller xử lý yêu cầu đổi trả")
+async def update_seller_return(
+    return_id: int,
+    return_data: SellerReturnUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Seller chấp nhận hoặc từ chối yêu cầu đổi trả.
+    Chỉ xử lý yêu cầu thuộc đơn hàng của seller.
+    """
+    _require_seller(current_user)
+
+    return_req = db.query(ReturnRequest).filter(ReturnRequest.id == return_id).first()
+    if not return_req:
+        raise HTTPException(status_code=404, detail="Yêu cầu đổi trả không tồn tại")
+
+    # Kiểm tra đơn hàng thuộc seller
+    order = db.query(Order).filter(
+        Order.id == return_req.order_id,
+        Order.seller_id == current_user.id
+    ).first()
+    if not order:
+        raise HTTPException(status_code=403, detail="Không có quyền xử lý yêu cầu này")
+
+    if return_req.status != ReturnStatus.PENDING:
+        raise HTTPException(status_code=400, detail="Chỉ xử lý yêu cầu ở trạng thái PENDING")
+
+    if return_data.action == "ACCEPT":
+        return_req.status = ReturnStatus.APPROVED
+        message = "Đã chấp nhận yêu cầu đổi trả"
+    else:
+        return_req.status = ReturnStatus.REJECTED
+        message = "Đã từ chối yêu cầu đổi trả"
+
+    return_req.admin_note = return_data.note
+    return_req.handled_by = current_user.id
+    return_req.handled_at = datetime.utcnow()
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": message,
+        "return_id": return_id,
+        "status": return_req.status.value if hasattr(return_req.status, "value") else str(return_req.status)
     }

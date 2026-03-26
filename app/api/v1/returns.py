@@ -110,6 +110,7 @@ async def get_my_return_requests(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo mã đơn hàng"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -117,6 +118,13 @@ async def get_my_return_requests(
     query = db.query(ReturnRequest).filter(ReturnRequest.user_id == current_user.id)
     if status:
         query = query.filter(ReturnRequest.status == status)
+    if search:
+        matching_orders = db.query(Order.id).filter(
+            Order.customer_id == current_user.id,
+            Order.order_number.ilike(f"%{search}%")
+        ).all()
+        matching_ids = [o.id for o in matching_orders]
+        query = query.filter(ReturnRequest.order_id.in_(matching_ids))
 
     total = query.count()
     skip = (page - 1) * limit
@@ -138,6 +146,41 @@ async def get_my_return_requests(
             for r in requests
         ],
         "meta": {"total": total, "page": page, "limit": limit}
+    }
+
+
+@router.put("/{return_id}/cancel", summary="Khách hàng hủy yêu cầu đổi/trả")
+async def cancel_return_request(
+    return_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Khách hàng hủy yêu cầu đổi/trả.
+    Chỉ hủy được khi yêu cầu đang ở trạng thái PENDING.
+    """
+    req = db.query(ReturnRequest).filter(
+        ReturnRequest.id == return_id,
+        ReturnRequest.user_id == current_user.id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại hoặc không phải của bạn")
+
+    if req.status != ReturnStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ hủy được yêu cầu ở trạng thái PENDING. Hiện tại: {req.status.value}"
+        )
+
+    req.status = ReturnStatus.CANCELLED
+    req.handled_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã hủy yêu cầu đổi/trả",
+        "return_id": return_id,
+        "status": "CANCELLED"
     }
 
 
@@ -282,3 +325,4 @@ async def mark_return_received(
         "return_id": return_id,
         "status": "RECEIVED"
     }
+

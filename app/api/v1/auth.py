@@ -7,8 +7,7 @@ from app.core.database import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from app.core.config import settings
 from app.models.user import User, UserRole
-from app.models.role import Role, RolePermission
-from app.models.permission import Permission
+from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
 import re
 
@@ -52,7 +51,6 @@ class UserInfoResponse(BaseModel):
     deleted_at: Optional[str]
     type: Optional[str]
     roles: list
-    permissions: list
     source_providers: list
 
     class Config:
@@ -277,7 +275,6 @@ async def get_current_user_info(
     # Get user roles
     user_roles = db.query(UserRole).filter(UserRole.user_id == user.id).all()
     roles_data = []
-    permission_ids = set()
     
     for user_role in user_roles:
         role = db.query(Role).filter(Role.id == user_role.role_id).first()
@@ -286,34 +283,6 @@ async def get_current_user_info(
                 "id": role.id,
                 "role_name": role.role_name,
                 "description": role.description
-            })
-            # Get permissions for this role
-            role_permissions = db.query(RolePermission).filter(
-                RolePermission.role_id == role.id
-            ).all()
-            for rp in role_permissions:
-                permission_ids.add(rp.permission_id)
-    
-    # Get all permissions
-    permissions_data = []
-    for perm_id in permission_ids:
-        perm = db.query(Permission).filter(Permission.id == perm_id).first()
-        if perm:
-            permissions_data.append({
-                "id": perm.id,
-                "parent_id": perm.parent_id,
-                "name": perm.name,
-                "label": perm.label,
-                "type": perm.type,
-                "route": perm.route,
-                "status": perm.status,
-                "order": perm.order,
-                "icon": perm.icon,
-                "component": perm.component,
-                "hide": perm.hide,
-                "hideTab": perm.hide_tab,
-                "frameSrc": perm.frame_src,
-                "newFeature": perm.new_feature
             })
     
     return StandardResponse(
@@ -333,7 +302,6 @@ async def get_current_user_info(
             "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
             "type": user.type,
             "roles": roles_data,
-            "permissions": permissions_data,
             "source_providers": []
         }
     )
@@ -375,6 +343,44 @@ async def refresh_token(
             "api_token": access_token,
             "token_type": "Bearer",
             "expires_at": expires_at.isoformat()
+        }
+    )
+
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+    gender: Optional[str] = None
+
+
+@router.put("/profile", response_model=StandardResponse)
+async def update_profile(
+    profile_data: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Cập nhật thông tin cá nhân (dùng chung cho Admin, Seller, Consumer)
+    """
+    update_data = profile_data.dict(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Không có dữ liệu để cập nhật")
+
+    for key, value in update_data.items():
+        setattr(current_user, key, value)
+
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(current_user)
+
+    return StandardResponse(
+        success=True,
+        message="Cập nhật thông tin cá nhân thành công",
+        data={
+            "id": current_user.id,
+            "email": current_user.email,
+            "name": current_user.name,
+            "gender": current_user.gender,
+            "type": current_user.type,
         }
     )
 

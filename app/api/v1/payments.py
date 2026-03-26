@@ -224,10 +224,11 @@ async def get_payments(
     status: Optional[str] = Query(None),
     customer_id: Optional[int] = Query(None),
     seller_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo order_id"),
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get list of payments with pagination"""
+    """Get list of payments with pagination and search"""
     query = db.query(Payment)
     
     if status:
@@ -236,6 +237,12 @@ async def get_payments(
         query = query.filter(Payment.customer_id == customer_id)
     if seller_id:
         query = query.filter(Payment.seller_id == seller_id)
+    if search:
+        try:
+            search_id = int(search)
+            query = query.filter(Payment.order_id == search_id)
+        except ValueError:
+            pass
     
     # Get total count
     total = query.count()
@@ -250,6 +257,7 @@ async def get_payments(
         limit=limit,
         data=[PaymentResponse.from_orm(p) for p in payments]
     )
+
 
 @router.get("/{payment_id}/status")
 async def get_payment_status(
