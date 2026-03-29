@@ -52,25 +52,8 @@ cp .env.example .env
 ```
 
 Cập nhật các giá trị trong `.env`:
+Hiện tại đang chạy production
 
-```env
-# Database Configuration
-DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.bfzxkojszxxjbfisocwt.supabase.co:5432/postgres
-DIRECT_URL=postgresql://postgres.bfzxkojszxxjbfisocwt:[YOUR-PASSWORD]@aws-1-ap-south-1.pooler.supabase.com:5432/postgres
-
-# JWT Configuration
-SECRET_KEY=your-secret-key-here-change-in-production
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# CORS Configuration
-CORS_ORIGINS=http://localhost:3000,http://localhost:5173
-
-# Application
-APP_NAME=CMS API
-APP_VERSION=1.0.0
-DEBUG=True
-```
 
 ### 5. Chạy database migrations
 
