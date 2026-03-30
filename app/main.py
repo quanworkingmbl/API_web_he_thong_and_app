@@ -9,6 +9,7 @@ from app.core.exceptions import (
     http_exception_handler,
     general_exception_handler,
 )
+from app.core.middleware import LoggingMiddleware, ApiSecretMiddleware
 from app.core.logging_config import setup_logging
 
 # Setup logging
@@ -29,7 +30,12 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
-# CORS Middleware
+# API Secret Header Middleware
+# NOTE: FastAPI/Starlette uses LIFO order — middleware added FIRST runs LAST.
+# So: ApiSecretMiddleware added first → CORSMiddleware added second → CORS runs first, then secret check.
+app.add_middleware(ApiSecretMiddleware)
+
+# CORS Middleware (added last → runs first, handles OPTIONS preflight before secret check)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
