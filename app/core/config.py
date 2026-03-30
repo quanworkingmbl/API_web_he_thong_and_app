@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: Union[bool, str] = True
 
+    # API Secret Header (X-Quan-Secret)
+    API_SECRET_KEY: str = "VLU15122004"
+
     # AWS S3 Storage
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
