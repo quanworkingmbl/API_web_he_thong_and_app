@@ -65,5 +65,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Bỏ qua các biến môi trường lạ (PORT, NODE_ENV từ Node.js...)
 
 settings = Settings()
