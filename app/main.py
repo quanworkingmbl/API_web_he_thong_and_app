@@ -20,9 +20,9 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     
-    docs_url="/docs" if settings.DEBUG else None,  # path Swagger UI 
-    redoc_url="/redoc" if settings.DEBUG else None,  # Hide redoc in production
-    openapi_url="/openapi.json" if settings.DEBUG else None,  # Hide openapi in production
+    docs_url="/docs" if settings.SHOW_DOCS else None,       # Dùng SHOW_DOCS, độc lập với DEBUG
+    redoc_url="/redoc" if settings.SHOW_DOCS else None,     # Dùng SHOW_DOCS, độc lập với DEBUG
+    openapi_url="/openapi.json" if settings.SHOW_DOCS else None,  # Dùng SHOW_DOCS, độc lập với DEBUG
 )
 
 # Exception handlers
