@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "CMS API"
     APP_VERSION: str = "1.0.0"
     DEBUG: Union[bool, str] = True
+    SHOW_DOCS: Union[bool, str] = True  # Hiển thị /docs, /redoc độc lập với DEBUG
 
     # API Secret Header (X-Quan-Secret)
     API_SECRET_KEY: str = "VLU15122004"
@@ -46,10 +47,10 @@ class Settings(BaseSettings):
     GHN_URL: str = "https://dev-online-gateway.ghn.vn/shiip/public-api"
 
     
-    @field_validator('DEBUG', mode='before')
+    @field_validator('DEBUG', 'SHOW_DOCS', mode='before')
     @classmethod
     def parse_debug(cls, v: Union[bool, str, int]) -> bool:
-        """Parse DEBUG from various formats"""
+        """Parse DEBUG/SHOW_DOCS từ nhiều kiểu dữ liệu"""
         if isinstance(v, bool):
             return v
         if isinstance(v, str):

@@ -27,7 +27,7 @@ class Product(Base):
     label = Column(String(50), nullable=True)  # CLEAN_AGRICULTURE, TRADITIONAL_CRAFT, OCOP
     images = Column(Text, nullable=True)  # JSON array of image URLs
     # Inventory management
-    stock_quantity = Column(Integer, default=0, nullable=False)
+    stock_quantity = Column(Integer, default=0, nullable=False) # Số lượng tồn kho
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
