@@ -61,12 +61,12 @@ class UpdateProductRequest(BaseModel):
 
 
 class ProductApprovalRequest(BaseModel):
-    product_id: int
     status: str  # APPROVED, REJECTED
     notes: Optional[str] = None
     checked_description: bool = False
     checked_price: bool = False
     checked_images: bool = False
+    # product_id lấy từ URL path, không cần trong body
 
 
 # ==============================================================================
