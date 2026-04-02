@@ -28,7 +28,7 @@ class Product(Base):
     images = Column(Text, nullable=True)  # JSON array of image URLs
     # Inventory management
     stock_quantity = Column(Integer, default=0, nullable=False) # Số lượng tồn kho
-    is_active = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)# Sản phẩm có đang được bán hay không 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
