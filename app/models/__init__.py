@@ -5,7 +5,7 @@ from app.models.media import Media
 from app.models.product import Product, ProductApproval
 from app.models.payment import Payment, PaymentTransaction
 from app.models.content import Content
-from app.models.complaint import Complaint, Review
+from app.models.complaint import Complaint, Review, ModerationStatus
 from app.models.partner_contract import PartnerContract
 from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
 from app.models.category import Category
@@ -17,6 +17,22 @@ from app.models.settlement import SellerWallet, Settlement, Payout, SettlementSt
 from app.models.traceability import ProductCertificate, ProductOrigin, CertificateStatus
 from app.models.seller_profile import SellerProfile, VerificationStatus, BusinessType
 from app.models.promotion import Promotion, PromotionType, PromotionStatus
+
+# New models for marketplace
+from app.models.store import Store
+from app.models.address import Address, AddressType, Province, District, Ward
+from app.models.order_package import OrderPackage, OrderPackageStatus
+from app.models.product_variant import (
+    ProductVariant, ProductOption, ProductOptionValue,
+    InventoryMovement, MovementType, StockReservation, ReservationStatus
+)
+from app.models.product_media import ProductMedia, MediaType
+from app.models.payment_method import PaymentProvider, PaymentMethodType, OrderAdjustment
+from app.models.promotion_usage import PromotionUsage, OrderPromotion
+from app.models.shipping_service import ShippingRate, ShippingServiceType
+from app.models.review_image import ReviewImage
+from app.models.settlement_item import SettlementItem
+from app.models.permission import Permission, RolePermission
 
 __all__ = [
     "User",
@@ -32,6 +48,7 @@ __all__ = [
     "Content",
     "Complaint",
     "Review",
+    "ModerationStatus",
     "PartnerContract",
     "Order",
     "OrderItem",
@@ -68,6 +85,35 @@ __all__ = [
     "Promotion",
     "PromotionType",
     "PromotionStatus",
+    # New marketplace models
+    "Store",
+    "Address",
+    "AddressType",
+    "Province",
+    "District",
+    "Ward",
+    "OrderPackage",
+    "OrderPackageStatus",
+    "ProductVariant",
+    "ProductOption",
+    "ProductOptionValue",
+    "InventoryMovement",
+    "MovementType",
+    "StockReservation",
+    "ReservationStatus",
+    "ProductMedia",
+    "MediaType",
+    "PaymentProvider",
+    "PaymentMethodType",
+    "OrderAdjustment",
+    "PromotionUsage",
+    "OrderPromotion",
+    "ShippingRate",
+    "ShippingServiceType",
+    "ReviewImage",
+    "SettlementItem",
+    "Permission",
+    "RolePermission",
 ]
 
 
