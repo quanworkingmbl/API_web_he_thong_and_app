@@ -31,11 +31,25 @@ class SellerProfile(Base):
     description = Column(Text, nullable=True)                   # Mô tả cơ sở
     address = Column(Text, nullable=True)                       # Địa chỉ cơ sở
 
+    # Địa chỉ chuẩn hóa theo hành chính
+    province_id = Column(Integer, nullable=True)
+    district_id = Column(Integer, nullable=True)
+    ward_id = Column(Integer, nullable=True)
+
+    # Thông tin thuế và pháp lý
+    tax_id = Column(String(50), nullable=True)                  # Mã số thuế
+    legal_representative = Column(String(255), nullable=True)   # Người đại diện pháp luật
+
     # Giấy tờ xác minh
     id_card_number = Column(String(20), nullable=True)          # CCCD / CMND
     id_card_front_url = Column(Text, nullable=True)             # Ảnh mặt trước CCCD
     id_card_back_url = Column(Text, nullable=True)              # Ảnh mặt sau CCCD
     business_license_url = Column(Text, nullable=True)          # Giấy phép kinh doanh
+    health_certificate_url = Column(Text, nullable=True)        # Giấy chứng nhận vệ sinh ATTP
+
+    # Liên hệ
+    hotline = Column(String(20), nullable=True)                 # Hotline hỗ trợ khách hàng
+    social_links = Column(Text, nullable=True)                  # JSON: Facebook, Zalo, etc.
 
     # Tài khoản ngân hàng
     bank_name = Column(String(255), nullable=True)

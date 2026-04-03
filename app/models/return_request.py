@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum, Numeric
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -27,13 +27,22 @@ class ReturnRequest(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True)  # Specific item
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     return_type = Column(SQLEnum(ReturnType), nullable=False, default=ReturnType.RETURN)
     reason = Column(Text, nullable=False)
     images = Column(Text, nullable=True)  # JSON array of image URLs làm chứng cứ
 
-    status = Column(SQLEnum(ReturnStatus), default=ReturnStatus.PENDING)
+    # Item details
+    quantity = Column(Integer, nullable=True)  # Số lượng đổi/trả
+    refund_amount = Column(Numeric(15, 2), nullable=True)  # Số tiền hoàn
+    resolution_option = Column(String(50), nullable=True)  # REFUND, EXCHANGE, STORE_CREDIT
+
+    # Pickup information
+    pickup_address = Column(Text, nullable=True)  # Địa chỉ lấy hàng trả
+
+    status = Column(SQLEnum(ReturnStatus), default=ReturnStatus.PENDING, index=True)
     admin_note = Column(Text, nullable=True)
     handled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     handled_at = Column(DateTime(timezone=True), nullable=True)

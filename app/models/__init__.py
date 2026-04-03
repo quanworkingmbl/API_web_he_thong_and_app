@@ -2,7 +2,7 @@ from app.models.user import User, UserRole, UserOrganization
 from app.models.role import Role
 from app.models.organization import Organization
 from app.models.media import Media
-from app.models.product import Product, ProductApproval
+from app.models.product import Product, ProductApproval, ProductLabel
 from app.models.payment import Payment, PaymentTransaction
 from app.models.content import Content
 from app.models.complaint import Complaint, Review
@@ -16,7 +16,19 @@ from app.models.return_request import ReturnRequest, ReturnType, ReturnStatus
 from app.models.settlement import SellerWallet, Settlement, Payout, SettlementStatus, PayoutStatus
 from app.models.traceability import ProductCertificate, ProductOrigin, CertificateStatus
 from app.models.seller_profile import SellerProfile, VerificationStatus, BusinessType
-from app.models.promotion import Promotion, PromotionType, PromotionStatus
+from app.models.promotion import Promotion, PromotionType, PromotionStatus, PromotionScope, PromotionChannel
+
+# New models
+from app.models.address import Address
+from app.models.store import Store
+from app.models.product_variant import ProductVariant, ProductOption, ProductOptionValue
+from app.models.inventory import ProductInventory, StockLog
+from app.models.product_media import ProductMedia
+from app.models.promotion_usage import PromotionUsage
+from app.models.sub_order import SubOrder, SubOrderItem, SubOrderStatus
+from app.models.warehouse import Warehouse
+from app.models.notification import Notification, NotificationStatus, NotificationType
+from app.models.audit_log import AuditLog
 
 __all__ = [
     "User",
@@ -27,6 +39,7 @@ __all__ = [
     "Media",
     "Product",
     "ProductApproval",
+    "ProductLabel",
     "Payment",
     "PaymentTransaction",
     "Content",
@@ -68,6 +81,27 @@ __all__ = [
     "Promotion",
     "PromotionType",
     "PromotionStatus",
+    "PromotionScope",
+    "PromotionChannel",
+    # New models
+    "Address",
+    "Store",
+    "ProductVariant",
+    "ProductOption",
+    "ProductOptionValue",
+    "ProductInventory",
+    "StockLog",
+    "ProductMedia",
+    "PromotionUsage",
+    "SubOrder",
+    "SubOrderItem",
+    "SubOrderStatus",
+    "Warehouse",
+    "Notification",
+    "NotificationStatus",
+    "NotificationType",
+    "AuditLog",
 ]
+
 
 
