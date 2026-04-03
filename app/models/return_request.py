@@ -26,21 +26,38 @@ class ReturnRequest(Base):
     __tablename__ = "return_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    # Item-level return support
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True, index=True)
 
     return_type = Column(SQLEnum(ReturnType), nullable=False, default=ReturnType.RETURN)
     reason = Column(Text, nullable=False)
     images = Column(Text, nullable=True)  # JSON array of image URLs làm chứng cứ
 
-    status = Column(SQLEnum(ReturnStatus), default=ReturnStatus.PENDING)
+    # Refund info
+    refund_amount = Column(String(20), nullable=True)  # Số tiền hoàn
+    refund_method = Column(String(50), nullable=True)  # ORIGINAL, BANK_TRANSFER, WALLET
+
+    # Seller return address
+    seller_return_address_id = Column(Integer, nullable=True)  # FK to addresses
+    return_shipping_code = Column(String(100), nullable=True)  # Mã vận đơn trả hàng
+
+    status = Column(SQLEnum(ReturnStatus), default=ReturnStatus.PENDING, index=True)
     admin_note = Column(Text, nullable=True)
+
+    # Approval tracking
     handled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     handled_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     order = relationship("Order", foreign_keys=[order_id])
     user = relationship("User", foreign_keys=[user_id])
+    order_item = relationship("OrderItem", foreign_keys=[order_item_id])
     handler = relationship("User", foreign_keys=[handled_by])
+    approver = relationship("User", foreign_keys=[approved_by])
