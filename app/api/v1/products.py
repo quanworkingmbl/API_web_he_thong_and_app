@@ -7,6 +7,7 @@ from app.models.product import Product, ProductApproval, ProductStatus, ProductL
 from app.models.category import Category
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
+from app.core.permissions import check_product_label_access
 from pydantic import BaseModel, Field
 from decimal import Decimal
 
@@ -363,11 +364,13 @@ async def update_product_label(
     Update product label
     Labels: CLEAN_AGRICULTURE, TRADITIONAL_CRAFT, OCOP
     """
+    check_product_label_access(current_user)
+
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    
+
     product.label = label
     db.commit()
-    
+
     return {"success": True, "message": "Product label updated successfully"}

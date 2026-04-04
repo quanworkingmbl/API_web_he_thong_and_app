@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.models.user import User
 from app.api.v1.auth import get_current_user
+from app.core.permissions import check_dashboard_access
 from pydantic import BaseModel
 from decimal import Decimal
 
@@ -55,6 +56,8 @@ async def get_dashboard_overview(
     """
     Tổng quan dashboard - hiển thị các thống kê chính của hệ thống
     """
+    check_dashboard_access(current_user)
+
     from app.models.user import User
     from app.models.product import Product, ProductStatus
     from app.models.order import Order, OrderStatus
@@ -127,6 +130,8 @@ async def get_revenue_stats(
     """
     Thống kê doanh thu theo thời gian
     """
+    check_dashboard_access(current_user)
+
     from app.models.order import Order, OrderStatus
 
     # Tính ngày bắt đầu dựa trên period
@@ -162,7 +167,7 @@ async def get_revenue_stats(
     }
 
 
-@router.get("/dashboard/products")  
+@router.get("/dashboard/products")
 async def get_product_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -170,6 +175,8 @@ async def get_product_stats(
     """
     Thống kê sản phẩm theo trạng thái và loại nhãn
     """
+    check_dashboard_access(current_user)
+
     from app.models.product import Product, ProductStatus, ProductLabel
     
     total = db.query(Product).count()
@@ -207,6 +214,8 @@ async def get_order_stats(
     """
     Thống kê đơn hàng
     """
+    check_dashboard_access(current_user)
+
     from app.models.order import Order, OrderStatus
 
     total = db.query(Order).count()
@@ -250,6 +259,8 @@ async def get_user_stats(
     """
     Thống kê người dùng theo loại và trạng thái
     """
+    check_dashboard_access(current_user)
+
     from app.models.user import User
     
     total = db.query(User).filter(User.deleted_at.is_(None)).count()
