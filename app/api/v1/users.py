@@ -5,6 +5,7 @@ from typing import Optional, List
 from app.core.database import get_db
 from app.models.user import User
 from app.api.v1.auth import get_current_user
+from app.core.permissions import check_user_manage_access
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 
@@ -57,6 +58,8 @@ async def get_users(
     db: Session = Depends(get_db)
 ):
     """Get list of users"""
+    check_user_manage_access(current_user)
+
     query = db.query(User).filter(User.deleted_at.is_(None))
     
     if model:
@@ -92,6 +95,8 @@ async def create_user(
     db: Session = Depends(get_db)
 ):
     """Create a new user"""
+    check_user_manage_access(current_user)
+
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
@@ -123,6 +128,8 @@ async def update_user(
     db: Session = Depends(get_db)
 ):
     """Update a user"""
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -151,6 +158,8 @@ async def get_user_by_id(
     db: Session = Depends(get_db)
 ):
     """Get user by ID"""
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(
         User.id == user_id,
         User.deleted_at.is_(None)
@@ -172,6 +181,8 @@ async def delete_user(
     Soft delete a user
     Không xóa vĩnh viễn, chỉ đánh dấu deleted_at
     """
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -199,6 +210,8 @@ async def activate_user(
     activated = 1: Kích hoạt
     activated = 0: Vô hiệu hóa
     """
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -224,6 +237,8 @@ async def assign_roles_to_user(
     Assign roles to a user
     Xóa tất cả roles cũ và gán roles mới
     """
+    check_user_manage_access(current_user)
+
     from app.models.user import UserRole
     from app.models.role import Role
     
@@ -266,6 +281,8 @@ async def get_user_roles(
     db: Session = Depends(get_db)
 ):
     """Get all roles assigned to a user"""
+    check_user_manage_access(current_user)
+
     from app.models.user import UserRole
     from app.models.role import Role
     
