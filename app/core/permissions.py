@@ -413,6 +413,60 @@ def check_product_label_access(user: User) -> None:
         )
 
 
+def check_role_manage_access(user: User) -> None:
+    """
+    Check if user can create/update/delete roles.
+    Only admin should manage roles.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_role_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Role management permission required (admin only)"
+        )
+
+
+def check_organization_manage_access(user: User) -> None:
+    """
+    Check if user can create/update/delete organizations.
+    Only admin should manage organizations.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_organization_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization management permission required (admin only)"
+        )
+
+
+def check_media_manage_access(user: User) -> None:
+    """
+    Check if user can delete media files.
+    Only admin or the uploader should delete media.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_media_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Media management permission required (admin only)"
+        )
+
+
 # ==============================================================================
 # HELPER UTILITIES
 # ==============================================================================

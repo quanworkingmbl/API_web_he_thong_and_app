@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.models.role import Role
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.core.permissions import check_role_manage_access
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -66,6 +67,8 @@ async def create_role(
     db: Session = Depends(get_db)
 ):
     """Create a new role"""
+    check_role_manage_access(current_user)
+
     existing_role = db.query(Role).filter(Role.role_name == role_data.role_name).first()
     if existing_role:
         raise HTTPException(status_code=400, detail="Role name already exists")
@@ -89,6 +92,8 @@ async def update_role(
     db: Session = Depends(get_db)
 ):
     """Update a role"""
+    check_role_manage_access(current_user)
+
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
@@ -109,6 +114,8 @@ async def delete_role(
     db: Session = Depends(get_db)
 ):
     """Delete a role"""
+    check_role_manage_access(current_user)
+
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")

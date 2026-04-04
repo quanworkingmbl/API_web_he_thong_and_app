@@ -7,6 +7,7 @@ from app.models.order import Order, OrderStatus
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.vnpay import vnpay_service
+from app.core.permissions import check_payment_config_access
 from pydantic import BaseModel
 from decimal import Decimal
 from datetime import datetime
@@ -305,6 +306,8 @@ async def process_refund(
     db: Session = Depends(get_db)
 ):
     """Process a refund"""
+    check_payment_config_access(current_user)
+
     payment = db.query(Payment).filter(Payment.id == refund_data.payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -348,6 +351,8 @@ async def update_platform_fee(
     db: Session = Depends(get_db)
 ):
     """Update platform fee percentage (global config)"""
+    check_payment_config_access(current_user)
+
     # This would typically be stored in a configuration table
     # For now, return success
     return {"message": f"Platform fee updated to {fee_percentage}%"}
@@ -359,6 +364,8 @@ async def update_payment_cycle(
     db: Session = Depends(get_db)
 ):
     """Update payment cycle (global config)"""
+    check_payment_config_access(current_user)
+
     # This would typically be stored in a configuration table
     return {"message": f"Payment cycle updated to {cycle}"}
 
