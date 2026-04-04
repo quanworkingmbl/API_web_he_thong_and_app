@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.models.partner_contract import PartnerContract, ContractStatus
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
+from app.core.permissions import check_contract_manage_access
 from pydantic import BaseModel, Field
 from datetime import datetime
 from decimal import Decimal
@@ -157,6 +158,8 @@ async def create_contract(
     db: Session = Depends(get_db)
 ):
     """Create a partner contract"""
+    check_contract_manage_access(current_user)
+
     # Check if contract number already exists
     existing = db.query(PartnerContract).filter(
         PartnerContract.contract_number == contract_data.contract_number
@@ -210,6 +213,8 @@ async def update_contract(
     db: Session = Depends(get_db)
 ):
     """Update a contract"""
+    check_contract_manage_access(current_user)
+
     contract = db.query(PartnerContract).filter(PartnerContract.id == contract_id).first()
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -247,6 +252,8 @@ async def delete_contract(
     db: Session = Depends(get_db)
 ):
     """Delete a contract"""
+    check_contract_manage_access(current_user)
+
     contract = db.query(PartnerContract).filter(PartnerContract.id == contract_id).first()
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
