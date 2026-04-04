@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.region import Region
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.core.permissions import check_region_manage_access
 from pydantic import BaseModel, Field
 import re
 
@@ -123,6 +124,8 @@ async def create_region(
     db: Session = Depends(get_db)
 ):
     """Create a new region"""
+    check_region_manage_access(current_user)
+
     # Check if name already exists
     existing = db.query(Region).filter(Region.name == region_data.name).first()
     if existing:
@@ -162,6 +165,8 @@ async def update_region(
     db: Session = Depends(get_db)
 ):
     """Update a region"""
+    check_region_manage_access(current_user)
+
     region = db.query(Region).filter(Region.id == region_id).first()
     if not region:
         raise HTTPException(status_code=404, detail="Region not found")
@@ -195,6 +200,8 @@ async def delete_region(
     db: Session = Depends(get_db)
 ):
     """Delete a region"""
+    check_region_manage_access(current_user)
+
     region = db.query(Region).filter(Region.id == region_id).first()
     if not region:
         raise HTTPException(status_code=404, detail="Region not found")
