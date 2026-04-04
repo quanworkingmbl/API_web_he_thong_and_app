@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.category import Category
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.core.permissions import check_category_manage_access
 from pydantic import BaseModel, Field
 import re
 
@@ -130,6 +131,8 @@ async def create_category(
     db: Session = Depends(get_db)
 ):
     """Create a new category"""
+    check_category_manage_access(current_user)
+
     # Check if name already exists
     existing = db.query(Category).filter(Category.name == category_data.name).first()
     if existing:
@@ -175,6 +178,8 @@ async def update_category(
     db: Session = Depends(get_db)
 ):
     """Update a category"""
+    check_category_manage_access(current_user)
+
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -216,6 +221,8 @@ async def delete_category(
     db: Session = Depends(get_db)
 ):
     """Delete a category"""
+    check_category_manage_access(current_user)
+
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
