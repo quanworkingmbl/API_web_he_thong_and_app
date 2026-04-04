@@ -6,6 +6,7 @@ from app.models.media import Media
 from app.api.v1.auth import get_current_user
 from app.models.user import User
 from app.core.config import settings
+from app.core.permissions import check_ownership
 from pydantic import BaseModel
 import os
 import uuid
@@ -195,6 +196,9 @@ async def delete_media(
     media = db.query(Media).filter(Media.id == media_id).first()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
+
+    # Check ownership - only the uploader or admin can delete
+    check_ownership(media.uploaded_by, current_user, allow_admin=True)
 
     # Xóa trên AWS S3
     try:
