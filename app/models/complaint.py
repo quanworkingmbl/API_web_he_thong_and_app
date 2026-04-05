@@ -113,7 +113,7 @@ class ComplaintComment(Base):
     id           = Column(Integer, primary_key=True, index=True)
     complaint_id = Column(Integer, ForeignKey("complaints.id"), nullable=False, index=True)
     author_id    = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    role         = Column(SQLEnum(CommentRole), nullable=False)   # buyer/seller/admin/system
+    role         = Column(String(20), nullable=False)   # buyer/seller/admin/system
     message      = Column(Text, nullable=False)
     attachments  = Column(Text, nullable=True)   # JSON array of image/file URLs
     is_internal  = Column(Boolean, default=False, nullable=False)  # True = chỉ admin/CS thấy
