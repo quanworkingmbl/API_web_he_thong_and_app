@@ -3,15 +3,25 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime
 from app.core.database import get_db
-from app.models.product import Product, ProductApproval, ProductStatus, ProductLabel
+from app.models.product import Product, ProductApproval, ProductStatus, ProductLabel, ProductPriceLog
 from app.models.category import Category
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
-from app.core.permissions import check_product_label_access
-from pydantic import BaseModel, Field
+from app.core.permissions import check_product_label_access, check_seller_kyc_verified
+from pydantic import BaseModel, Field, validator
 from decimal import Decimal
+import json
 
 router = APIRouter()
+
+# ==============================================================================
+# CONSTANTS FOR VALIDATION
+# ==============================================================================
+
+MIN_DESCRIPTION_LENGTH = 50
+MIN_IMAGES_COUNT = 1
+MAX_PRICE = Decimal("100000000")  # 100 triệu VND
+MIN_PRICE = Decimal("1000")  # 1000 VND
 
 
 # ==============================================================================
@@ -45,20 +55,41 @@ class ProductListResponse(BaseModel):
 class CreateProductRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     description: Optional[str] = None
-    price: Decimal = Field(..., ge=0)
+    price: Decimal = Field(..., gt=0)
     producer_id: int
     category_id: Optional[int] = None
     label: Optional[str] = None
     images: Optional[str] = None  # JSON array of image URLs
+    
+    @validator('price')
+    def validate_price(cls, v):
+        if v <= 0:
+            raise ValueError('Giá sản phẩm phải lớn hơn 0')
+        if v > MAX_PRICE:
+            raise ValueError(f'Giá sản phẩm không được vượt quá {MAX_PRICE:,.0f} VND')
+        if v < MIN_PRICE:
+            raise ValueError(f'Giá sản phẩm phải tối thiểu {MIN_PRICE:,.0f} VND')
+        return v
 
 
 class UpdateProductRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=255)
     description: Optional[str] = None
-    price: Optional[Decimal] = Field(None, ge=0)
+    price: Optional[Decimal] = Field(None, gt=0)
     category_id: Optional[int] = None
     label: Optional[str] = None
     images: Optional[str] = None
+    
+    @validator('price')
+    def validate_price(cls, v):
+        if v is not None:
+            if v <= 0:
+                raise ValueError('Giá sản phẩm phải lớn hơn 0')
+            if v > MAX_PRICE:
+                raise ValueError(f'Giá sản phẩm không được vượt quá {MAX_PRICE:,.0f} VND')
+            if v < MIN_PRICE:
+                raise ValueError(f'Giá sản phẩm phải tối thiểu {MIN_PRICE:,.0f} VND')
+        return v
 
 
 class ProductApprovalRequest(BaseModel):
@@ -68,6 +99,53 @@ class ProductApprovalRequest(BaseModel):
     checked_price: bool = False
     checked_images: bool = False
     # product_id lấy từ URL path, không cần trong body
+
+
+# ==============================================================================
+# HELPER FUNCTIONS FOR VALIDATION
+# ==============================================================================
+
+def validate_product_content(description: Optional[str], images: Optional[str], is_update: bool = False) -> List[str]:
+    """
+    Validate product content quality.
+    Returns list of validation errors.
+    """
+    errors = []
+    
+    # Validate description length
+    if description:
+        if len(description.strip()) < MIN_DESCRIPTION_LENGTH:
+            errors.append(f"Mô tả sản phẩm phải có ít nhất {MIN_DESCRIPTION_LENGTH} ký tự (hiện tại: {len(description.strip())} ký tự)")
+    elif not is_update:
+        errors.append(f"Mô tả sản phẩm là bắt buộc và phải có ít nhất {MIN_DESCRIPTION_LENGTH} ký tự")
+    
+    # Validate images count
+    if images:
+        try:
+            images_list = json.loads(images)
+            if isinstance(images_list, list):
+                if len(images_list) < MIN_IMAGES_COUNT:
+                    errors.append(f"Sản phẩm phải có ít nhất {MIN_IMAGES_COUNT} ảnh")
+            else:
+                errors.append("Định dạng ảnh không hợp lệ (phải là JSON array)")
+        except json.JSONDecodeError:
+            errors.append("Định dạng ảnh không hợp lệ (phải là JSON array)")
+    elif not is_update:
+        errors.append(f"Sản phẩm phải có ít nhất {MIN_IMAGES_COUNT} ảnh")
+    
+    return errors
+
+
+def log_price_change(db: Session, product_id: int, old_price: Decimal, new_price: Decimal, changed_by: int, reason: str = None):
+    """Log price change for audit purposes"""
+    price_log = ProductPriceLog(
+        product_id=product_id,
+        old_price=old_price,
+        new_price=new_price,
+        changed_by=changed_by,
+        reason=reason
+    )
+    db.add(price_log)
 
 
 # ==============================================================================
@@ -83,13 +161,36 @@ async def get_products(
     category_id: Optional[int] = Query(None),
     label: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    include_inactive: bool = Query(False, description="Include inactive products (admin/seller only)"),
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
-    Get list of products with pagination and filters
+    Get list of products with pagination and filters.
+    - Consumer: only sees is_active=True products
+    - Seller: can see their own inactive products with include_inactive=True
+    - Admin: can see all products with include_inactive=True
     """
     query = db.query(Product)
+
+    # Filter by is_active based on user role
+    if is_active is not None:
+        query = query.filter(Product.is_active == is_active)
+    elif not include_inactive:
+        # Default: only show active products for consumers
+        if not current_user or current_user.type not in ("admin", "producer", "seller"):
+            query = query.filter(Product.is_active == True)
+    elif include_inactive:
+        # Admin can see all, seller can only see their own inactive
+        if current_user and current_user.type in ("producer", "seller"):
+            # Seller: only include their own inactive products
+            query = query.filter(
+                (Product.is_active == True) | (Product.producer_id == current_user.id)
+            )
+        elif not current_user or current_user.type != "admin":
+            # Non-admin without auth: only active
+            query = query.filter(Product.is_active == True)
 
     if status:
         query = query.filter(Product.status == status)
@@ -183,8 +284,13 @@ async def create_product(
     Tạo sản phẩm mới.
     - **Admin**: có thể tạo cho bất kỳ producer nào (truyền `producer_id` trong body).
     - **Seller/Producer**: `producer_id` tự động gán = `current_user.id`, bỏ qua giá trị body.
+    - **KYC Required**: Seller phải được xác minh hồ sơ kinh doanh trước khi tạo sản phẩm.
     """
     is_admin = (current_user.type == "admin")
+    
+    # KYC check for non-admin users
+    if not is_admin:
+        check_seller_kyc_verified(current_user, db)
 
     if is_admin:
         # Admin chỉ định producer tùy ý
@@ -202,6 +308,11 @@ async def create_product(
         category = db.query(Category).filter(Category.id == product_data.category_id).first()
         if not category:
             raise HTTPException(status_code=400, detail="Category not found")
+    
+    # Validate content quality
+    content_errors = validate_product_content(product_data.description, product_data.images)
+    if content_errors:
+        raise HTTPException(status_code=400, detail="; ".join(content_errors))
 
     new_product = Product(
         name=product_data.name,
@@ -269,7 +380,27 @@ async def update_product(
         if not category:
             raise HTTPException(status_code=400, detail="Category not found")
 
+    # Validate content if description or images are being updated
     update_data = product_data.dict(exclude_unset=True)
+    
+    desc_to_check = update_data.get('description', product.description)
+    images_to_check = update_data.get('images', product.images)
+    
+    content_errors = validate_product_content(desc_to_check, images_to_check, is_update=True)
+    if content_errors:
+        raise HTTPException(status_code=400, detail="; ".join(content_errors))
+    
+    # Log price change if price is being updated
+    if 'price' in update_data and update_data['price'] != product.price:
+        log_price_change(
+            db=db,
+            product_id=product.id,
+            old_price=product.price,
+            new_price=update_data['price'],
+            changed_by=current_user.id,
+            reason="Cập nhật giá sản phẩm"
+        )
+    
     for key, value in update_data.items():
         setattr(product, key, value)
 
@@ -302,15 +433,92 @@ async def delete_product(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Delete a product"""
-    product = db.query(Product).filter(Product.id == product_id).first()
+    """
+    Delete a product.
+    - Nếu sản phẩm đã có đơn hàng: không cho xóa, chỉ cho ẩn (is_active=False)
+    - Admin có thể xóa bất kỳ sản phẩm nào (nếu chưa có đơn)
+    - Seller chỉ xóa sản phẩm của mình
+    """
+    is_admin = (current_user.type == "admin")
+    
+    query = db.query(Product).filter(Product.id == product_id)
+    if not is_admin:
+        query = query.filter(Product.producer_id == current_user.id)
+    
+    product = query.first()
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(
+            status_code=404, 
+            detail="Product not found" if is_admin else "Sản phẩm không tồn tại hoặc bạn không có quyền xóa"
+        )
+    
+    # Check if product has any orders
+    from app.models.order import Order
+    has_orders = db.query(Order).filter(Order.id.in_(
+        db.query(OrderItem.order_id).filter(OrderItem.product_id == product_id)
+    )).first() is not None if 'OrderItem' in dir() else False
+    
+    # Alternative: check via a simple subquery (assuming order_items table exists)
+    try:
+        from sqlalchemy import text
+        result = db.execute(
+            text("SELECT 1 FROM order_items WHERE product_id = :pid LIMIT 1"),
+            {"pid": product_id}
+        ).fetchone()
+        has_orders = result is not None
+    except Exception:
+        has_orders = False
+    
+    if has_orders:
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể xóa sản phẩm đã có đơn hàng. Vui lòng ẩn sản phẩm thay vì xóa (PUT /{product_id}/toggle-active)"
+        )
     
     db.delete(product)
     db.commit()
     
     return {"success": True, "message": "Product deleted successfully"}
+
+
+@router.put("/{product_id}/toggle-active")
+async def toggle_product_active(
+    product_id: int,
+    is_active: bool = Query(..., description="True = hiện, False = ẩn"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Ẩn/hiện sản phẩm (soft delete).
+    - Admin: toggle bất kỳ sản phẩm nào
+    - Seller: chỉ toggle sản phẩm của mình
+    """
+    is_admin = (current_user.type == "admin")
+    
+    query = db.query(Product).filter(Product.id == product_id)
+    if not is_admin:
+        query = query.filter(Product.producer_id == current_user.id)
+    
+    product = query.first()
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found" if is_admin else "Sản phẩm không tồn tại hoặc bạn không có quyền thay đổi"
+        )
+    
+    product.is_active = is_active
+    product.updated_at = datetime.utcnow()
+    db.commit()
+    
+    status_text = "hiển thị" if is_active else "ẩn"
+    return {
+        "success": True, 
+        "message": f"Sản phẩm đã được {status_text}",
+        "data": {
+            "product_id": product.id,
+            "is_active": product.is_active
+        }
+    }
 
 
 # ==============================================================================
@@ -324,7 +532,10 @@ async def approve_product(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Approve or reject a product"""
+    """
+    Approve or reject a product.
+    Kiểm tra KYC của seller trước khi duyệt.
+    """
     # Permission check: chỉ admin hoặc content_manager mới được duyệt sản phẩm
     if current_user.type not in ("admin", "content_manager"):
         raise HTTPException(status_code=403, detail="Không có quyền duyệt sản phẩm. Yêu cầu role: admin hoặc content_manager")
@@ -332,6 +543,19 @@ async def approve_product(
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Check if seller is KYC verified before approving
+    if approval_data.status == "APPROVED":
+        from app.models.seller_profile import SellerProfile, VerificationStatus
+        seller_profile = db.query(SellerProfile).filter(
+            SellerProfile.user_id == product.producer_id
+        ).first()
+        
+        if not seller_profile or seller_profile.verification_status != VerificationStatus.VERIFIED:
+            raise HTTPException(
+                status_code=400,
+                detail="Không thể duyệt sản phẩm: Seller chưa được xác minh hồ sơ kinh doanh (KYC)"
+            )
     
     # Update product status
     product.status = approval_data.status

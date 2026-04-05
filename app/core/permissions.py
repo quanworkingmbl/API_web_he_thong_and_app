@@ -489,3 +489,59 @@ def is_consumer(user: User) -> bool:
 def is_content_manager(user: User) -> bool:
     """Check if user is content manager (non-raising version)"""
     return user.type == "content_manager"
+
+
+# ==============================================================================
+# KYC VERIFICATION CHECK
+# ==============================================================================
+
+def check_seller_kyc_verified(user: User, db) -> None:
+    """
+    Check if seller has completed KYC verification.
+    Blocks unverified sellers from creating/publishing products.
+    
+    Args:
+        user: Current authenticated user
+        db: Database session
+    
+    Raises:
+        HTTPException 403: If seller is not KYC verified
+    
+    Usage:
+        check_seller_kyc_verified(current_user, db)
+    """
+    # Admin bypasses KYC check
+    if user.type == "admin":
+        return
+    
+    # Only check for seller/producer types
+    if user.type not in {"producer", "seller"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only sellers can perform this action"
+        )
+    
+    # Import here to avoid circular import
+    from app.models.seller_profile import SellerProfile, VerificationStatus
+    
+    seller_profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == user.id
+    ).first()
+    
+    if not seller_profile:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn chưa có hồ sơ kinh doanh. Vui lòng hoàn tất đăng ký seller trước khi tạo sản phẩm."
+        )
+    
+    if seller_profile.verification_status == VerificationStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hồ sơ kinh doanh đang chờ xét duyệt. Vui lòng chờ admin phê duyệt trước khi tạo sản phẩm."
+        )
+    
+    if seller_profile.verification_status == VerificationStatus.REJECTED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Hồ sơ kinh doanh đã bị từ chối. Lý do: {seller_profile.rejection_reason or 'Không có lý do'}. Vui lòng cập nhật hồ sơ và gửi lại."
+        )

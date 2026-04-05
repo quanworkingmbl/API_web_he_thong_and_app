@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional, List
 from app.core.database import get_db
-from app.models.user import User
+from app.models.user import User, UserStatus
 from app.api.v1.auth import get_current_user
 from app.core.permissions import check_user_manage_access
 from pydantic import BaseModel, EmailStr
@@ -17,6 +17,9 @@ class UserResponse(BaseModel):
     name: str
     gender: Optional[str]
     activated: int
+    status: str
+    status_reason: Optional[str]
+    status_expire_at: Optional[datetime]
     created_by: Optional[str]
     updated_by: Optional[str]
     created_at: datetime
@@ -46,6 +49,12 @@ class UpdateUserRequest(BaseModel):
     gender: Optional[str] = None
     type: Optional[str] = None
     activated: Optional[int] = None
+
+class UpdateUserStatusRequest(BaseModel):
+    status: str = Field(..., description="User status: ACTIVE, SUSPENDED, BANNED")
+    status_reason: Optional[str] = Field(None, description="Reason for status change")
+    status_expire_at: Optional[datetime] = Field(None, description="Expiration time for SUSPENDED status")
+
 
 @router.get("", response_model=UserListResponse)
 async def get_users(
@@ -301,3 +310,68 @@ async def get_user_roles(
             for role in roles
         ]
     }
+
+
+@router.put("/{user_id}/status")
+async def update_user_status(
+    user_id: int,
+    status_data: UpdateUserStatusRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update user account status (ACTIVE, SUSPENDED, BANNED)
+    Admin only endpoint
+    Prevents self-ban/self-suspend
+    """
+    check_user_manage_access(current_user)
+
+    # Validate status value
+    try:
+        new_status = UserStatus[status_data.status.upper()]
+    except KeyError:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid status. Must be one of: ACTIVE, SUSPENDED, BANNED"
+        )
+    
+    # Find target user
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent self-ban/self-suspend
+    if user.id == current_user.id and new_status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400, 
+            detail="You cannot suspend or ban yourself"
+        )
+    
+    # Validate SUSPENDED requires expire time
+    if new_status == UserStatus.SUSPENDED and not status_data.status_expire_at:
+        raise HTTPException(
+            status_code=400,
+            detail="status_expire_at is required for SUSPENDED status (or use BANNED for permanent)"
+        )
+    
+    # Update status
+    user.status = new_status
+    user.status_reason = status_data.status_reason
+    user.status_expire_at = status_data.status_expire_at if new_status == UserStatus.SUSPENDED else None
+    user.updated_by = current_user.email
+    user.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "success": True,
+        "message": f"User status updated to {new_status.value}",
+        "data": {
+            "user_id": user.id,
+            "status": user.status.value,
+            "status_reason": user.status_reason,
+            "status_expire_at": user.status_expire_at.isoformat() if user.status_expire_at else None
+        }
+    }
+

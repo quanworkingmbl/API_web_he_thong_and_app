@@ -6,7 +6,7 @@ from typing import Optional
 from app.core.database import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from app.core.config import settings
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserStatus
 from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
 import re
@@ -43,6 +43,9 @@ class UserInfoResponse(BaseModel):
     name: str
     gender: Optional[str]
     activated: int
+    status: str
+    status_reason: Optional[str]
+    status_expire_at: Optional[str]
     created_by: Optional[str]
     updated_by: Optional[str]
     created_at: str
@@ -72,6 +75,39 @@ def get_bearer_token(credentials: HTTPAuthorizationCredentials = Depends(securit
             headers={"WWW-Authenticate": "Bearer"},
         )
     return credentials.credentials
+
+def check_user_status(user: User) -> None:
+    """
+    Check user account status and raise appropriate exception if suspended or banned
+    
+    Raises:
+        HTTPException 403: If user is SUSPENDED (and not expired) or BANNED
+    """
+    if user.status == UserStatus.BANNED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Account has been permanently banned. Reason: {user.status_reason or 'No reason provided'}"
+        )
+    
+    if user.status == UserStatus.SUSPENDED:
+        # Check if suspension has expired
+        if user.status_expire_at:
+            if datetime.utcnow() < user.status_expire_at:
+                # Still suspended
+                expire_str = user.status_expire_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Account is suspended until {expire_str}. Reason: {user.status_reason or 'No reason provided'}"
+                )
+            # Suspension expired - should auto-reactivate but we'll just allow login
+            # Admin should have a cron job to auto-reactivate expired suspensions
+        else:
+            # Suspended indefinitely
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Account is suspended indefinitely. Reason: {user.status_reason or 'No reason provided'}"
+            )
+
 
 def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depends(get_db)):
     """Get current authenticated user from Bearer token in header"""
@@ -112,6 +148,9 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is not activated",
         )
+    
+    # Check user status (BANNED/SUSPENDED)
+    check_user_status(user)
     
     return user
 
@@ -236,6 +275,9 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
             detail="User account is not activated. Please contact administrator."
         )
     
+    # Check user status (BANNED/SUSPENDED)
+    check_user_status(user)
+    
     expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": str(user.id), "email": user.email},
@@ -294,6 +336,9 @@ async def get_current_user_info(
             "name": user.name,
             "gender": user.gender,
             "activated": user.activated,
+            "status": user.status.value,
+            "status_reason": user.status_reason,
+            "status_expire_at": user.status_expire_at.isoformat() if user.status_expire_at else None,
             "created_by": user.created_by,
             "updated_by": user.updated_by,
             "created_at": user.created_at.isoformat() if user.created_at else "",

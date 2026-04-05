@@ -1,10 +1,10 @@
 -- ============================================================================
 -- RESET & SEED DATABASE - PostgreSQL RDS AWS
--- Cập nhật: 2026-04-05 – Khớp với schema thực tế (alembic models)
+-- Cập nhật: 2026-04-05 – Tích hợp đầy đủ schema mới:
+--   Order Security, Complaint Management, Payment Management
 --
--- CÁCH DÙNG (sau khi alembic upgrade head đã chạy xong):
---   Chạy TOÀN BỘ file này trong pgAdmin / DBeaver
---   (bảng đã tồn tại → chỉ cần TRUNCATE rồi INSERT)
+-- CÁCH DÙNG: Chạy TOÀN BỘ file này trong pgAdmin / DBeaver
+--   File tự tạo enum/bảng mới nếu chưa có (idempotent schema)
 -- ============================================================================
 
 
@@ -13,6 +13,10 @@
 -- ############################################################################
 
 TRUNCATE TABLE
+    payment_audit_logs,
+    complaint_status_logs,
+    complaint_comments,
+    order_status_logs,
     return_requests,
     product_origins,
     product_certificates,
@@ -44,6 +48,120 @@ TRUNCATE TABLE
     roles,
     organizations
 RESTART IDENTITY CASCADE;
+
+
+-- ############################################################################
+-- BƯỚC 1.5: ĐẢM BẢO ENUM TYPES & SCHEMA MỚI (idempotent)
+-- ############################################################################
+
+DO $$ BEGIN
+    CREATE TYPE complaintcategory AS ENUM
+        ('DELIVERY','QUALITY','REFUND','FRAUD','SERVICE','OTHER');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE complaintpriority AS ENUM
+        ('LOW','MEDIUM','HIGH','URGENT');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE commentrole AS ENUM
+        ('buyer','seller','admin','system');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER TYPE paymentstatus ADD VALUE IF NOT EXISTS 'PARTIAL_REFUNDED';
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+-- Cột mới cho orders
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE INDEX IF NOT EXISTS ix_orders_is_active ON orders (is_active);
+
+-- Cột mới cho complaints
+ALTER TABLE complaints
+    ADD COLUMN IF NOT EXISTS category        complaintcategory NOT NULL DEFAULT 'OTHER',
+    ADD COLUMN IF NOT EXISTS priority        complaintpriority NOT NULL DEFAULT 'MEDIUM',
+    ADD COLUMN IF NOT EXISTS images          TEXT,
+    ADD COLUMN IF NOT EXISTS resolution_type VARCHAR(30),
+    ADD COLUMN IF NOT EXISTS return_request_id INTEGER REFERENCES return_requests(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS assigned_at       TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS resolved_at       TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS closed_at         TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS ix_complaints_category ON complaints (category);
+CREATE INDEX IF NOT EXISTS ix_complaints_priority ON complaints (priority);
+
+-- Cột mới cho payments
+ALTER TABLE payments
+    ADD COLUMN IF NOT EXISTS vnpay_transaction_no VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS vnpay_response_code  VARCHAR(10),
+    ADD COLUMN IF NOT EXISTS vnpay_bank_code       VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS amount_from_gateway   NUMERIC(15,2),
+    ADD COLUMN IF NOT EXISTS amount_mismatch       BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS refunded_amount       NUMERIC(15,2),
+    ADD COLUMN IF NOT EXISTS refund_note           TEXT,
+    ADD COLUMN IF NOT EXISTS refunded_at           TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS ix_payments_vnpay_transaction_no ON payments (vnpay_transaction_no);
+
+-- Cột mới cho payment_transactions
+ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway_ref VARCHAR(255);
+
+-- Bảng mới
+CREATE TABLE IF NOT EXISTS order_status_logs (
+    id         SERIAL PRIMARY KEY,
+    order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    old_status VARCHAR(30),
+    new_status VARCHAR(30) NOT NULL,
+    actor_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    role       VARCHAR(30),
+    note       TEXT,
+    timestamp  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_order_status_logs_id       ON order_status_logs (id);
+CREATE INDEX IF NOT EXISTS ix_order_status_logs_order_id ON order_status_logs (order_id);
+
+CREATE TABLE IF NOT EXISTS complaint_comments (
+    id           SERIAL PRIMARY KEY,
+    complaint_id INTEGER NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+    author_id    INTEGER NOT NULL REFERENCES users(id)     ON DELETE SET NULL,
+    role         commentrole NOT NULL,
+    message      TEXT NOT NULL,
+    attachments  TEXT,
+    is_internal  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_complaint_comments_id           ON complaint_comments (id);
+CREATE INDEX IF NOT EXISTS ix_complaint_comments_complaint_id ON complaint_comments (complaint_id);
+
+CREATE TABLE IF NOT EXISTS complaint_status_logs (
+    id           SERIAL PRIMARY KEY,
+    complaint_id INTEGER NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+    old_status   VARCHAR(30),
+    new_status   VARCHAR(30) NOT NULL,
+    actor_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    note         TEXT,
+    timestamp    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_complaint_status_logs_id           ON complaint_status_logs (id);
+CREATE INDEX IF NOT EXISTS ix_complaint_status_logs_complaint_id ON complaint_status_logs (complaint_id);
+
+CREATE TABLE IF NOT EXISTS payment_audit_logs (
+    id         SERIAL PRIMARY KEY,
+    payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+    action     VARCHAR(50) NOT NULL,
+    actor_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    amount     NUMERIC(15,2),
+    note       TEXT,
+    ip_address VARCHAR(50),
+    user_agent VARCHAR(500),
+    timestamp  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_payment_audit_logs_id         ON payment_audit_logs (id);
+CREATE INDEX IF NOT EXISTS ix_payment_audit_logs_payment_id ON payment_audit_logs (payment_id);
 
 
 -- ############################################################################
@@ -213,32 +331,51 @@ INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone
     seller_id, subtotal, shipping_fee, discount_amount, total_amount,
     platform_fee_percentage, platform_fee_amount, seller_amount,
     status, payment_method, payment_status, currency,
-    confirmed_at, shipped_at, delivered_at, created_at) VALUES
+    confirmed_at, shipped_at, delivered_at, created_at, is_active) VALUES
 (1, 'ORD-2026-001', 6, 'Hoàng Văn Em',  '0912345678', 'customer1@example.com',
     '123 Đường ABC, Phường Hàng Bạc', 'Hà Nội',      'Hoàn Kiếm',    'Hàng Bạc',
     3, 60000.00, 25000.00, 0.00, 85000.00, 5.00, 4250.00, 80750.00,
     'DELIVERED', 'COD', 'paid', 'VND',
-    NOW()-INTERVAL '5 days', NOW()-INTERVAL '4 days', NOW()-INTERVAL '2 days', NOW()-INTERVAL '6 days'),
+    NOW()-INTERVAL '5 days', NOW()-INTERVAL '4 days', NOW()-INTERVAL '2 days', NOW()-INTERVAL '6 days', TRUE),
 (2, 'ORD-2026-002', 7, 'Đỗ Thị Phương', '0987654321', 'customer2@example.com',
     '456 Đường DEF, Phường Bến Nghé', 'Hồ Chí Minh', 'Quận 1',       'Bến Nghé',
     4, 350000.00, 30000.00, 10000.00, 370000.00, 5.00, 18500.00, 351500.00,
     'SHIPPING', 'BANK_TRANSFER', 'paid', 'VND',
-    NOW()-INTERVAL '3 days', NOW()-INTERVAL '2 days', NULL, NOW()-INTERVAL '4 days'),
+    NOW()-INTERVAL '3 days', NOW()-INTERVAL '2 days', NULL, NOW()-INTERVAL '4 days', TRUE),
 (3, 'ORD-2026-003', 6, 'Hoàng Văn Em',  '0912345678', 'customer1@example.com',
     '123 Đường ABC, Phường Hàng Bạc', 'Hà Nội',      'Hoàn Kiếm',    'Hàng Bạc',
     5, 450000.00, 25000.00, 0.00, 475000.00, 5.00, 23750.00, 451250.00,
     'PROCESSING', 'MOMO', 'paid', 'VND',
-    NOW()-INTERVAL '1 day', NULL, NULL, NOW()-INTERVAL '2 days'),
+    NOW()-INTERVAL '1 day', NULL, NULL, NOW()-INTERVAL '2 days', TRUE),
 (4, 'ORD-2026-004', 8, 'Vũ Minh Quân',  '0901234567', 'customer3@example.com',
     '789 Đường GHI, Phường Mỹ An',   'Đà Nẵng',     'Ngũ Hành Sơn', 'Mỹ An',
     3, 215000.00, 20000.00, 0.00, 235000.00, 5.00, 11750.00, 223250.00,
     'CONFIRMED', 'VNPAY', 'paid', 'VND',
-    NOW(), NULL, NULL, NOW()-INTERVAL '12 hours'),
+    NOW(), NULL, NULL, NOW()-INTERVAL '12 hours', TRUE),
 (5, 'ORD-2026-005', 7, 'Đỗ Thị Phương', '0987654321', 'customer2@example.com',
     '456 Đường DEF, Phường Bến Nghé', 'Hồ Chí Minh', 'Quận 1',       'Bến Nghé',
     4, 280000.00, 30000.00, 0.00, 310000.00, 5.00, 15500.00, 294500.00,
     'PENDING', 'COD', 'unpaid', 'VND',
-    NULL, NULL, NULL, NOW()-INTERVAL '3 hours');
+    NULL, NULL, NULL, NOW()-INTERVAL '3 hours', TRUE);
+
+-- ============================================================================
+-- 12b. ORDER_STATUS_LOGS
+-- ============================================================================
+INSERT INTO order_status_logs (order_id, old_status, new_status, actor_id, role, note, timestamp) VALUES
+(1, NULL,         'PENDING',    6, 'consumer', 'Đặt hàng qua mobile app. Phương thức: COD',              NOW()-INTERVAL '6 days'),
+(1, 'PENDING',    'CONFIRMED',  3, 'seller',   'Seller xác nhận đơn hàng',                               NOW()-INTERVAL '5 days 22 hours'),
+(1, 'CONFIRMED',  'PROCESSING', 3, 'seller',   'Đang chuẩn bị hàng',                                    NOW()-INTERVAL '5 days 20 hours'),
+(1, 'PROCESSING', 'SHIPPING',   3, 'seller',   'Tạo vận đơn GHN, tracking: GHN-VN-7654321',             NOW()-INTERVAL '4 days'),
+(1, 'SHIPPING',   'DELIVERED',  NULL,'system', 'Cập nhật tự động từ GHN webhook',                        NOW()-INTERVAL '2 days'),
+(2, NULL,         'PENDING',    7, 'consumer', 'Đặt hàng qua mobile app. Phương thức: BANK_TRANSFER',    NOW()-INTERVAL '4 days'),
+(2, 'PENDING',    'CONFIRMED',  4, 'seller',   'Seller xác nhận đơn hàng',                               NOW()-INTERVAL '3 days 20 hours'),
+(2, 'CONFIRMED',  'SHIPPING',   4, 'seller',   'Tạo vận đơn GHTK, tracking: GHTK-VN-8765432',           NOW()-INTERVAL '2 days'),
+(3, NULL,         'PENDING',    6, 'consumer', 'Đặt hàng qua mobile app. Phương thức: MOMO',             NOW()-INTERVAL '2 days'),
+(3, 'PENDING',    'CONFIRMED',  5, 'seller',   'Seller xác nhận đơn hàng',                               NOW()-INTERVAL '1 day 20 hours'),
+(3, 'CONFIRMED',  'PROCESSING', 5, 'seller',   'Đang chuẩn bị hàng',                                    NOW()-INTERVAL '1 day'),
+(4, NULL,         'PENDING',    8, 'consumer', 'Đặt hàng qua mobile app. Phương thức: VNPAY',            NOW()-INTERVAL '12 hours'),
+(4, 'PENDING',    'CONFIRMED',  3, 'seller',   'Seller xác nhận đơn hàng',                               NOW()-INTERVAL '11 hours'),
+(5, NULL,         'PENDING',    7, 'consumer', 'Đặt hàng qua mobile app. Phương thức: COD',              NOW()-INTERVAL '3 hours');
 
 -- ============================================================================
 -- 13. ORDER_ITEMS
@@ -265,21 +402,34 @@ INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantit
 -- NOTE: Bỏ các cột cũ không dùng; payment_method_id để NULL
 -- ============================================================================
 INSERT INTO payments (id, order_id, customer_id, seller_id, amount, currency,
-    platform_fee_percentage, platform_fee_amount, seller_amount, status, payment_cycle) VALUES
-(1, 1, 6, 3,  85000.00, 'VND', 5.00,  4250.00,  80750.00, 'COMPLETED', 'WEEKLY'),
-(2, 2, 7, 4, 370000.00, 'VND', 5.00, 18500.00, 351500.00, 'COMPLETED', 'WEEKLY'),
-(3, 3, 6, 5, 475000.00, 'VND', 5.00, 23750.00, 451250.00, 'PENDING',   'MONTHLY'),
-(4, 4, 8, 3, 235000.00, 'VND', 5.00, 11750.00, 223250.00, 'COMPLETED', 'WEEKLY');
+    platform_fee_percentage, platform_fee_amount, seller_amount, status, payment_cycle,
+    vnpay_transaction_no, vnpay_response_code, vnpay_bank_code, amount_from_gateway, amount_mismatch) VALUES
+(1, 1, 6, 3,  85000.00, 'VND', 5.00,  4250.00,  80750.00, 'COMPLETED', 'WEEKLY',  NULL, NULL, NULL, NULL, FALSE),
+(2, 2, 7, 4, 370000.00, 'VND', 5.00, 18500.00, 351500.00, 'COMPLETED', 'WEEKLY',  NULL, NULL, NULL, NULL, FALSE),
+(3, 3, 6, 5, 475000.00, 'VND', 5.00, 23750.00, 451250.00, 'PENDING',   'MONTHLY', NULL, NULL, NULL, NULL, FALSE),
+(4, 4, 8, 3, 235000.00, 'VND', 5.00, 11750.00, 223250.00, 'COMPLETED', 'WEEKLY',
+    'VNP-TXN-20260405-004', '00', 'NCB', 235000.00, FALSE);
 
 -- ============================================================================
 -- 15. PAYMENT_TRANSACTIONS
 -- Columns: payment_id, transaction_type, amount, status, notes, created_at
 -- ============================================================================
-INSERT INTO payment_transactions (payment_id, transaction_type, amount, status, notes, created_at) VALUES
-(1, 'payment',  85000.00, 'COMPLETED', 'Thanh toán COD đơn ORD-2026-001',          NOW()-INTERVAL '2 days'),
-(2, 'payment', 370000.00, 'COMPLETED', 'Thanh toán chuyển khoản đơn ORD-2026-002', NOW()-INTERVAL '2 days'),
-(3, 'payment', 475000.00, 'PENDING',   'Thanh toán MoMo đơn ORD-2026-003',         NOW()),
-(4, 'payment', 235000.00, 'COMPLETED', 'Thanh toán VNPay đơn ORD-2026-004',        NOW());
+INSERT INTO payment_transactions (payment_id, transaction_type, amount, status, notes, gateway_ref, created_at) VALUES
+(1, 'payment',  85000.00, 'COMPLETED', 'Thanh toán COD đơn ORD-2026-001',          NULL,                    NOW()-INTERVAL '2 days'),
+(2, 'payment', 370000.00, 'COMPLETED', 'Thanh toán chuyển khoản đơn ORD-2026-002', NULL,                    NOW()-INTERVAL '2 days'),
+(3, 'payment', 475000.00, 'PENDING',   'Thanh toán MoMo đơn ORD-2026-003',         NULL,                    NOW()),
+(4, 'payment', 235000.00, 'COMPLETED', 'Thanh toán VNPay đơn ORD-2026-004',        'VNP-TXN-20260405-004', NOW());
+
+-- ============================================================================
+-- 15b. PAYMENT_AUDIT_LOGS
+-- ============================================================================
+INSERT INTO payment_audit_logs (payment_id, action, actor_id, amount, note, ip_address, timestamp) VALUES
+(1,    'IPN_RECEIVED',  NULL, 85000.00,  'COD thu tiền khi giao hàng. GHN webhook DELIVERED.',              NULL,            NOW()-INTERVAL '2 days'),
+(2,    'IPN_RECEIVED',  NULL, 370000.00, 'BANK_TRANSFER xác nhận. txn=BANK-TXN-002, bank=BIDV',             NULL,            NOW()-INTERVAL '2 days'),
+(4,    'VNPAY_RETURN',  NULL, 235000.00, 'return url. code=00, mismatch=False. txn=VNP-TXN-20260405-004',   '192.168.1.100', NOW()),
+(4,    'IPN_RECEIVED',  NULL, 235000.00, 'txn=VNP-TXN-20260405-004, code=00, bank=NCB',                     NULL,            NOW()),
+(NULL, 'CONFIG_FEE',    1,    NULL,      'Set platform fee = 5%',                                            '127.0.0.1',    NOW()-INTERVAL '60 days'),
+(NULL, 'CONFIG_CYCLE',  1,    NULL,      'Set payment cycle = WEEKLY',                                       '127.0.0.1',    NOW()-INTERVAL '60 days');
 
 -- ============================================================================
 -- 16. PARTNER_CONTRACTS
@@ -300,15 +450,42 @@ INSERT INTO partner_contracts (id, contract_number, partner_id, contract_type,
 -- 17. COMPLAINTS
 -- ============================================================================
 INSERT INTO complaints (product_id, order_id, user_id, complaint_type,
-    title, description, status, handled_by, resolution) VALUES
+    category, priority, title, description, status, handled_by, resolution,
+    assigned_at, first_response_at, resolved_at) VALUES
 (7, NULL, 6, 'PRODUCT_QUALITY',
+    'QUALITY', 'MEDIUM',
     'Sản phẩm giỏ đan tre chưa được duyệt',
     'Tôi muốn mua giỏ đan tre nhưng sản phẩm chưa được duyệt để đặt hàng',
-    'RESOLVED', 2, 'Đã liên hệ người bán để bổ sung ảnh và hoàn thiện thông tin'),
+    'RESOLVED', 2, 'Đã liên hệ người bán để bổ sung ảnh và hoàn thiện thông tin',
+    NOW()-INTERVAL '8 days', NOW()-INTERVAL '7 days', NOW()-INTERVAL '6 days'),
 (NULL, 2, 7, 'DELIVERY',
+    'DELIVERY', 'HIGH',
     'Đơn hàng giao chậm hơn dự kiến',
     'Đơn ORD-2026-002 đã 2 ngày chưa thấy cập nhật trạng thái vận chuyển',
-    'IN_PROGRESS', 2, NULL);
+    'IN_PROGRESS', 2, NULL,
+    NOW()-INTERVAL '2 days', NOW()-INTERVAL '1 day', NULL);
+
+-- ============================================================================
+-- 17b. COMPLAINT_COMMENTS & COMPLAINT_STATUS_LOGS
+-- ============================================================================
+INSERT INTO complaint_comments (complaint_id, author_id, role, message, is_internal, created_at) VALUES
+(1, 6, 'buyer',  'Tôi muốn mua giỏ đan tre nhưng thấy sản phẩm chưa được duyệt. Khi nào có thể mua?', FALSE, NOW()-INTERVAL '8 days'),
+(1, 2, 'admin',  'Chúng tôi đã liên hệ với người bán và yêu cầu bổ sung ảnh sản phẩm.',               FALSE, NOW()-INTERVAL '7 days'),
+(1, 2, 'admin',  '[Ghi chú nội bộ] Seller5 đã được nhắc nhở. Hạn bổ sung: 3 ngày.',                   TRUE,  NOW()-INTERVAL '7 days'),
+(1, 6, 'buyer',  'Cảm ơn, tôi sẽ chờ thêm.',                                                          FALSE, NOW()-INTERVAL '6 days'),
+(2, 7, 'buyer',  'Đơn ORD-2026-002 giao từ 2 ngày trước mà vẫn chưa đến. Tracking: GHTK-VN-8765432.', FALSE, NOW()-INTERVAL '2 days'),
+(2, 2, 'admin',  'Chúng tôi đã liên hệ GHTK để kiểm tra. Hàng đang trên đường, giao ngày mai.',        FALSE, NOW()-INTERVAL '1 day'),
+(2, 4, 'seller', 'Xin lỗi vì sự chậm trễ. Hàng tôi đã bàn giao cho GHTK đúng hạn.',                  FALSE, NOW()-INTERVAL '1 day'),
+(2, 2, 'admin',  '[Ghi chú nội bộ] Lỗi từ GHTK, không phải seller.',                                  TRUE,  NOW()-INTERVAL '20 hours');
+
+INSERT INTO complaint_status_logs (complaint_id, old_status, new_status, actor_id, note, timestamp) VALUES
+(1, NULL,           'PENDING',     6, 'Khiếu nại được tạo mới',                              NOW()-INTERVAL '8 days'),
+(1, 'PENDING',      'ASSIGNED',    2, 'Giao cho user #2 (Nguyễn Văn An)',                    NOW()-INTERVAL '8 days'),
+(1, 'ASSIGNED',     'IN_PROGRESS', 2, 'Tự động IN_PROGRESS khi CS phản hồi lần đầu',         NOW()-INTERVAL '7 days'),
+(1, 'IN_PROGRESS',  'RESOLVED',    2, 'Đã liên hệ người bán bổ sung ảnh',                   NOW()-INTERVAL '6 days'),
+(2, NULL,           'PENDING',     7, 'Khiếu nại được tạo mới',                              NOW()-INTERVAL '2 days'),
+(2, 'PENDING',      'ASSIGNED',    2, 'Giao cho user #2 (Nguyễn Văn An)',                    NOW()-INTERVAL '2 days'),
+(2, 'ASSIGNED',     'IN_PROGRESS', 2, 'Tự động IN_PROGRESS khi CS phản hồi lần đầu',         NOW()-INTERVAL '1 day');
 
 -- ============================================================================
 -- 18. CONTENTS
@@ -495,8 +672,12 @@ SELECT setval('payouts_id_seq',              (SELECT MAX(id) FROM payouts));
 SELECT setval('return_requests_id_seq',      (SELECT MAX(id) FROM return_requests));
 SELECT setval('product_certificates_id_seq', (SELECT MAX(id) FROM product_certificates));
 SELECT setval('product_origins_id_seq',      (SELECT MAX(id) FROM product_origins));
+SELECT setval('order_status_logs_id_seq',    (SELECT MAX(id) FROM order_status_logs));
+SELECT setval('complaint_comments_id_seq',   (SELECT MAX(id) FROM complaint_comments));
+SELECT setval('complaint_status_logs_id_seq',(SELECT MAX(id) FROM complaint_status_logs));
+SELECT setval('payment_audit_logs_id_seq',   (SELECT MAX(id) FROM payment_audit_logs));
 
 -- ============================================================================
 -- HOÀN TẤT
 -- ============================================================================
-SELECT 'Database reset & seed HOÀN TẤT!' AS result;
+SELECT 'Database reset & seed HOÀN TẤT! (tích hợp đầy đủ schema mới)' AS result;

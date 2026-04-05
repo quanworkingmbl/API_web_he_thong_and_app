@@ -41,6 +41,7 @@ from app.models.return_request import ReturnRequest, ReturnStatus
 from app.models.category import Category
 from app.models.user import User
 from app.api.v1.auth import get_current_user
+from app.services.order_state import log_status_change
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -282,6 +283,19 @@ async def confirm_order(
 
     order.status = OrderStatus.CONFIRMED
     order.confirmed_at = datetime.utcnow()
+
+    # [AUDIT] Ghi log xác nhận đơn
+    log_status_change(
+        db=db,
+        order_id=order_id,
+        old_status=OrderStatus.PENDING.value,
+        new_status=OrderStatus.CONFIRMED.value,
+        actor_id=current_user.id,
+        role="seller",
+        note="Seller xác nhận đơn hàng",
+        auto_flush=True,
+    )
+
     db.commit()
 
     return {
@@ -320,6 +334,8 @@ async def reject_order(
         )
 
     # Hoàn lại tồn kho nếu đã trừ (CONFIRMED)
+    old_cancel_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+
     if order.status == OrderStatus.CONFIRMED:
         items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
         for item in items:
@@ -330,6 +346,19 @@ async def reject_order(
     order.status = OrderStatus.CANCELLED
     order.cancelled_at = datetime.utcnow()
     order.cancel_reason = reject_data.reason
+
+    # [AUDIT] Ghi log hủy đơn
+    log_status_change(
+        db=db,
+        order_id=order_id,
+        old_status=old_cancel_status,
+        new_status=OrderStatus.CANCELLED.value,
+        actor_id=current_user.id,
+        role="seller",
+        note=f"Seller từ chối đơn: {reject_data.reason}",
+        auto_flush=True,
+    )
+
     db.commit()
 
     return {
@@ -362,8 +391,23 @@ async def mark_order_shipping(
             detail=f"Không thể chuyển sang giao hàng từ trạng thái {order.status.value}"
         )
 
+    old_ship_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+
     order.status = OrderStatus.SHIPPING
     order.shipped_at = datetime.utcnow()
+
+    # [AUDIT] Ghi log chuyển sang shipping
+    log_status_change(
+        db=db,
+        order_id=order_id,
+        old_status=old_ship_status,
+        new_status=OrderStatus.SHIPPING.value,
+        actor_id=current_user.id,
+        role="seller",
+        note="Seller chuyển sang đang giao hàng",
+        auto_flush=True,
+    )
+
     db.commit()
 
     return {
@@ -589,13 +633,18 @@ async def get_seller_profile(
 # DELETE PRODUCT
 # ==============================================================================
 
-@router.delete("/products/{product_id}", summary="Seller xóa sản phẩm")
+@router.delete("/products/{product_id}", summary="Seller ẩn sản phẩm (soft-delete)")
 async def delete_seller_product(
     product_id: int,
+    reason: Optional[str] = Query(None, description="Lý do ẩn sản phẩm"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Seller xóa sản phẩm của mình."""
+    """
+    Seller ẩn sản phẩm (soft-delete: is_active=False).
+    - Không xóa vĩnh viễn để giữ lịch sử đơn hàng.
+    - Chặn ẩn nếu sản phẩm còn trong đơn hàng đang hoạt động (PENDING/CONFIRMED/PROCESSING/SHIPPING).
+    """
     _require_seller(current_user)
 
     product = db.query(Product).filter(
@@ -605,10 +654,40 @@ async def delete_seller_product(
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không có quyền xóa")
 
-    db.delete(product)
+    if not product.is_active:
+        raise HTTPException(status_code=400, detail="Sản phẩm đã được ẩn trước đó")
+
+    # Kiểm tra đơn hàng đang active liên quan đến sản phẩm này
+    ACTIVE_ORDER_STATUSES = [
+        OrderStatus.PENDING,
+        OrderStatus.CONFIRMED,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPING,
+    ]
+    active_order_count = (
+        db.query(OrderItem)
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(
+            OrderItem.product_id == product_id,
+            Order.status.in_(ACTIVE_ORDER_STATUSES),
+            Order.is_active == True,
+        )
+        .count()
+    )
+    if active_order_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Không thể ẩn sản phẩm vì còn {active_order_count} đơn hàng đang xử lý "
+                f"(PENDING/CONFIRMED/PROCESSING/SHIPPING). Hãy đợi đơn hoàn tất."
+            )
+        )
+
+    # [SOFT DELETE] Ẩn sản phẩm thay vì xóa
+    product.is_active = False
     db.commit()
 
-    return {"success": True, "message": "Đã xóa sản phẩm"}
+    return {"success": True, "message": "Sản phẩm đã được ẩn. Dữ liệu lịch sử được giữ lại."}
 
 
 # ==============================================================================
