@@ -1,30 +1,16 @@
 -- ============================================================================
 -- RESET & SEED DATABASE - PostgreSQL RDS AWS
--- Tác giả: Auto-generated
--- Mô tả: Xóa toàn bộ dữ liệu cũ (bao gồm bảng, enum, alembic) và
---         nhập lại toàn bộ dữ liệu mẫu mới từ đầu.
+-- Cập nhật: 2026-04-05 – Khớp với schema thực tế (alembic models)
 --
--- CÁCH DÙNG:
---   BƯỚC 1: Chạy TOÀN BỘ file này trong pgAdmin / DBeaver / psql
---            (có thể chạy một lần, script sẽ tự xử lý thứ tự)
---   BƯỚC 2: Sau khi BƯỚC 1 xong, chạy lệnh trong terminal:
---              alembic upgrade head
---   BƯỚC 3: Chạy lại file này từ dòng "BƯỚC 3" trở xuống
---            (hoặc chạy lại toàn bộ file vì các bảng đã tồn tại)
---
--- LƯU Ý AWS RDS:
---   - Không có quyền SUPERUSER, nhưng tất cả lệnh dưới đây tương thích.
---   - Nếu dùng psql: psql -h <host> -U <user> -d <db> -f reset_and_seed_rds.sql
+-- CÁCH DÙNG (sau khi alembic upgrade head đã chạy xong):
+--   Chạy TOÀN BỘ file này trong pgAdmin / DBeaver
+--   (bảng đã tồn tại → chỉ cần TRUNCATE rồi INSERT)
 -- ============================================================================
 
 
 -- ############################################################################
--- BƯỚC 1: TRUNCATE TẤT CẢ DỮ LIỆU (giữ cấu trúc bảng, nhanh hơn DROP)
---          SỬ DỤNG TRUNCATE thay vì DROP để không cần alembic upgrade lại
+-- BƯỚC 1: TRUNCATE DỮ LIỆU CŨ (giữ cấu trúc bảng)
 -- ############################################################################
-
--- Tắt kiểm tra foreign key tạm thời bằng cách TRUNCATE theo thứ tự đúng
--- (CASCADE sẽ xử lý các bảng phụ thuộc)
 
 TRUNCATE TABLE
     return_requests,
@@ -44,6 +30,7 @@ TRUNCATE TABLE
     promotions,
     reviews,
     product_approvals,
+    product_media,
     contents,
     partner_contracts,
     seller_profiles,
@@ -58,72 +45,9 @@ TRUNCATE TABLE
     organizations
 RESTART IDENTITY CASCADE;
 
--- ############################################################################
--- BƯỚC 2: NẾU MUỐN XÓA HOÀN TOÀN (DROP bảng + alembic) → chạy phần này
---          Sau đó phải chạy: alembic upgrade head
---          (Bỏ qua block này nếu chỉ muốn TRUNCATE & re-seed)
--- ############################################################################
-
-/*  --- BỎ COMMENT DÒNG NÀY NẾU MUỐN DROP HOÀN TOÀN ---
-
-DROP TABLE IF EXISTS return_requests        CASCADE;
-DROP TABLE IF EXISTS product_origins        CASCADE;
-DROP TABLE IF EXISTS product_certificates   CASCADE;
-DROP TABLE IF EXISTS payouts                CASCADE;
-DROP TABLE IF EXISTS settlements            CASCADE;
-DROP TABLE IF EXISTS seller_wallets         CASCADE;
-DROP TABLE IF EXISTS payment_transactions   CASCADE;
-DROP TABLE IF EXISTS payments               CASCADE;
-DROP TABLE IF EXISTS shipments              CASCADE;
-DROP TABLE IF EXISTS complaints             CASCADE;
-DROP TABLE IF EXISTS order_items            CASCADE;
-DROP TABLE IF EXISTS orders                 CASCADE;
-DROP TABLE IF EXISTS cart_items             CASCADE;
-DROP TABLE IF EXISTS carts                  CASCADE;
-DROP TABLE IF EXISTS promotions             CASCADE;
-DROP TABLE IF EXISTS reviews                CASCADE;
-DROP TABLE IF EXISTS product_approvals      CASCADE;
-DROP TABLE IF EXISTS contents               CASCADE;
-DROP TABLE IF EXISTS partner_contracts      CASCADE;
-DROP TABLE IF EXISTS seller_profiles        CASCADE;
-DROP TABLE IF EXISTS user_roles             CASCADE;
-DROP TABLE IF EXISTS user_organizations     CASCADE;
-DROP TABLE IF EXISTS products               CASCADE;
-DROP TABLE IF EXISTS categories             CASCADE;
-DROP TABLE IF EXISTS regions                CASCADE;
-DROP TABLE IF EXISTS medias                 CASCADE;
-DROP TABLE IF EXISTS users                  CASCADE;
-DROP TABLE IF EXISTS roles                  CASCADE;
-DROP TABLE IF EXISTS organizations          CASCADE;
-
-DROP TYPE IF EXISTS permissiontype    CASCADE;
-DROP TYPE IF EXISTS complaintstatus   CASCADE;
-DROP TYPE IF EXISTS contentstatus     CASCADE;
-DROP TYPE IF EXISTS paymentstatus     CASCADE;
-DROP TYPE IF EXISTS paymentcycle      CASCADE;
-DROP TYPE IF EXISTS productstatus     CASCADE;
-DROP TYPE IF EXISTS contractstatus    CASCADE;
-DROP TYPE IF EXISTS promotiontype     CASCADE;
-DROP TYPE IF EXISTS promotionstatus   CASCADE;
-DROP TYPE IF EXISTS businesstype      CASCADE;
-DROP TYPE IF EXISTS verificationstatus CASCADE;
-DROP TYPE IF EXISTS settlementstatus  CASCADE;
-DROP TYPE IF EXISTS payoutstatus      CASCADE;
-DROP TYPE IF EXISTS shippingprovider  CASCADE;
-DROP TYPE IF EXISTS shipmentstatus    CASCADE;
-DROP TYPE IF EXISTS returntype        CASCADE;
-DROP TYPE IF EXISTS returnstatus      CASCADE;
-DROP TYPE IF EXISTS certificatestatus CASCADE;
-
-DROP TABLE IF EXISTS alembic_version CASCADE;
-
---- Sau lệnh trên, chạy trong terminal: alembic upgrade head ---
---- Rồi quay lại chạy phần BƯỚC 3 bên dưới ---
-*/
-
 
 -- ############################################################################
--- BƯỚC 3: INSERT DỮ LIỆU MẪU
+-- BƯỚC 2: INSERT DỮ LIỆU MẪU
 -- Password của tất cả users: "password123"
 -- ############################################################################
 
@@ -147,6 +71,7 @@ INSERT INTO roles (id, role_name, description) VALUES
 
 -- ============================================================================
 -- 3. USERS  (password: "password123")
+-- Columns: id, email, password_hash, name, gender, activated, type
 -- ============================================================================
 INSERT INTO users (id, email, password_hash, name, gender, activated, type) VALUES
 (1, 'admin@example.com',     '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Quản trị viên', 'male',   1, 'admin'),
@@ -172,6 +97,7 @@ INSERT INTO user_organizations (user_id, organization_id) VALUES
 
 -- ============================================================================
 -- 6. CATEGORIES
+-- Columns: id, name, slug, description, icon, parent_id, "order", is_active
 -- ============================================================================
 INSERT INTO categories (id, name, slug, description, icon, parent_id, "order", is_active) VALUES
 (1, 'Rau củ quả',       'rau-cu-qua',       'Rau củ quả tươi sạch',                        'leaf',     NULL, 1, true),
@@ -180,11 +106,12 @@ INSERT INTO categories (id, name, slug, description, icon, parent_id, "order", i
 (4, 'Nông sản khô',     'nong-san-kho',     'Các loại nông sản đã qua chế biến, sấy khô', 'package',  NULL, 4, true),
 (5, 'Gia vị',           'gia-vi',           'Các loại gia vị phục vụ nấu ăn',             'coffee',   NULL, 5, true),
 (6, 'Gốm sứ',           'gom-su',           'Sản phẩm gốm sứ thủ công',                   'coffee',   3,    1, true),
-(7, 'Đan lát',          'dan-lat',          'Sản phẩm đan lát truyền thống',              'gift',     3,    2, true),
-(8, 'Thêu tay',         'theu-tay',         'Sản phẩm thêu tay tinh xảo',                 'heart',    3,    3, true);
+(7, 'Đan lát',          'dan-lat',          'Sản phẩm đan lát truyền thống',               'gift',     3,    2, true),
+(8, 'Thêu tay',         'theu-tay',         'Sản phẩm thêu tay tinh xảo',                  'heart',    3,    3, true);
 
 -- ============================================================================
 -- 7. REGIONS
+-- Columns: id, name, slug, description, latitude, longitude, "order", is_active
 -- ============================================================================
 INSERT INTO regions (id, name, slug, description, latitude, longitude, "order", is_active) VALUES
 (1, 'Hà Nội',      'ha-noi',      'Thủ đô Hà Nội',          '21.0285', '105.8542', 1, true),
@@ -195,23 +122,27 @@ INSERT INTO regions (id, name, slug, description, latitude, longitude, "order", 
 
 -- ============================================================================
 -- 8. PRODUCTS
+-- Columns từ model: id, name, description, price, producer_id, category_id,
+--   status (enum: PENDING/APPROVED/REJECTED), label (string), is_active,
+--   stock_quantity, sku, slug, weight, images, created_at
 -- ============================================================================
-INSERT INTO products (id, name, description, price, producer_id, category_id, status, label) VALUES
-(1,  'Rau cải xanh hữu cơ',      'Rau cải xanh trồng hữu cơ, không thuốc trừ sâu',         25000.00,  3, 1, 'APPROVED', 'CLEAN_AGRICULTURE'),
-(2,  'Cà chua bi Đà Lạt',        'Cà chua bi Đà Lạt ngọt tự nhiên, giàu vitamin C',          35000.00,  3, 1, 'APPROVED', 'CLEAN_AGRICULTURE'),
-(3,  'Cam sành Hà Giang',        'Cam sành Hà Giang ngọt thanh, ít hạt',                     50000.00,  3, 2, 'APPROVED', 'OCOP'),
-(4,  'Xoài cát Hòa Lộc',         'Xoài cát Hòa Lộc thơm ngon đặc sản Tiền Giang',          120000.00, 3, 2, 'APPROVED', 'OCOP'),
-(5,  'Bình gốm Bát Tràng',       'Bình gốm thủ công từ làng nghề Bát Tràng',                350000.00, 4, 6, 'APPROVED', 'TRADITIONAL_CRAFT'),
-(6,  'Chén trà gốm xanh',        'Bộ chén trà gốm xanh thủ công, họa tiết hoa sen',         280000.00, 4, 6, 'APPROVED', 'TRADITIONAL_CRAFT'),
-(7,  'Giỏ đan tre truyền thống', 'Giỏ đan tre thủ công tinh xảo, bền đẹp',                  150000.00, 5, 7, 'PENDING',  'TRADITIONAL_CRAFT'),
-(8,  'Khăn thêu tay Huế',        'Khăn thêu tay Huế, họa tiết tinh xảo, thích hợp làm quà', 450000.00, 5, 8, 'APPROVED', 'TRADITIONAL_CRAFT'),
-(9,  'Nấm hương khô Đà Lạt',     'Nấm hương Đà Lạt sấy khô tự nhiên, giàu dinh dưỡng',     180000.00, 3, 4, 'APPROVED', 'CLEAN_AGRICULTURE'),
-(10, 'Tiêu đen Phú Quốc',        'Tiêu đen hạt nguyên chất Phú Quốc',                       250000.00, 4, 5, 'APPROVED', 'OCOP'),
-(11, 'Mắm ruốc Huế',             'Mắm ruốc Huế nguyên chất, công thức truyền thống',          90000.00, 5, 5, 'APPROVED', 'TRADITIONAL_CRAFT'),
-(12, 'Đào sữa Mộc Châu',         'Đào sữa Mộc Châu tươi ngon, mọng nước',                    85000.00, 3, 2, 'PENDING',  'CLEAN_AGRICULTURE');
+INSERT INTO products (id, name, description, price, producer_id, category_id, status, label, is_active, stock_quantity) VALUES
+(1,  'Rau cải xanh hữu cơ',      'Rau cải xanh trồng hữu cơ, không thuốc trừ sâu',          25000.00, 3, 1, 'APPROVED', 'CLEAN_AGRICULTURE', true, 100),
+(2,  'Cà chua bi Đà Lạt',        'Cà chua bi Đà Lạt ngọt tự nhiên, giàu vitamin C',           35000.00, 3, 1, 'APPROVED', 'CLEAN_AGRICULTURE', true, 80),
+(3,  'Cam sành Hà Giang',        'Cam sành Hà Giang ngọt thanh, ít hạt',                      50000.00, 3, 2, 'APPROVED', 'OCOP',              true, 200),
+(4,  'Xoài cát Hòa Lộc',         'Xoài cát Hòa Lộc thơm ngon đặc sản Tiền Giang',           120000.00, 3, 2, 'APPROVED', 'OCOP',              true, 50),
+(5,  'Bình gốm Bát Tràng',       'Bình gốm thủ công từ làng nghề Bát Tràng',                 350000.00, 4, 6, 'APPROVED', 'TRADITIONAL_CRAFT', true, 30),
+(6,  'Chén trà gốm xanh',        'Bộ chén trà gốm xanh thủ công, họa tiết hoa sen',          280000.00, 4, 6, 'APPROVED', 'TRADITIONAL_CRAFT', true, 45),
+(7,  'Giỏ đan tre truyền thống', 'Giỏ đan tre thủ công tinh xảo, bền đẹp',                   150000.00, 5, 7, 'PENDING',  'TRADITIONAL_CRAFT', true, 25),
+(8,  'Khăn thêu tay Huế',        'Khăn thêu tay Huế, họa tiết tinh xảo, thích hợp làm quà',  450000.00, 5, 8, 'APPROVED', 'TRADITIONAL_CRAFT', true, 15),
+(9,  'Nấm hương khô Đà Lạt',     'Nấm hương Đà Lạt sấy khô tự nhiên, giàu dinh dưỡng',      180000.00, 3, 4, 'APPROVED', 'CLEAN_AGRICULTURE', true, 60),
+(10, 'Tiêu đen Phú Quốc',        'Tiêu đen hạt nguyên chất Phú Quốc',                        250000.00, 4, 5, 'APPROVED', 'OCOP',              true, 40),
+(11, 'Mắm ruốc Huế',             'Mắm ruốc Huế nguyên chất, công thức truyền thống',           90000.00, 5, 5, 'APPROVED', 'TRADITIONAL_CRAFT', true, 70),
+(12, 'Đào sữa Mộc Châu',         'Đào sữa Mộc Châu tươi ngon, mọng nước',                     85000.00, 3, 2, 'PENDING',  'CLEAN_AGRICULTURE', true, 35);
 
 -- ============================================================================
 -- 9. PRODUCT_APPROVALS
+-- Columns: product_id, approver_id, status, notes, checked_description, checked_price, checked_images
 -- ============================================================================
 INSERT INTO product_approvals (product_id, approver_id, status, notes, checked_description, checked_price, checked_images) VALUES
 (1,  2, 'APPROVED', 'Sản phẩm đạt chuẩn, mô tả chi tiết',        true, true, true),
@@ -228,6 +159,11 @@ INSERT INTO product_approvals (product_id, approver_id, status, notes, checked_d
 
 -- ============================================================================
 -- 10. SELLER_PROFILES
+-- Columns từ model: id, user_id, business_name, business_type, description, address,
+--   slug, shop_phone, shop_email, id_card_number,
+--   bank_name, bank_account_number, bank_account_name,
+--   verification_status, verified_by, verified_at
+-- NOTE: Bỏ các cột không có trong model mới (không có id_card_front_url etc.)
 -- ============================================================================
 INSERT INTO seller_profiles (id, user_id, business_name, business_type, description, address,
     id_card_number, bank_name, bank_account_number, bank_account_name,
@@ -250,77 +186,94 @@ INSERT INTO seller_profiles (id, user_id, business_name, business_type, descript
 
 -- ============================================================================
 -- 11. REVIEWS
+-- Columns: product_id, user_id, rating, comment, created_at
 -- ============================================================================
 INSERT INTO reviews (product_id, user_id, rating, comment, created_at) VALUES
-(1,  6, 5, 'Rau rất tươi và sạch, giao hàng nhanh!',             NOW() - INTERVAL '10 days'),
-(2,  6, 5, 'Cà chua ngọt, con nhà tôi rất thích',                 NOW() - INTERVAL '12 days'),
-(3,  7, 5, 'Cam ngọt thanh, rất ngon, giá hợp lý',                NOW() - INTERVAL '7 days'),
-(4,  6, 5, 'Xoài thơm ngon, đúng chuẩn Hòa Lộc',                  NOW() - INTERVAL '5 days'),
-(5,  7, 4, 'Bình gốm đẹp, chất lượng tốt nhưng giá hơi cao',     NOW() - INTERVAL '3 days'),
-(6,  6, 5, 'Chén trà rất đẹp, thích hợp làm quà tặng',            NOW() - INTERVAL '6 days'),
-(8,  7, 5, 'Thêu tay rất tinh xảo, đáng tiền',                    NOW() - INTERVAL '4 days'),
-(9,  8, 4, 'Nấm khô thơm ngon, sẽ mua lại',                       NOW() - INTERVAL '2 days'),
-(10, 6, 5, 'Tiêu Phú Quốc thơm đúng chuẩn, không lẫn tạp chất',  NOW() - INTERVAL '1 day');
+(1,  6, 5, 'Rau rất tươi và sạch, giao hàng nhanh!',            NOW() - INTERVAL '10 days'),
+(2,  6, 5, 'Cà chua ngọt, con nhà tôi rất thích',                NOW() - INTERVAL '12 days'),
+(3,  7, 5, 'Cam ngọt thanh, rất ngon, giá hợp lý',               NOW() - INTERVAL '7 days'),
+(4,  6, 5, 'Xoài thơm ngon, đúng chuẩn Hòa Lộc',                 NOW() - INTERVAL '5 days'),
+(5,  7, 4, 'Bình gốm đẹp, chất lượng tốt nhưng giá hơi cao',    NOW() - INTERVAL '3 days'),
+(6,  6, 5, 'Chén trà rất đẹp, thích hợp làm quà tặng',           NOW() - INTERVAL '6 days'),
+(8,  7, 5, 'Thêu tay rất tinh xảo, đáng tiền',                   NOW() - INTERVAL '4 days'),
+(9,  8, 4, 'Nấm khô thơm ngon, sẽ mua lại',                      NOW() - INTERVAL '2 days'),
+(10, 6, 5, 'Tiêu Phú Quốc thơm đúng chuẩn, không lẫn tạp chất', NOW() - INTERVAL '1 day');
 
 -- ============================================================================
 -- 12. ORDERS
+-- Columns từ model: id, order_number, customer_id, customer_name, customer_phone,
+--   customer_email, shipping_address, shipping_province, shipping_district, shipping_ward,
+--   seller_id, subtotal, shipping_fee, discount_amount, total_amount,
+--   platform_fee_percentage, platform_fee_amount, seller_amount,
+--   status (enum OrderStatus), payment_method (enum PaymentMethod),
+--   payment_status, confirmed_at, shipped_at, delivered_at, created_at
 -- ============================================================================
 INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, customer_email,
     shipping_address, shipping_province, shipping_district, shipping_ward,
     seller_id, subtotal, shipping_fee, discount_amount, total_amount,
     platform_fee_percentage, platform_fee_amount, seller_amount,
-    status, payment_method, payment_status,
+    status, payment_method, payment_status, currency,
     confirmed_at, shipped_at, delivered_at, created_at) VALUES
 (1, 'ORD-2026-001', 6, 'Hoàng Văn Em',  '0912345678', 'customer1@example.com',
     '123 Đường ABC, Phường Hàng Bạc', 'Hà Nội',      'Hoàn Kiếm',    'Hàng Bạc',
     3, 60000.00, 25000.00, 0.00, 85000.00, 5.00, 4250.00, 80750.00,
-    'DELIVERED', 'COD', 'paid',
+    'DELIVERED', 'COD', 'paid', 'VND',
     NOW()-INTERVAL '5 days', NOW()-INTERVAL '4 days', NOW()-INTERVAL '2 days', NOW()-INTERVAL '6 days'),
 (2, 'ORD-2026-002', 7, 'Đỗ Thị Phương', '0987654321', 'customer2@example.com',
     '456 Đường DEF, Phường Bến Nghé', 'Hồ Chí Minh', 'Quận 1',       'Bến Nghé',
     4, 350000.00, 30000.00, 10000.00, 370000.00, 5.00, 18500.00, 351500.00,
-    'SHIPPING', 'BANK_TRANSFER', 'paid',
+    'SHIPPING', 'BANK_TRANSFER', 'paid', 'VND',
     NOW()-INTERVAL '3 days', NOW()-INTERVAL '2 days', NULL, NOW()-INTERVAL '4 days'),
 (3, 'ORD-2026-003', 6, 'Hoàng Văn Em',  '0912345678', 'customer1@example.com',
     '123 Đường ABC, Phường Hàng Bạc', 'Hà Nội',      'Hoàn Kiếm',    'Hàng Bạc',
     5, 450000.00, 25000.00, 0.00, 475000.00, 5.00, 23750.00, 451250.00,
-    'PROCESSING', 'MOMO', 'paid',
+    'PROCESSING', 'MOMO', 'paid', 'VND',
     NOW()-INTERVAL '1 day', NULL, NULL, NOW()-INTERVAL '2 days'),
 (4, 'ORD-2026-004', 8, 'Vũ Minh Quân',  '0901234567', 'customer3@example.com',
     '789 Đường GHI, Phường Mỹ An',   'Đà Nẵng',     'Ngũ Hành Sơn', 'Mỹ An',
     3, 215000.00, 20000.00, 0.00, 235000.00, 5.00, 11750.00, 223250.00,
-    'CONFIRMED', 'VNPAY', 'paid',
+    'CONFIRMED', 'VNPAY', 'paid', 'VND',
     NOW(), NULL, NULL, NOW()-INTERVAL '12 hours'),
 (5, 'ORD-2026-005', 7, 'Đỗ Thị Phương', '0987654321', 'customer2@example.com',
     '456 Đường DEF, Phường Bến Nghé', 'Hồ Chí Minh', 'Quận 1',       'Bến Nghé',
     4, 280000.00, 30000.00, 0.00, 310000.00, 5.00, 15500.00, 294500.00,
-    'PENDING', 'COD', 'unpaid',
+    'PENDING', 'COD', 'unpaid', 'VND',
     NULL, NULL, NULL, NOW()-INTERVAL '3 hours');
 
 -- ============================================================================
 -- 13. ORDER_ITEMS
+-- Columns từ model: order_id, product_id, product_name, unit_price, quantity,
+--   total_price, created_at
+--   (các cột mới: seller_id, store_id, package_id, variant_id, product_image,
+--    tax_amount, discount_amount, tracking_code → để NULL)
 -- ============================================================================
-INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity, total_price, created_at) VALUES
-(1, 1, 'Rau cải xanh hữu cơ',   25000.00, 2,  50000.00, NOW()-INTERVAL '6 days'),
-(1, 2, 'Cà chua bi Đà Lạt',     35000.00, 1,  35000.00, NOW()-INTERVAL '6 days'),
-(2, 5, 'Bình gốm Bát Tràng',   350000.00, 1, 350000.00, NOW()-INTERVAL '4 days'),
-(3, 8, 'Khăn thêu tay Huế',    450000.00, 1, 450000.00, NOW()-INTERVAL '2 days'),
-(4, 9, 'Nấm hương khô Đà Lạt', 180000.00, 1, 180000.00, NOW()-INTERVAL '12 hours'),
-(4, 2, 'Cà chua bi Đà Lạt',     35000.00, 1,  35000.00, NOW()-INTERVAL '12 hours'),
-(5, 6, 'Chén trà gốm xanh',    280000.00, 1, 280000.00, NOW()-INTERVAL '3 hours');
+INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity, total_price, tax_amount, discount_amount, created_at) VALUES
+(1, 1, 'Rau cải xanh hữu cơ',   25000.00, 2,  50000.00, 0.00, 0.00, NOW()-INTERVAL '6 days'),
+(1, 2, 'Cà chua bi Đà Lạt',     35000.00, 1,  35000.00, 0.00, 0.00, NOW()-INTERVAL '6 days'),
+(2, 5, 'Bình gốm Bát Tràng',   350000.00, 1, 350000.00, 0.00, 0.00, NOW()-INTERVAL '4 days'),
+(3, 8, 'Khăn thêu tay Huế',    450000.00, 1, 450000.00, 0.00, 0.00, NOW()-INTERVAL '2 days'),
+(4, 9, 'Nấm hương khô Đà Lạt', 180000.00, 1, 180000.00, 0.00, 0.00, NOW()-INTERVAL '12 hours'),
+(4, 2, 'Cà chua bi Đà Lạt',     35000.00, 1,  35000.00, 0.00, 0.00, NOW()-INTERVAL '12 hours'),
+(5, 6, 'Chén trà gốm xanh',    280000.00, 1, 280000.00, 0.00, 0.00, NOW()-INTERVAL '3 hours');
 
 -- ============================================================================
 -- 14. PAYMENTS
+-- Columns từ model: id, order_id, customer_id, seller_id, amount,
+--   platform_fee_percentage, platform_fee_amount, seller_amount,
+--   status (enum: PENDING/COMPLETED/FAILED/REFUNDED),
+--   payment_cycle (enum: WEEKLY/MONTHLY)
+-- NOTE: Bỏ các cột cũ không dùng; payment_method_id để NULL
 -- ============================================================================
-INSERT INTO payments (id, order_id, customer_id, seller_id, amount,
+INSERT INTO payments (id, order_id, customer_id, seller_id, amount, currency,
     platform_fee_percentage, platform_fee_amount, seller_amount, status, payment_cycle) VALUES
-(1, 1, 6, 3,  85000.00, 5.00,  4250.00,  80750.00, 'COMPLETED', 'WEEKLY'),
-(2, 2, 7, 4, 370000.00, 5.00, 18500.00, 351500.00, 'COMPLETED', 'WEEKLY'),
-(3, 3, 6, 5, 475000.00, 5.00, 23750.00, 451250.00, 'PENDING',   'MONTHLY'),
-(4, 4, 8, 3, 235000.00, 5.00, 11750.00, 223250.00, 'COMPLETED', 'WEEKLY');
+(1, 1, 6, 3,  85000.00, 'VND', 5.00,  4250.00,  80750.00, 'COMPLETED', 'WEEKLY'),
+(2, 2, 7, 4, 370000.00, 'VND', 5.00, 18500.00, 351500.00, 'COMPLETED', 'WEEKLY'),
+(3, 3, 6, 5, 475000.00, 'VND', 5.00, 23750.00, 451250.00, 'PENDING',   'MONTHLY'),
+(4, 4, 8, 3, 235000.00, 'VND', 5.00, 11750.00, 223250.00, 'COMPLETED', 'WEEKLY');
 
 -- ============================================================================
 -- 15. PAYMENT_TRANSACTIONS
+-- Columns: payment_id, transaction_type, amount, status, notes, created_at
 -- ============================================================================
 INSERT INTO payment_transactions (payment_id, transaction_type, amount, status, notes, created_at) VALUES
 (1, 'payment',  85000.00, 'COMPLETED', 'Thanh toán COD đơn ORD-2026-001',          NOW()-INTERVAL '2 days'),
@@ -377,6 +330,10 @@ INSERT INTO contents (id, title, content, content_type, author_id, product_id,
 
 -- ============================================================================
 -- 19. PROMOTIONS
+-- Columns từ model: id, code, name, description, promotion_type (enum),
+--   discount_value, min_order_amount, max_discount_amount, usage_limit,
+--   usage_limit_per_user, used_count, start_date, end_date,
+--   status (enum), is_public, seller_id (nullable), created_by
 -- ============================================================================
 INSERT INTO promotions (id, code, name, description, promotion_type, discount_value,
     min_order_amount, max_discount_amount, usage_limit, used_count,
@@ -413,6 +370,9 @@ INSERT INTO cart_items (cart_id, product_id, quantity, unit_price) VALUES
 
 -- ============================================================================
 -- 21. SHIPMENTS
+-- Columns từ model: id, order_id, provider (enum), tracking_code,
+--   provider_order_code, status (enum), fee, weight,
+--   estimated_delivery, actual_delivery, from_address, to_address, note
 -- ============================================================================
 INSERT INTO shipments (id, order_id, provider, tracking_code, provider_order_code,
     status, fee, weight, estimated_delivery, actual_delivery,
@@ -422,8 +382,9 @@ INSERT INTO shipments (id, order_id, provider, tracking_code, provider_order_cod
     'Thôn Tân Lập, xã Đan Phượng, Hà Nội', '123 Đường ABC, Phường Hàng Bạc, Hà Nội', NULL),
 (2, 2, 'GHTK',   'GHTK-VN-8765432', 'GHTK-ORDER-002', 'IN_TRANSIT', 30000.00, 3500,
     NOW()+INTERVAL '1 day', NULL,
-    'Số 12 Làng Bát Tràng, Gia Lâm, Hà Nội', '456 Đường DEF, Bến Nghé, Quận 1, TP.HCM', 'Hàng gốm sứ, đóng gói bong bóng'),
-(3, 3, 'MANUAL', NULL, NULL,                           'PENDING',    25000.00, 500,
+    'Số 12 Làng Bát Tràng, Gia Lâm, Hà Nội', '456 Đường DEF, Bến Nghé, Quận 1, TP.HCM',
+    'Hàng gốm sứ, đóng gói bong bóng'),
+(3, 3, 'MANUAL', NULL, NULL, 'PENDING', 25000.00, 500,
     NOW()+INTERVAL '3 days', NULL,
     'Khu công nghiệp An Don, Đà Nẵng', '123 Đường ABC, Phường Hàng Bạc, Hà Nội', 'Seller tự giao'),
 (4, 4, 'GHN',    'GHN-VN-9876543',  'GHN-ORDER-004',  'CREATED',    20000.00, 600,
@@ -451,7 +412,7 @@ INSERT INTO settlements (id, seller_id, period_start, period_end,
     1, 370000.00, 18500.00, 351500.00, 'APPROVED',  1, NOW()-INTERVAL '5 days',
     'Đối soát tuần 1 tháng 3/2026 – seller Lê Văn Cường'),
 (3, 5, NOW()-INTERVAL '7 days',  NOW(),
-    1, 475000.00, 23750.00, 451250.00, 'PENDING',  NULL, NULL,
+    1, 475000.00, 23750.00, 451250.00, 'PENDING', NULL, NULL,
     'Đối soát tuần 2 tháng 3/2026 – seller Phạm Thị Dung');
 
 -- ============================================================================
@@ -463,7 +424,7 @@ INSERT INTO payouts (id, seller_id, settlement_id, amount,
 (1, 3, 1, 304000.00, 'Vietcombank', '0071004321001', 'TRAN THI BINH',
     'SUCCESS',    'VCB-TXN-20260324-001', 'Chi trả đối soát tuần 1/3/2026', 1, NOW()-INTERVAL '5 days'),
 (2, 4, 2, 351500.00, 'BIDV', '31410001234567', 'LE VAN CUONG',
-    'PROCESSING', 'BIDV-TXN-20260325-002','Chi trả đối soát tuần 1/3/2026', 1, NULL);
+    'PROCESSING', 'BIDV-TXN-20260325-002', 'Chi trả đối soát tuần 1/3/2026', 1, NULL);
 
 -- ============================================================================
 -- 25. RETURN_REQUESTS
@@ -511,7 +472,7 @@ INSERT INTO product_origins (id, product_id, village_name, region_id, producer_n
     'Thu hoạch → Phơi nắng 5–7 ngày → Sàng lọc → Đóng gói hút chân không');
 
 -- ============================================================================
--- RESET SEQUENCES (đồng bộ lại auto-increment sau khi insert)
+-- RESET SEQUENCES (đồng bộ lại auto-increment)
 -- ============================================================================
 SELECT setval('organizations_id_seq',        (SELECT MAX(id) FROM organizations));
 SELECT setval('roles_id_seq',                (SELECT MAX(id) FROM roles));
