@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Numeric, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Numeric, Boolean, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -73,6 +73,9 @@ class Order(Base):
     admin_note = Column(Text, nullable=True)
     cancel_reason = Column(Text, nullable=True)
     
+    # Soft-delete
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -120,3 +123,28 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
     seller = relationship("User", foreign_keys=[seller_id])
+
+
+# ==============================================================================
+# ORDER STATUS AUDIT LOG
+# ==============================================================================
+
+class OrderStatusLog(Base):
+    """
+    Audit log mỗi lần trạng thái đơn hàng thay đổi.
+    Ghi lại: ai thay đổi, từ trạng thái nào sang trạng thái nào, khi nào.
+    """
+    __tablename__ = "order_status_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    old_status = Column(String(30), nullable=True)   # None khi tạo mới
+    new_status = Column(String(30), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # None = system/webhook
+    role = Column(String(30), nullable=True)          # consumer / seller / admin / system
+    note = Column(Text, nullable=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    order = relationship("Order", foreign_keys=[order_id])
+    actor = relationship("User", foreign_keys=[actor_id])

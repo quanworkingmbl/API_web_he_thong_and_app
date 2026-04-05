@@ -79,3 +79,19 @@ class ProductApproval(Base):
     product = relationship("Product", foreign_keys=[product_id])
     approver = relationship("User", foreign_keys=[approver_id])
 
+
+class ProductPriceLog(Base):
+    """Log thay đổi giá sản phẩm - dùng để audit và phát hiện gian lận"""
+    __tablename__ = "product_price_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    old_price = Column(Numeric(15, 2), nullable=False)
+    new_price = Column(Numeric(15, 2), nullable=False)
+    changed_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reason = Column(Text, nullable=True)  # Lý do thay đổi giá (optional)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    product = relationship("Product", foreign_keys=[product_id])
+    changer = relationship("User", foreign_keys=[changed_by])
+

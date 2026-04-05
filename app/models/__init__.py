@@ -3,11 +3,14 @@ from app.models.role import Role
 from app.models.organization import Organization
 from app.models.media import Media
 from app.models.product import Product, ProductApproval
-from app.models.payment import Payment, PaymentTransaction
+from app.models.payment import Payment, PaymentTransaction, PaymentAuditLog, PaymentStatus, PaymentCycle
 from app.models.content import Content
-from app.models.complaint import Complaint, Review, ModerationStatus
+from app.models.complaint import (
+    Complaint, Review, ComplaintStatus, ModerationStatus,
+    ComplaintComment, ComplaintStatusLog, ComplaintCategory, ComplaintPriority, CommentRole
+)
 from app.models.partner_contract import PartnerContract
-from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
+from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod, OrderStatusLog
 from app.models.category import Category
 from app.models.region import Region
 from app.models.cart import Cart, CartItem
@@ -45,14 +48,24 @@ __all__ = [
     "ProductApproval",
     "Payment",
     "PaymentTransaction",
+    "PaymentAuditLog",
+    "PaymentStatus",
+    "PaymentCycle",
     "Content",
     "Complaint",
     "Review",
+    "ComplaintStatus",
+    "ComplaintCategory",
+    "ComplaintPriority",
+    "ComplaintComment",
+    "ComplaintStatusLog",
+    "CommentRole",
     "ModerationStatus",
     "PartnerContract",
     "Order",
     "OrderItem",
     "OrderStatus",
+    "OrderStatusLog",
     "PaymentMethod",
     "Category",
     "Region",

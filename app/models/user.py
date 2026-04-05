@@ -1,7 +1,13 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
+import enum
+
+class UserStatus(enum.Enum):
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    BANNED = "BANNED"
 
 class User(Base):
     __tablename__ = "users"
@@ -13,6 +19,9 @@ class User(Base):
     gender = Column(String(50), nullable=True)
     activated = Column(Integer, default=1)  # 1 = active, 0 = inactive
     type = Column(String(50), nullable=True)  # consumer, producer, admin, etc.
+    status = Column(Enum(UserStatus), default=UserStatus.ACTIVE, nullable=False)
+    status_reason = Column(Text, nullable=True)
+    status_expire_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(String(255), nullable=True)
     updated_by = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -12,16 +12,24 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime
 from app.core.database import get_db
-from app.models.content import Content, ContentStatus
+from app.models.content import Content, ContentStatus, ContentAuditLog, ContentAuditAction
 from app.models.product import Product, ProductStatus
 from app.models.user import User
 from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
 from app.api.v1.auth import get_current_user, get_current_user_optional
+from app.core.permissions import check_seller_kyc_verified
+from app.services.order_state import (
+    check_order_ownership,
+    validate_status_transition,
+    log_status_change,
+    resolve_payment_status,
+)
 from pydantic import BaseModel, Field
 from decimal import Decimal
 import uuid
 import os
 import boto3
+import json
 from botocore.client import Config
 from dotenv import load_dotenv
 
@@ -137,10 +145,13 @@ async def get_public_posts(
     db: Session = Depends(get_db)
 ):
     """
-    Lấy danh sách bài viết công khai (đã duyệt)
+    Lấy danh sách bài viết công khai (đã duyệt + is_active)
     Public endpoint - không cần đăng nhập
     """
-    query = db.query(Content).filter(Content.status == ContentStatus.APPROVED)
+    query = db.query(Content).filter(
+        Content.status == ContentStatus.APPROVED,
+        Content.is_active == True
+    )
     
     if author_id:
         query = query.filter(Content.author_id == author_id)
@@ -183,11 +194,15 @@ async def get_my_posts(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     status: Optional[str] = Query(None),
+    include_inactive: bool = Query(False, description="Include deleted posts"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Lấy danh sách bài viết của producer đang đăng nhập"""
     query = db.query(Content).filter(Content.author_id == current_user.id)
+    
+    if not include_inactive:
+        query = query.filter(Content.is_active == True)
     
     if status:
         query = query.filter(Content.status == status)
@@ -203,6 +218,7 @@ async def get_my_posts(
                 "id": p.id,
                 "title": p.title,
                 "status": p.status.value if hasattr(p.status, 'value') else str(p.status),
+                "is_active": p.is_active,
                 "created_at": p.created_at.isoformat()
             }
             for p in posts
@@ -230,10 +246,15 @@ async def create_my_post(
 ):
     """
     Producer tạo bài viết mới (multipart/form-data).
+    - KYC Required: Producer/seller phải được xác minh trước khi tạo bài viết.
     - Nếu gửi kèm `media_file` (ảnh hoặc video): tự upload lên Supabase rồi lưu URL.
     - Nếu chỉ gửi `images`/`videos` (URL text): dùng trực tiếp.
     - Bài viết tạo xong ở trạng thái PENDING chờ admin duyệt.
     """
+    # KYC check for seller/producer
+    if current_user.type in ("producer", "seller"):
+        check_seller_kyc_verified(current_user, db)
+    
     final_image_url = images
     final_video_url = videos
 
@@ -258,6 +279,19 @@ async def create_my_post(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Upload thất bại: {str(e)}")
 
+    # Validate: require at least one media
+    has_media = bool(final_image_url or final_video_url)
+    if not has_media:
+        raise HTTPException(status_code=400, detail="Bài viết phải có ít nhất 1 ảnh hoặc video")
+    
+    # Validate: require content with minimum length
+    MIN_CONTENT_LENGTH = 30
+    if not content or len(content.strip()) < MIN_CONTENT_LENGTH:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Nội dung bài viết phải có ít nhất {MIN_CONTENT_LENGTH} ký tự"
+        )
+
     new_post = Content(
         title=title,
         content=content,
@@ -266,10 +300,23 @@ async def create_my_post(
         product_id=product_id,
         status=ContentStatus.PENDING,
         images=final_image_url,
-        videos=final_video_url
+        videos=final_video_url,
+        is_active=True
     )
 
     db.add(new_post)
+    db.flush()
+    
+    # Log audit
+    audit_log = ContentAuditLog(
+        content_id=new_post.id,
+        action=ContentAuditAction.CREATE,
+        user_id=current_user.id,
+        new_status="PENDING",
+        notes=f"Post created via mobile app by {current_user.email}"
+    )
+    db.add(audit_log)
+    
     db.commit()
     db.refresh(new_post)
 
@@ -293,10 +340,11 @@ async def get_post_detail(
     post_id: int,
     db: Session = Depends(get_db)
 ):
-    """Xem chi tiết bài viết - Public"""
+    """Xem chi tiết bài viết - Public (chỉ hiện bài APPROVED & is_active)"""
     post = db.query(Content).filter(
         Content.id == post_id,
-        Content.status == ContentStatus.APPROVED
+        Content.status == ContentStatus.APPROVED,
+        Content.is_active == True
     ).first()
     
     if not post:
@@ -328,14 +376,17 @@ async def update_my_post(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Producer cập nhật bài viết của mình"""
+    """Producer cập nhật bài viết của mình (ownership check)"""
     post = db.query(Content).filter(
         Content.id == post_id,
-        Content.author_id == current_user.id
+        Content.author_id == current_user.id,
+        Content.is_active == True
     ).first()
     
     if not post:
         raise HTTPException(status_code=404, detail="Post not found or not authorized")
+    
+    old_status = post.status.value if hasattr(post.status, 'value') else str(post.status)
     
     update_data = post_data.dict(exclude_unset=True)
     for key, value in update_data.items():
@@ -344,6 +395,19 @@ async def update_my_post(
     # Reset to pending if content is updated
     if update_data:
         post.status = ContentStatus.PENDING
+    
+    post.updated_at = datetime.utcnow()
+    
+    # Log audit
+    audit_log = ContentAuditLog(
+        content_id=post.id,
+        action=ContentAuditAction.UPDATE,
+        user_id=current_user.id,
+        old_status=old_status,
+        new_status="PENDING",
+        notes=f"Post updated via mobile app by {current_user.email}"
+    )
+    db.add(audit_log)
     
     db.commit()
     
@@ -360,16 +424,30 @@ async def delete_my_post(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Producer xóa bài viết của mình"""
+    """Producer soft-delete bài viết của mình (ownership check)"""
     post = db.query(Content).filter(
         Content.id == post_id,
-        Content.author_id == current_user.id
+        Content.author_id == current_user.id,
+        Content.is_active == True
     ).first()
     
     if not post:
         raise HTTPException(status_code=404, detail="Post not found or not authorized")
     
-    db.delete(post)
+    # Soft delete instead of hard delete
+    post.is_active = False
+    post.deleted_at = datetime.utcnow()
+    post.deleted_by = current_user.id
+    
+    # Log audit
+    audit_log = ContentAuditLog(
+        content_id=post.id,
+        action=ContentAuditAction.DELETE,
+        user_id=current_user.id,
+        notes=f"Post soft-deleted via mobile app by {current_user.email}"
+    )
+    db.add(audit_log)
+    
     db.commit()
     
     return {"success": True, "message": "Post deleted successfully"}
@@ -482,23 +560,32 @@ async def create_order(
 ):
     """
     Tạo đơn hàng từ giỏ hàng.
-    - [FIX 1] Kiểm tra & trừ tồn kho khi đặt thành công.
-    - [FIX 3] Tự động tách đơn nếu giỏ có sản phẩm từ nhiều người bán khác nhau.
-    Yêu cầu đăng nhập.
     """
     if not checkout_data.items or len(checkout_data.items) == 0:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
-    # ── Bước 1: Validate sản phẩm & kiểm tra tồn kho ──────────────────────────
+    # ── Bước 1: Lọc sản phẩm với SELECT FOR UPDATE (chống race condition) ─────────────────────
     # Nhóm items theo seller_id để hỗ trợ multi-seller checkout
     sellers_map: dict = {}  # {seller_id: [{"product": ..., "quantity": ..., ...}]}
 
-    for item in checkout_data.items:
-        product = db.query(Product).filter(
-            Product.id == item.product_id,
+    product_ids = [item.product_id for item in checkout_data.items]
+
+    # SELECT FOR UPDATE: khóa các hàng product trong transaction,
+    # ngăn 2 request đồng thời trừ stock cùng lúc (PostgreSQL)
+    locked_products = (
+        db.query(Product)
+        .filter(
+            Product.id.in_(product_ids),
             Product.status == ProductStatus.APPROVED,
-            Product.is_active == True
-        ).first()
+            Product.is_active == True,
+        )
+        .with_for_update()  # PostgreSQL FOR UPDATE
+        .all()
+    )
+    locked_map = {p.id: p for p in locked_products}
+
+    for item in checkout_data.items:
+        product = locked_map.get(item.product_id)
 
         if not product:
             raise HTTPException(
@@ -506,7 +593,7 @@ async def create_order(
                 detail=f"Sản phẩm ID {item.product_id} không tìm thấy hoặc chưa được duyệt"
             )
 
-        # [FIX 1] Kiểm tra tồn kho trước khi đặt
+        # Kiểm tra tồn kho SAU KHI đã khóa hàng (tránh TOCTOU)
         if product.stock_quantity < item.quantity:
             raise HTTPException(
                 status_code=400,
@@ -576,8 +663,20 @@ async def create_order(
                 quantity=item_data["quantity"],
                 total_price=item_data["total_price"],
             ))
-            # [FIX 1] Trừ tồn kho ngay khi đặt hàng thành công
+            # Trừ tồn kho TRONG CÙNG TRANSACTION (đã khóa bằng SELECT FOR UPDATE)
             item_data["product"].stock_quantity -= item_data["quantity"]
+
+        # [AUDIT] Ghi log trạng thái khởi tạo
+        log_status_change(
+            db=db,
+            order_id=new_order.id,
+            old_status=None,
+            new_status=OrderStatus.PENDING.value,
+            actor_id=current_user.id,
+            role="consumer",
+            note=f"Đặt hàng qua mobile app. Phương thức: {checkout_data.payment_method}",
+            auto_flush=True,
+        )
 
         created_orders.append({
             "order_id": new_order.id,
@@ -700,6 +799,79 @@ async def get_my_order_detail(
                 for item in items
             ]
         }
+    }
+
+
+# ==============================================================================
+# CANCEL ORDER – Consumer tự hủy đơn hàng của mình
+# ==============================================================================
+
+class CancelOrderRequest(BaseModel):
+    cancel_reason: Optional[str] = Field(None, max_length=500, description="Lý do hủy đơn")
+
+
+@router.put("/orders/my/{order_id}/cancel")
+async def cancel_my_order(
+    order_id: int,
+    cancel_data: CancelOrderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Consumer tự hủy đơn hàng của mình.
+    - Cho phép hủy khi đơn đang ở PENDING hoặc CONFIRMED.
+    - Trạng thái PROCESSING/SHIPPING/DELIVERED không thể hủy.
+    - Ghi audit log và trả về tồn kho nếu đơn đã CONFIRMED.
+    """
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.customer_id == current_user.id,  # ownership check trực tiếp
+        Order.is_active == True
+    ).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    old_status = order.status
+
+    # [STATE MACHINE] Chỉ cho phép hủy từ PENDING hoặc CONFIRMED
+    validate_status_transition(old_status, OrderStatus.CANCELLED, role="consumer")
+
+    # Nếu đơn đã CONFIRMED: hoàn lại tồn kho
+    if old_status == OrderStatus.CONFIRMED:
+        from app.models.product import Product
+        items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+        for item in items:
+            product = db.query(Product).filter(Product.id == item.product_id).first()
+            if product:
+                product.stock_quantity += item.quantity
+
+    # Cập nhật đơn
+    order.status = OrderStatus.CANCELLED
+    order.cancelled_at = datetime.utcnow()
+    if cancel_data.cancel_reason:
+        order.cancel_reason = cancel_data.cancel_reason
+
+    # [AUDIT] Ghi log
+    log_status_change(
+        db=db,
+        order_id=order_id,
+        old_status=old_status.value if hasattr(old_status, "value") else str(old_status),
+        new_status=OrderStatus.CANCELLED.value,
+        actor_id=current_user.id,
+        role="consumer",
+        note=cancel_data.cancel_reason or "Consumer tự hủy đơn",
+        auto_flush=True,
+    )
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đơn hàng đã được hủy thành công",
+        "order_id": order_id,
+        "old_status": old_status.value if hasattr(old_status, "value") else str(old_status),
+        "new_status": "CANCELLED",
     }
 
 
