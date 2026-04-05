@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional, List
+from datetime import datetime
 from app.core.database import get_db
 from app.models.role import Role
 from app.api.v1.auth import get_current_user
@@ -14,8 +15,8 @@ class RoleResponse(BaseModel):
     id: int
     role_name: str
     description: Optional[str]
-    created_at: str
-    updated_at: Optional[str]
+    created_at: datetime
+    updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True
