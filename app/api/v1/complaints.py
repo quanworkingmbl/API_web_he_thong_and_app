@@ -155,19 +155,27 @@ def _complaint_detail(c: Complaint, db: Session, current_user: Optional[User] = 
     role = _resolve_role(current_user) if current_user else "buyer"
     is_privileged = role in VALID_ADMIN_ROLES
 
-    # Filter comment: internal chỉ admin/CS thấy
+    # Query comments trực tiếp (tránh lazy-load gây lỗi commentrole enum)
+    from sqlalchemy import text as sa_text
+    raw_comments = (
+        db.query(ComplaintComment)
+        .filter(ComplaintComment.complaint_id == c.id)
+        .order_by(ComplaintComment.created_at)
+        .all()
+    )
+
     visible_comments = [
         {
             "id": cm.id,
             "author_id": cm.author_id,
             "author_name": cm.author.name if cm.author else None,
-            "role": cm.role.value if hasattr(cm.role, "value") else cm.role,
+            "role": str(cm.role) if cm.role is not None else None,
             "message": cm.message,
             "attachments": cm.attachments,
             "is_internal": cm.is_internal,
             "created_at": cm.created_at.isoformat(),
         }
-        for cm in c.comments
+        for cm in raw_comments
         if (not cm.is_internal) or is_privileged
     ]
 
@@ -207,6 +215,7 @@ def _complaint_detail(c: Complaint, db: Session, current_user: Optional[User] = 
         ]
 
     return result
+
 
 
 def _check_complaint_access(complaint: Complaint, current_user: User, db: Session) -> str:
@@ -286,6 +295,22 @@ async def get_complaints(
     skip  = (page - 1) * limit
     complaints = query.order_by(Complaint.created_at.desc()).offset(skip).limit(limit).all()
 
+    # ─── Đếm comment qua subquery để tránh lazy-load (lỗi commentrole enum) ───
+    from sqlalchemy import func as sa_func
+    complaint_ids = [c.id for c in complaints]
+    comment_counts = {}
+    if complaint_ids:
+        rows = (
+            db.query(
+                ComplaintComment.complaint_id,
+                sa_func.count(ComplaintComment.id).label("cnt"),
+            )
+            .filter(ComplaintComment.complaint_id.in_(complaint_ids))
+            .group_by(ComplaintComment.complaint_id)
+            .all()
+        )
+        comment_counts = {r.complaint_id: r.cnt for r in rows}
+
     return {
         "success": True,
         "data": [
@@ -297,7 +322,7 @@ async def get_complaints(
                 "title": c.title,
                 "status": c.status.value if hasattr(c.status, "value") else c.status,
                 "handled_by": c.handled_by,
-                "comment_count": len(c.comments),
+                "comment_count": comment_counts.get(c.id, 0),
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "first_response_at": c.first_response_at.isoformat() if c.first_response_at else None,
             }
