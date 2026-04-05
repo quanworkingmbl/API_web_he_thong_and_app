@@ -43,10 +43,10 @@ class ModerationStatus(str, enum.Enum):
 
 class CommentRole(str, enum.Enum):
     """Vai trò của người viết comment trong thread."""
-    BUYER  = "buyer"
-    SELLER = "seller"
-    ADMIN  = "admin"
-    SYSTEM = "system"
+    BUYER  = "BUYER"
+    SELLER = "SELLER"
+    ADMIN  = "ADMIN"
+    SYSTEM = "SYSTEM"
 
 
 # ==============================================================================
