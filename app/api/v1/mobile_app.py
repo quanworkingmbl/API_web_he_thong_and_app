@@ -14,6 +14,7 @@ from datetime import datetime
 from app.core.database import get_db
 from app.models.content import Content, ContentStatus, ContentAuditLog, ContentAuditAction
 from app.models.product import Product, ProductStatus
+from app.models.product_variant import ProductVariant
 from app.models.user import User
 from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
 from app.api.v1.auth import get_current_user, get_current_user_optional
@@ -24,6 +25,7 @@ from app.services.order_state import (
     log_status_change,
     resolve_payment_status,
 )
+from app.services.inventory import validate_line_for_sale, decrement_stock, increment_stock
 from pydantic import BaseModel, Field
 from decimal import Decimal
 import uuid
@@ -118,6 +120,7 @@ class UpdatePostRequest(BaseModel):
 class CartItemRequest(BaseModel):
     product_id: int
     quantity: int = Field(..., ge=1)
+    variant_id: Optional[int] = None
 
 
 class CheckoutRequest(BaseModel):
@@ -564,14 +567,12 @@ async def create_order(
     if not checkout_data.items or len(checkout_data.items) == 0:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
-    # ── Bước 1: Lọc sản phẩm với SELECT FOR UPDATE (chống race condition) ─────────────────────
-    # Nhóm items theo seller_id để hỗ trợ multi-seller checkout
-    sellers_map: dict = {}  # {seller_id: [{"product": ..., "quantity": ..., ...}]}
+    # ── Bước 1: Khóa Product + ProductVariant (FOR UPDATE), validate SKU/tồn ──
+    sellers_map: dict = {}
 
-    product_ids = [item.product_id for item in checkout_data.items]
+    product_ids = sorted({item.product_id for item in checkout_data.items})
+    variant_ids = sorted({item.variant_id for item in checkout_data.items if item.variant_id})
 
-    # SELECT FOR UPDATE: khóa các hàng product trong transaction,
-    # ngăn 2 request đồng thời trừ stock cùng lúc (PostgreSQL)
     locked_products = (
         db.query(Product)
         .filter(
@@ -579,39 +580,48 @@ async def create_order(
             Product.status == ProductStatus.APPROVED,
             Product.is_active == True,
         )
-        .with_for_update()  # PostgreSQL FOR UPDATE
+        .order_by(Product.id)
+        .with_for_update()
         .all()
     )
     locked_map = {p.id: p for p in locked_products}
 
+    if len(locked_map) != len(product_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Một hoặc nhiều sản phẩm không tồn tại hoặc chưa được duyệt",
+        )
+
+    if variant_ids:
+        locked_variants = (
+            db.query(ProductVariant)
+            .filter(ProductVariant.id.in_(variant_ids))
+            .order_by(ProductVariant.id)
+            .with_for_update()
+            .all()
+        )
+        if len(locked_variants) != len(variant_ids):
+            raise HTTPException(
+                status_code=400,
+                detail="Biến thể không tồn tại hoặc không khả dụng",
+            )
+
     for item in checkout_data.items:
-        product = locked_map.get(item.product_id)
-
-        if not product:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Sản phẩm ID {item.product_id} không tìm thấy hoặc chưa được duyệt"
-            )
-
-        # Kiểm tra tồn kho SAU KHI đã khóa hàng (tránh TOCTOU)
-        if product.stock_quantity < item.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Sản phẩm '{product.name}' không đủ hàng. "
-                    f"Tồn kho: {product.stock_quantity}, yêu cầu: {item.quantity}"
-                )
-            )
-
+        product = locked_map[item.product_id]
+        _, unit_price = validate_line_for_sale(db, product, item.quantity, item.variant_id)
+        total_price = unit_price * item.quantity
         sid = product.producer_id
         if sid not in sellers_map:
             sellers_map[sid] = []
-        sellers_map[sid].append({
-            "product": product,
-            "quantity": item.quantity,
-            "unit_price": product.price,
-            "total_price": product.price * item.quantity,
-        })
+        sellers_map[sid].append(
+            {
+                "product": product,
+                "quantity": item.quantity,
+                "unit_price": unit_price,
+                "total_price": total_price,
+                "variant_id": item.variant_id,
+            }
+        )
 
     # ── Bước 2: Tạo đơn hàng – tách theo từng người bán (FIX 3) ───────────────
     platform_fee_percentage = Decimal("5.0")
@@ -654,17 +664,21 @@ async def create_order(
         db.flush()  # lấy new_order.id trước khi tạo items
 
         for item_data in items_of_seller:
-            db.add(OrderItem(
-                order_id=new_order.id,
-                product_id=item_data["product"].id,
-                product_name=item_data["product"].name,
-                product_image=item_data["product"].images,
-                unit_price=item_data["unit_price"],
-                quantity=item_data["quantity"],
-                total_price=item_data["total_price"],
-            ))
-            # Trừ tồn kho TRONG CÙNG TRANSACTION (đã khóa bằng SELECT FOR UPDATE)
-            item_data["product"].stock_quantity -= item_data["quantity"]
+            p = item_data["product"]
+            db.add(
+                OrderItem(
+                    order_id=new_order.id,
+                    product_id=p.id,
+                    seller_id=p.producer_id,
+                    variant_id=item_data["variant_id"],
+                    product_name=p.name,
+                    product_image=p.images,
+                    unit_price=item_data["unit_price"],
+                    quantity=item_data["quantity"],
+                    total_price=item_data["total_price"],
+                )
+            )
+            decrement_stock(db, p, item_data["quantity"], item_data["variant_id"])
 
         # [AUDIT] Ghi log trạng thái khởi tạo
         log_status_change(
@@ -837,14 +851,13 @@ async def cancel_my_order(
     # [STATE MACHINE] Chỉ cho phép hủy từ PENDING hoặc CONFIRMED
     validate_status_transition(old_status, OrderStatus.CANCELLED, role="consumer")
 
-    # Nếu đơn đã CONFIRMED: hoàn lại tồn kho
-    if old_status == OrderStatus.CONFIRMED:
-        from app.models.product import Product
+    # Hoàn tồn: đã trừ khi đặt hàng (PENDING/CONFIRMED trước khi hủy)
+    if old_status in (OrderStatus.PENDING, OrderStatus.CONFIRMED):
         items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
         for item in items:
             product = db.query(Product).filter(Product.id == item.product_id).first()
             if product:
-                product.stock_quantity += item.quantity
+                increment_stock(db, product, item.quantity, item.variant_id)
 
     # Cập nhật đơn
     order.status = OrderStatus.CANCELLED

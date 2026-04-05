@@ -135,12 +135,18 @@ async def get_orders(
     user_type = (current_user.type or "").lower()
     query = db.query(Order)
 
-    # Giới hạn theo role
-    if user_type == "consumer":
+    # Giới hạn theo role — chỉ admin xem toàn bộ; role khác (vd. content_manager) không được mặc định thấy hết
+    if user_type == "admin":
+        pass
+    elif user_type == "consumer":
         query = query.filter(Order.customer_id == current_user.id)
     elif user_type in ("producer", "seller"):
         query = query.filter(Order.seller_id == current_user.id)
-    # admin: không lọc, xem tất cả
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="Không có quyền xem danh sách đơn hàng",
+        )
 
     # Chỉ admin mới xem được đơn đã soft-delete
     if include_inactive and user_type == "admin":

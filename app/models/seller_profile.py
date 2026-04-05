@@ -37,7 +37,7 @@ class SellerProfile(Base):
     shop_email = Column(String(255), nullable=True)
 
     # Địa chỉ lấy hàng chuẩn hóa
-    pickup_address_id = Column(Integer, nullable=True)  # FK to addresses
+    pickup_address_id = Column(Integer, ForeignKey("addresses.id", ondelete="SET NULL"), nullable=True)
 
     # Giấy tờ xác minh
     id_card_number = Column(String(20), nullable=True)          # CCCD / CMND

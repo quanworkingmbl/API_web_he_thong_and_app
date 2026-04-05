@@ -99,9 +99,9 @@ class OrderItem(Base):
 
     # Multi-seller support
     seller_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Seller của item này
-    store_id = Column(Integer, nullable=True, index=True)  # Store của item này
-    package_id = Column(Integer, nullable=True, index=True)  # OrderPackage nếu dùng multi-seller
-    variant_id = Column(Integer, nullable=True, index=True)  # ProductVariant nếu có
+    store_id = Column(Integer, ForeignKey("stores.id", ondelete="SET NULL"), nullable=True, index=True)
+    package_id = Column(Integer, ForeignKey("order_packages.id", ondelete="SET NULL"), nullable=True, index=True)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Product snapshot (giữ thông tin tại thời điểm đặt hàng)
     product_name = Column(String(255), nullable=False)
@@ -123,6 +123,9 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
     seller = relationship("User", foreign_keys=[seller_id])
+    variant = relationship("ProductVariant", foreign_keys=[variant_id])
+    store = relationship("Store", foreign_keys=[store_id])
+    package = relationship("OrderPackage", foreign_keys=[package_id])
 
 
 # ==============================================================================
