@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.models.user import User, UserStatus
 from app.api.v1.auth import get_current_user
 from app.core.permissions import check_user_manage_access
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 
 router = APIRouter()
