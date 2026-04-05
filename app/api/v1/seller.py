@@ -42,6 +42,7 @@ from app.models.category import Category
 from app.models.user import User
 from app.api.v1.auth import get_current_user
 from app.services.order_state import log_status_change
+from app.services.inventory import increment_stock
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -269,17 +270,7 @@ async def confirm_order(
             detail=f"Không thể xác nhận đơn hàng đang ở trạng thái {order.status.value}"
         )
 
-    # Kiểm tra và trừ tồn kho
-    items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
-    for item in items:
-        product = db.query(Product).filter(Product.id == item.product_id).first()
-        if product:
-            if product.stock_quantity < item.quantity:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Sản phẩm '{product.name}' không đủ hàng (còn {product.stock_quantity}, cần {item.quantity})"
-                )
-            product.stock_quantity -= item.quantity
+    # Tồn kho đã trừ khi khách đặt hàng (checkout). Xác nhận đơn không trừ thêm để tránh double-deduct.
 
     order.status = OrderStatus.CONFIRMED
     order.confirmed_at = datetime.utcnow()
@@ -333,15 +324,15 @@ async def reject_order(
             detail=f"Không thể hủy đơn hàng đang ở trạng thái {order.status.value}"
         )
 
-    # Hoàn lại tồn kho nếu đã trừ (CONFIRMED)
+    # Hoàn tồn: đã trừ khi đặt hàng — hoàn khi hủy từ PENDING hoặc CONFIRMED
     old_cancel_status = order.status.value if hasattr(order.status, "value") else str(order.status)
 
-    if order.status == OrderStatus.CONFIRMED:
+    if order.status in (OrderStatus.PENDING, OrderStatus.CONFIRMED):
         items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
         for item in items:
             product = db.query(Product).filter(Product.id == item.product_id).first()
             if product:
-                product.stock_quantity += item.quantity
+                increment_stock(db, product, item.quantity, item.variant_id)
 
     order.status = OrderStatus.CANCELLED
     order.cancelled_at = datetime.utcnow()

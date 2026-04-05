@@ -25,7 +25,7 @@ class Product(Base):
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True, index=True)
 
     # Multi-seller support
-    store_id = Column(Integer, nullable=True, index=True)  # FK to stores
+    store_id = Column(Integer, ForeignKey("stores.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Product identification & SEO
     sku = Column(String(100), unique=True, nullable=True, index=True)  # Nullable vì có thể dùng variants
@@ -62,6 +62,7 @@ class Product(Base):
 
     producer = relationship("User", foreign_keys=[producer_id])
     category = relationship("Category", foreign_keys=[category_id], back_populates="products")
+    store = relationship("Store", foreign_keys=[store_id])
 
 class ProductApproval(Base):
     __tablename__ = "product_approvals"

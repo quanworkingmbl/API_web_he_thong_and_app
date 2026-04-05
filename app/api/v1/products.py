@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime
@@ -168,18 +169,20 @@ async def get_products(
 ):
     """
     Get list of products with pagination and filters.
-    - Consumer: only sees is_active=True products
-    - Seller: can see their own inactive products with include_inactive=True
-    - Admin: can see all products with include_inactive=True
+    - Khách / consumer: chỉ sản phẩm APPROVED và đang bán (is_active).
+    - Seller/producer: thấy sản phẩm APPROVED công khai + mọi trạng thái của chính họ.
+    - Admin / content_manager: xem toàn bộ (kèm bộ lọc khác).
     """
     query = db.query(Product)
+
+    ut = ((current_user.type if current_user else None) or "").lower()
 
     # Filter by is_active based on user role
     if is_active is not None:
         query = query.filter(Product.is_active == is_active)
     elif not include_inactive:
         # Default: only show active products for consumers
-        if not current_user or current_user.type not in ("admin", "producer", "seller"):
+        if not current_user or current_user.type not in ("admin", "producer", "seller", "content_manager"):
             query = query.filter(Product.is_active == True)
     elif include_inactive:
         # Admin can see all, seller can only see their own inactive
@@ -188,11 +191,32 @@ async def get_products(
             query = query.filter(
                 (Product.is_active == True) | (Product.producer_id == current_user.id)
             )
-        elif not current_user or current_user.type != "admin":
+        elif not current_user or current_user.type not in ("admin", "content_manager"):
             # Non-admin without auth: only active
             query = query.filter(Product.is_active == True)
 
+    # Catalog visibility: tránh lộ SP chưa duyệt ra khách / consumer
+    if ut in ("admin", "content_manager"):
+        pass
+    elif ut in ("producer", "seller"):
+        query = query.filter(
+            or_(
+                Product.status == ProductStatus.APPROVED,
+                Product.producer_id == current_user.id,
+            )
+        )
+    else:
+        query = query.filter(
+            Product.status == ProductStatus.APPROVED,
+            Product.is_active == True,
+        )
+
     if status:
+        # Seller lọc theo trạng thái khác APPROVED: chỉ áp cho sản phẩm của họ (tránh xem SP người khác)
+        if ut in ("producer", "seller"):
+            st_upper = status.strip().upper() if isinstance(status, str) else str(status).upper()
+            if st_upper != "APPROVED":
+                query = query.filter(Product.producer_id == current_user.id)
         query = query.filter(Product.status == status)
     if producer_id:
         query = query.filter(Product.producer_id == producer_id)
@@ -245,10 +269,21 @@ async def get_product_by_id(
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get product details by ID"""
+    """Get product details by ID (chỉ SP công khai APPROVED trừ khi admin/moderator hoặc chủ sản phẩm)."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+
+    ut = ((current_user.type if current_user else None) or "").lower()
+    can_see_unpublished = ut in ("admin", "content_manager")
+    is_owner = (
+        current_user is not None
+        and ut in ("producer", "seller")
+        and product.producer_id == current_user.id
+    )
+    if not can_see_unpublished and not is_owner:
+        if product.status != ProductStatus.APPROVED or not product.is_active:
+            raise HTTPException(status_code=404, detail="Product not found")
 
     producer = db.query(User).filter(User.id == product.producer_id).first()
     category = db.query(Category).filter(Category.id == product.category_id).first() if product.category_id else None

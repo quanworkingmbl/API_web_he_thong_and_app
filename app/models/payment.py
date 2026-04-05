@@ -34,8 +34,8 @@ class Payment(Base):
     customer_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     seller_id   = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
-    # Payment gateway
-    payment_method_id      = Column(Integer, nullable=True, index=True)
+    # Payment gateway (FK tới bảng payment_methods — PaymentMethodType)
+    payment_method_id      = Column(Integer, ForeignKey("payment_methods.id", ondelete="SET NULL"), nullable=True, index=True)
     gateway_transaction_id = Column(String(255), nullable=True, index=True)   # Mã GD cổng thanh toán
     payment_channel        = Column(String(50),  nullable=True)               # card/bank/wallet/cod
 
