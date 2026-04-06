@@ -10,12 +10,12 @@ Endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 from app.core.database import get_db
-from app.models.seller_profile import SellerProfile, VerificationStatus, BusinessType
+from app.models.seller_profile import SellerProfile, VerificationStatus
 from app.models.user import User
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_allow_inactive
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -58,7 +58,7 @@ class VerifySellerRequest(BaseModel):
 @router.post("/register", summary="Seller nộp hồ sơ kinh doanh")
 async def register_seller_profile(
     data: SellerRegisterRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_allow_inactive),
     db: Session = Depends(get_db)
 ):
     """
@@ -81,8 +81,8 @@ async def register_seller_profile(
             setattr(existing, key, value)
         existing.verification_status = VerificationStatus.PENDING
         existing.rejection_reason = None
-        db.commit()
-        db.refresh(existing)
+        existing.verified_by = None
+        existing.verified_at = None
         profile = existing
         msg = "Hồ sơ đã được cập nhật, chờ xét duyệt lại"
     else:
@@ -91,9 +91,12 @@ async def register_seller_profile(
             **data.dict()
         )
         db.add(profile)
-        db.commit()
-        db.refresh(profile)
         msg = "Hồ sơ đã được nộp thành công, chờ admin xét duyệt"
+
+    # Sau mỗi lần nộp/cập nhật hồ sơ, tài khoản seller quay về trạng thái chờ duyệt.
+    current_user.activated = 0
+    db.commit()
+    db.refresh(profile)
 
     return {
         "success": True,
@@ -102,17 +105,20 @@ async def register_seller_profile(
             "id": profile.id,
             "business_name": profile.business_name,
             "business_type": profile.business_type.value if hasattr(profile.business_type, "value") else str(profile.business_type),
-            "verification_status": "PENDING"
+            "verification_status": profile.verification_status.value if hasattr(profile.verification_status, "value") else str(profile.verification_status)
         }
     }
 
 
 @router.get("/verification-status", summary="Xem trạng thái xác minh")
 async def get_verification_status(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_allow_inactive),
     db: Session = Depends(get_db)
 ):
     """Seller xem trạng thái hồ sơ của mình."""
+    if current_user.type not in {"producer", "seller"}:
+        raise HTTPException(status_code=403, detail="Chỉ tài khoản seller/producer mới có thể xem trạng thái KYC")
+
     profile = db.query(SellerProfile).filter(
         SellerProfile.user_id == current_user.id
     ).first()
@@ -161,7 +167,13 @@ async def verify_seller(
     if not profile:
         raise HTTPException(status_code=404, detail="Hồ sơ seller không tồn tại")
 
-    profile.verification_status = data.status
+    if data.status == "REJECTED" and not data.rejection_reason:
+        raise HTTPException(
+            status_code=400,
+            detail="rejection_reason là bắt buộc khi từ chối hồ sơ"
+        )
+
+    profile.verification_status = VerificationStatus(data.status)
     profile.verified_by = current_user.id
     profile.verified_at = datetime.utcnow()
 
@@ -173,6 +185,8 @@ async def verify_seller(
             seller_user.activated = 1
     elif data.status == "REJECTED":
         profile.rejection_reason = data.rejection_reason
+        if seller_user:
+            seller_user.activated = 0
 
     db.commit()
 
@@ -201,7 +215,11 @@ async def get_seller_applications(
 
     query = db.query(SellerProfile)
     if status:
-        query = query.filter(SellerProfile.verification_status == status)
+        try:
+            status_enum = VerificationStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="status phải là PENDING | VERIFIED | REJECTED")
+        query = query.filter(SellerProfile.verification_status == status_enum)
 
     total = query.count()
     skip = (page - 1) * limit

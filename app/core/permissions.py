@@ -531,13 +531,13 @@ def check_seller_kyc_verified(user: User, db) -> None:
     if not seller_profile:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bạn chưa có hồ sơ kinh doanh. Vui lòng hoàn tất đăng ký seller trước khi tạo sản phẩm."
+            detail="Bạn chưa có hồ sơ kinh doanh. Vui lòng hoàn tất đăng ký seller trước khi tạo sản phẩm hoặc nội dung."
         )
     
     if seller_profile.verification_status == VerificationStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Hồ sơ kinh doanh đang chờ xét duyệt. Vui lòng chờ admin phê duyệt trước khi tạo sản phẩm."
+            detail="Hồ sơ kinh doanh đang chờ xét duyệt. Vui lòng chờ admin phê duyệt trước khi tạo sản phẩm hoặc nội dung."
         )
     
     if seller_profile.verification_status == VerificationStatus.REJECTED:

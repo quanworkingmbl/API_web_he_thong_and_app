@@ -120,17 +120,47 @@
 | `page` / `limit` | int | Phân trang |
 
 ### POST `/api/seller/posts` – Tạo bài đăng
+
+#### Bảng field
+
+| Field | Type | Bắt buộc | Validation | Mô tả |
+|-------|------|----------|------------|-------|
+| `title` | string | ✅ | 2–255 ký tự | Tiêu đề bài đăng |
+| `content` | string | ❌ | — | Nội dung bài đăng |
+| `content_type` | string | ❌ | `POST` \| `PRODUCT_DESCRIPTION` \| `NEWS` \| `ANNOUNCEMENT` | Mặc định: `POST` |
+| `product_id` | integer | ❌ | ID sản phẩm hợp lệ | Liên kết sản phẩm |
+| `images` | string | ❌ | JSON string của array URL | Ảnh bài đăng |
+| `videos` | string | ❌ | JSON string của array URL | Video bài đăng |
+
+#### Request body mẫu (đầy đủ)
 ```json
 {
   "title": "Giới thiệu Gạo ST25 chính hãng",
-  "content": "Gạo ST25 được trồng tại Sóc Trăng...",
+  "content": "Gạo ST25 được trồng tại Sóc Trăng, nổi tiếng thơm ngon...",
+  "content_type": "POST",
   "product_id": 1,
-  "images": "[\"https://s3.amazonaws.com/...\"]",
+  "images": "[\"https://s3.amazonaws.com/bucket/image1.jpg\", \"https://s3.amazonaws.com/bucket/image2.jpg\"]",
   "videos": null
 }
 ```
 
-> Upload ảnh trước qua `/api/medias/uploads` → lấy URL → điền vào `images`.  
+#### Request body tối giản (chỉ bắt buộc)
+```json
+{
+  "title": "Giới thiệu Gạo ST25 chính hãng"
+}
+```
+
+> [!IMPORTANT]
+> **`images` và `videos` phải là JSON string, KHÔNG phải array.**  
+> ✅ Đúng: `"images": "[\"https://url.com/img.jpg\"]"` (string chứa JSON)  
+> ❌ Sai: `"images": ["https://url.com/img.jpg"]` (array trực tiếp → 422)
+
+> [!NOTE]
+> **`content_type`** phải là một trong 4 giá trị UPPERCASE: `POST`, `PRODUCT_DESCRIPTION`, `NEWS`, `ANNOUNCEMENT`.  
+> Gửi sai giá trị (ví dụ `"post"` thường thường) → 422.
+
+> Upload ảnh trước qua `/api/medias/uploads` → lấy `url` → ghép thành JSON string → điền vào `images`.  
 > Bài đăng sau khi tạo → status `PENDING`, cần Admin duyệt. Sửa nội dung → reset về `PENDING`.
 
 ---

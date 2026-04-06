@@ -109,8 +109,8 @@ def check_user_status(user: User) -> None:
             )
 
 
-def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depends(get_db)):
-    """Get current authenticated user from Bearer token in header"""
+def _get_user_from_token(token: str, db: Session) -> User:
+    """Resolve user from JWT token and ensure account is not deleted."""
     payload = decode_access_token(token)
     if payload is None:
         raise HTTPException(
@@ -118,6 +118,7 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     user_id: str = payload.get("sub")
     if user_id is None:
         raise HTTPException(
@@ -125,7 +126,7 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
             detail="Invalid token payload",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     try:
         user_id_int = int(user_id)
     except ValueError:
@@ -134,7 +135,7 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
             detail="Invalid user ID in token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     user = db.query(User).filter(User.id == user_id_int, User.deleted_at.is_(None)).first()
     if user is None:
         raise HTTPException(
@@ -142,6 +143,13 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
             detail="User not found or has been deleted",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    return user
+
+
+def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depends(get_db)):
+    """Get current authenticated user from Bearer token in header"""
+    user = _get_user_from_token(token, db)
     
     if user.activated != 1:
         raise HTTPException(
@@ -152,6 +160,22 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
     # Check user status (BANNED/SUSPENDED)
     check_user_status(user)
     
+    return user
+
+
+def get_current_user_allow_inactive(
+    token: str = Depends(get_bearer_token),
+    db: Session = Depends(get_db)
+):
+    """
+    Get authenticated user from Bearer token without checking `activated` flag.
+    Used for onboarding flows where seller accounts may still be inactive.
+    """
+    user = _get_user_from_token(token, db)
+
+    # BANNED/SUSPENDED accounts are still blocked.
+    check_user_status(user)
+
     return user
 
 def get_current_user_optional(
@@ -269,7 +293,8 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
             detail="Incorrect email or password"
         )
     
-    if user.activated != 1:
+    allow_inactive_for_onboarding = user.type in ("producer", "seller")
+    if user.activated != 1 and not allow_inactive_for_onboarding:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is not activated. Please contact administrator."
@@ -298,7 +323,8 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
                 "id": user.id,
                 "email": user.email,
                 "name": user.name,
-                "type": user.type
+                "type": user.type,
+                "activated": user.activated
             }
         }
     )
