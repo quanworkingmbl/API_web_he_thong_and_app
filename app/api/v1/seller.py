@@ -41,6 +41,7 @@ from app.models.return_request import ReturnRequest, ReturnStatus
 from app.models.category import Category
 from app.models.user import User
 from app.api.v1.auth import get_current_user
+from app.core.permissions import check_seller_kyc_verified
 from app.services.order_state import log_status_change
 from app.services.inventory import increment_stock
 from pydantic import BaseModel, Field
@@ -468,6 +469,7 @@ async def create_seller_product(
     - Sản phẩm tạo xong ở trạng thái **PENDING** chờ Admin duyệt.
     """
     _require_seller(current_user)
+    check_seller_kyc_verified(current_user, db)
 
     new_product = Product(
         name=product_data.name,
@@ -791,6 +793,7 @@ async def create_seller_post(
 ):
     """Seller tạo bài đăng mới. Bài đăng ở trạng thái PENDING chờ Admin duyệt."""
     _require_seller(current_user)
+    check_seller_kyc_verified(current_user, db)
 
     new_post = Content(
         title=post_data.title,
