@@ -14,6 +14,7 @@ from datetime import datetime
 from app.core.database import get_db
 from app.models.content import Content, ContentStatus, ContentAuditLog, ContentAuditAction
 from app.models.product import Product, ProductStatus
+from app.models.traceability import ProductOrigin, ProductCertificate, OriginStatus, CertificateStatus
 from app.models.product_variant import ProductVariant
 from app.models.user import User
 from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
@@ -533,6 +534,39 @@ async def get_product_detail(
         raise HTTPException(status_code=404, detail="Product not found")
     
     producer = db.query(User).filter(User.id == product.producer_id).first()
+    origin = db.query(ProductOrigin).filter(
+        ProductOrigin.product_id == product.id,
+        ProductOrigin.verification_status == OriginStatus.VERIFIED,
+    ).first()
+    certificates = db.query(ProductCertificate).filter(
+        ProductCertificate.product_id == product.id,
+        ProductCertificate.verification_status == CertificateStatus.VERIFIED,
+    ).all()
+
+    origin_payload = None
+    if origin:
+        origin_payload = {
+            "village_name": origin.village_name,
+            "region_id": origin.region_id,
+            "producer_name": origin.producer_name,
+            "batch_number": origin.batch_number,
+            "production_date": origin.production_date.isoformat() if origin.production_date else None,
+            "expiry_date": origin.expiry_date.isoformat() if origin.expiry_date else None,
+            "ingredients": origin.ingredients,
+            "process_summary": origin.process_summary,
+        }
+
+    certificates_payload = [
+        {
+            "certificate_name": cert.certificate_name,
+            "certificate_number": cert.certificate_number,
+            "issued_by": cert.issued_by,
+            "issue_date": cert.issue_date.isoformat() if cert.issue_date else None,
+            "expiry_date": cert.expiry_date.isoformat() if cert.expiry_date else None,
+            "document_url": cert.document_url,
+        }
+        for cert in certificates
+    ]
     
     return {
         "success": True,
@@ -546,6 +580,10 @@ async def get_product_detail(
             "producer_type": producer.type if producer else None,
             "label": product.label,
             "images": product.images,
+            "traceability": {
+                "origin": origin_payload,
+                "certificates": certificates_payload,
+            },
             "created_at": product.created_at.isoformat() if product.created_at else None
         }
     }

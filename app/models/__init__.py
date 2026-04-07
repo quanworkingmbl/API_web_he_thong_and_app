@@ -17,7 +17,7 @@ from app.models.cart import Cart, CartItem
 from app.models.shipment import Shipment, ShipmentStatus, ShippingProvider
 from app.models.return_request import ReturnRequest, ReturnType, ReturnStatus
 from app.models.settlement import SellerWallet, Settlement, Payout, SettlementStatus, PayoutStatus
-from app.models.traceability import ProductCertificate, ProductOrigin, CertificateStatus
+from app.models.traceability import ProductCertificate, ProductOrigin, CertificateStatus, OriginStatus
 from app.models.seller_profile import SellerProfile, VerificationStatus, BusinessType
 from app.models.promotion import Promotion, PromotionType, PromotionStatus
 
@@ -90,6 +90,7 @@ __all__ = [
     "ProductCertificate",
     "ProductOrigin",
     "CertificateStatus",
+    "OriginStatus",
     # Seller Onboarding
     "SellerProfile",
     "VerificationStatus",
