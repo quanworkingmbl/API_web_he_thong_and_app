@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.models.user import User, UserRole, UserStatus
 from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
+import httpx
 import re
 
 router = APIRouter()
@@ -65,6 +66,62 @@ class StandardResponse(BaseModel):
     message: str
     data: Optional[dict] = None
     errors: Optional[list] = None
+
+
+async def verify_recaptcha_v3(token: Optional[str], request: Request) -> None:
+    """Validate reCAPTCHA v3 token with Google siteverify API."""
+    if not settings.RECAPTCHA_ENABLED:
+        return
+
+    if not settings.RECAPTCHA_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="reCAPTCHA is not configured on server",
+        )
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reCAPTCHA token is required",
+        )
+
+    payload = {
+        "secret": settings.RECAPTCHA_SECRET_KEY,
+        "response": token,
+    }
+    if request.client and request.client.host:
+        payload["remoteip"] = request.client.host
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(settings.RECAPTCHA_VERIFY_URL, data=payload)
+            response.raise_for_status()
+            verify_result = response.json()
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to verify reCAPTCHA right now",
+        )
+
+    if not verify_result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reCAPTCHA verification failed",
+        )
+
+    action = verify_result.get("action")
+    if action != settings.RECAPTCHA_EXPECTED_ACTION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reCAPTCHA action",
+        )
+
+    score = float(verify_result.get("score", 0.0) or 0.0)
+    if score < settings.RECAPTCHA_MIN_SCORE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reCAPTCHA score too low",
+        )
 
 def get_bearer_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """Extract Bearer token from Authorization header"""
@@ -270,12 +327,14 @@ async def register(register_data: RegisterRequest, db: Session = Depends(get_db)
     )
 
 @router.post("/login", response_model=StandardResponse)
-async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+async def login(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """
     Login endpoint
     Returns Bearer token in response
     Use token in Authorization header: Authorization: Bearer <token>
     """
+    await verify_recaptcha_v3(login_data.recaptcha, request)
+
     user = db.query(User).filter(
         User.email == login_data.email,
         User.deleted_at.is_(None)

@@ -46,8 +46,15 @@ class Settings(BaseSettings):
     GHN_SHOP_ID: str = ""
     GHN_URL: str = "https://dev-online-gateway.ghn.vn/shiip/public-api"
 
+    # Google reCAPTCHA v3
+    RECAPTCHA_ENABLED: Union[bool, str] = True
+    RECAPTCHA_SECRET_KEY: str = ""
+    RECAPTCHA_VERIFY_URL: str = "https://www.google.com/recaptcha/api/siteverify"
+    RECAPTCHA_MIN_SCORE: float = 0.5
+    RECAPTCHA_EXPECTED_ACTION: str = "login"
+
     
-    @field_validator('DEBUG', 'SHOW_DOCS', mode='before')
+    @field_validator('DEBUG', 'SHOW_DOCS', 'RECAPTCHA_ENABLED', mode='before')
     @classmethod
     def parse_debug(cls, v: Union[bool, str, int]) -> bool:
         """Parse DEBUG/SHOW_DOCS từ nhiều kiểu dữ liệu"""
