@@ -30,15 +30,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from decimal import Decimal
 from app.core.database import get_db
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.product import Product, ProductStatus
+from app.models.traceability import ProductOrigin, OriginStatus
 from app.models.content import Content, ContentStatus
 from app.models.partner_contract import PartnerContract, ContractStatus
 from app.models.return_request import ReturnRequest, ReturnStatus
 from app.models.category import Category
+from app.models.region import Region
 from app.models.user import User
 from app.api.v1.auth import get_current_user
 from app.core.permissions import check_seller_kyc_verified
@@ -61,6 +63,19 @@ def _require_seller(current_user: User):
     return current_user
 
 
+def _validate_origin_payload(origin_data: dict, db: Session):
+    production_date = origin_data.get("production_date")
+    expiry_date = origin_data.get("expiry_date")
+    if production_date and expiry_date and expiry_date < production_date:
+        raise HTTPException(status_code=400, detail="Hạn sử dụng phải lớn hơn hoặc bằng ngày sản xuất")
+
+    region_id = origin_data.get("region_id")
+    if region_id is not None:
+        region = db.query(Region).filter(Region.id == region_id).first()
+        if not region:
+            raise HTTPException(status_code=400, detail="Vùng miền không tồn tại")
+
+
 # ==============================================================================
 # SCHEMAS
 # ==============================================================================
@@ -73,6 +88,28 @@ class RejectOrderRequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=500)
 
 
+class CreateSellerOriginRequest(BaseModel):
+    village_name: str = Field(..., min_length=2, max_length=255)
+    region_id: Optional[int] = None
+    producer_name: str = Field(..., min_length=2, max_length=255)
+    batch_number: str = Field(..., min_length=1, max_length=100)
+    production_date: date
+    expiry_date: Optional[date] = None
+    ingredients: str = Field(..., min_length=2)
+    process_summary: str = Field(..., min_length=10)
+
+
+class UpdateSellerOriginRequest(BaseModel):
+    village_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    region_id: Optional[int] = None
+    producer_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    batch_number: Optional[str] = Field(None, min_length=1, max_length=100)
+    production_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    ingredients: Optional[str] = Field(None, min_length=2)
+    process_summary: Optional[str] = Field(None, min_length=10)
+
+
 class CreateSellerProductRequest(BaseModel):
     """Schema tạo sản phẩm mới – dùng tại Web Seller Portal"""
     name: str = Field(..., min_length=2, max_length=255)
@@ -81,6 +118,7 @@ class CreateSellerProductRequest(BaseModel):
     label: Optional[str] = Field(None, pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT|OCOP)$")
     images: Optional[str] = None   # JSON array of image URLs
     stock_quantity: int = Field(default=0, ge=0)
+    origin: CreateSellerOriginRequest
 
 
 class UpdateSellerProductRequest(BaseModel):
@@ -92,6 +130,7 @@ class UpdateSellerProductRequest(BaseModel):
     images: Optional[str] = None
     stock_quantity: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
+    origin: Optional[UpdateSellerOriginRequest] = None
 
 
 # ==============================================================================
@@ -471,6 +510,9 @@ async def create_seller_product(
     _require_seller(current_user)
     check_seller_kyc_verified(current_user, db)
 
+    origin_data = product_data.origin.dict()
+    _validate_origin_payload(origin_data, db)
+
     new_product = Product(
         name=product_data.name,
         description=product_data.description,
@@ -483,12 +525,29 @@ async def create_seller_product(
         is_active=True,
     )
     db.add(new_product)
+    db.flush()
+
+    origin = ProductOrigin(
+        product_id=new_product.id,
+        village_name=origin_data.get("village_name"),
+        region_id=origin_data.get("region_id"),
+        producer_name=origin_data.get("producer_name"),
+        batch_number=origin_data.get("batch_number"),
+        production_date=origin_data.get("production_date"),
+        expiry_date=origin_data.get("expiry_date"),
+        ingredients=origin_data.get("ingredients"),
+        process_summary=origin_data.get("process_summary"),
+        verification_status=OriginStatus.PENDING,
+    )
+    db.add(origin)
+
     db.commit()
     db.refresh(new_product)
+    db.refresh(origin)
 
     return {
         "success": True,
-        "message": "Sản phẩm đã được tạo. Chờ Admin duyệt.",
+        "message": "Sản phẩm đã được tạo. Chờ Admin duyệt sản phẩm và nguồn gốc.",
         "data": {
             "id": new_product.id,
             "name": new_product.name,
@@ -496,6 +555,7 @@ async def create_seller_product(
             "stock_quantity": new_product.stock_quantity,
             "label": new_product.label,
             "status": "PENDING",
+            "origin_status": origin.verification_status.value if hasattr(origin.verification_status, "value") else str(origin.verification_status),
             "images": new_product.images,
             "created_at": new_product.created_at.isoformat() if new_product.created_at else None,
         },
@@ -528,6 +588,9 @@ async def update_seller_product(
         )
 
     update_data = product_data.dict(exclude_unset=True)
+    origin_input = update_data.pop("origin", None)
+    origin_changed = False
+    origin_record = db.query(ProductOrigin).filter(ProductOrigin.product_id == product.id).first()
 
     # Các field nội dung khi thay đổi cần duyệt lại
     content_fields = {"name", "description", "price", "images", "label"}
@@ -536,15 +599,77 @@ async def update_seller_product(
     for key, value in update_data.items():
         setattr(product, key, value)
 
+    if origin_input is not None:
+        origin_data = {k: v for k, v in origin_input.items() if v is not None}
+
+        existing_values = {}
+        if origin_record:
+            existing_values = {
+                "village_name": origin_record.village_name,
+                "region_id": origin_record.region_id,
+                "producer_name": origin_record.producer_name,
+                "batch_number": origin_record.batch_number,
+                "production_date": origin_record.production_date,
+                "expiry_date": origin_record.expiry_date,
+                "ingredients": origin_record.ingredients,
+                "process_summary": origin_record.process_summary,
+            }
+
+        merged_origin = {**existing_values, **origin_data}
+
+        required_origin_fields = [
+            "village_name",
+            "producer_name",
+            "batch_number",
+            "production_date",
+            "ingredients",
+            "process_summary",
+        ]
+        missing_fields = [field for field in required_origin_fields if not merged_origin.get(field)]
+        if missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Thiếu trường nguồn gốc bắt buộc: {', '.join(missing_fields)}",
+            )
+
+        _validate_origin_payload(merged_origin, db)
+
+        if origin_record:
+            for key, value in merged_origin.items():
+                setattr(origin_record, key, value)
+        else:
+            origin_record = ProductOrigin(
+                product_id=product.id,
+                village_name=merged_origin.get("village_name"),
+                region_id=merged_origin.get("region_id"),
+                producer_name=merged_origin.get("producer_name"),
+                batch_number=merged_origin.get("batch_number"),
+                production_date=merged_origin.get("production_date"),
+                expiry_date=merged_origin.get("expiry_date"),
+                ingredients=merged_origin.get("ingredients"),
+                process_summary=merged_origin.get("process_summary"),
+            )
+            db.add(origin_record)
+
+        origin_record.verification_status = OriginStatus.PENDING
+        origin_record.verified_by = None
+        origin_record.verified_at = None
+        origin_record.rejection_reason = None
+        origin_changed = True
+
     if needs_reapproval:
         product.status = ProductStatus.PENDING
 
     db.commit()
     db.refresh(product)
+    if origin_record:
+        db.refresh(origin_record)
 
     return {
         "success": True,
-        "message": "Đã cập nhật sản phẩm." + (" Chờ Admin duyệt lại." if needs_reapproval else ""),
+        "message": "Đã cập nhật sản phẩm."
+        + (" Chờ Admin duyệt lại." if needs_reapproval else "")
+        + (" Nguồn gốc đang chờ duyệt lại." if origin_changed else ""),
         "data": {
             "id": product.id,
             "name": product.name,
@@ -553,6 +678,11 @@ async def update_seller_product(
             "is_active": product.is_active,
             "label": product.label,
             "status": product.status.value if hasattr(product.status, "value") else str(product.status),
+            "origin_status": (
+                origin_record.verification_status.value
+                if origin_record and hasattr(origin_record.verification_status, "value")
+                else (str(origin_record.verification_status) if origin_record else None)
+            ),
             "images": product.images,
             "updated_at": product.updated_at.isoformat() if product.updated_at else None,
         },

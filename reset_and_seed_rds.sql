@@ -73,6 +73,12 @@ EXCEPTION WHEN duplicate_object THEN null;
 END $$;
 
 DO $$ BEGIN
+    CREATE TYPE originstatus AS ENUM
+        ('PENDING','VERIFIED','REJECTED');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
     ALTER TYPE paymentstatus ADD VALUE IF NOT EXISTS 'PARTIAL_REFUNDED';
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
@@ -109,6 +115,13 @@ CREATE INDEX IF NOT EXISTS ix_payments_vnpay_transaction_no ON payments (vnpay_t
 
 -- Cột mới cho payment_transactions
 ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway_ref VARCHAR(255);
+
+-- Cột mới cho product_origins (duyệt nguồn gốc)
+ALTER TABLE product_origins
+    ADD COLUMN IF NOT EXISTS verification_status originstatus NOT NULL DEFAULT 'PENDING',
+    ADD COLUMN IF NOT EXISTS verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 
 -- Bảng mới
 CREATE TABLE IF NOT EXISTS order_status_logs (
@@ -630,23 +643,28 @@ INSERT INTO product_certificates (id, product_id, certificate_name, certificate_
 -- 27. PRODUCT_ORIGINS
 -- ============================================================================
 INSERT INTO product_origins (id, product_id, village_name, region_id, producer_name,
-    batch_number, production_date, expiry_date, ingredients, process_summary) VALUES
+    batch_number, production_date, expiry_date, ingredients, process_summary,
+    verification_status, verified_by, verified_at, rejection_reason) VALUES
 (1, 1,  'Thôn Tân Lập, Đan Phượng', 1, 'Hộ nông dân Trần Thị Bình',
     'LOT-RAU-2026-001',  '2026-03-28', '2026-04-03',
     'Rau cải xanh 100% tự nhiên, không thuốc trừ sâu',
-    'Gieo hạt → Bón phân hữu cơ → Thu hoạch → Rửa sạch → Đóng gói'),
+    'Gieo hạt → Bón phân hữu cơ → Thu hoạch → Rửa sạch → Đóng gói',
+    'VERIFIED', 1, NOW()-INTERVAL '12 days', NULL),
 (2, 3,  'Vùng cam Hà Giang', 1, 'HTX Nông nghiệp Hà Giang',
     'LOT-CAM-2026-012',  '2026-03-10', '2026-04-10',
     'Cam sành nguyên chất, không chất bảo quản',
-    'Thu hoạch → Phân loại → Rửa sạch → Đóng thùng → Vận chuyển lạnh'),
+    'Thu hoạch → Phân loại → Rửa sạch → Đóng thùng → Vận chuyển lạnh',
+    'VERIFIED', 2, NOW()-INTERVAL '10 days', NULL),
 (3, 5,  'Làng nghề Bát Tràng', 1, 'Gia đình nghệ nhân Lê Văn Cường',
     'LOT-GOM-2026-005',  '2026-02-15', NULL,
     'Đất sét Bát Tràng, men sứ tự nhiên',
-    'Lấy đất → Nhào nặn → Tạo hình → Phơi khô → Tráng men → Nung 1200°C → Kiểm tra'),
+    'Lấy đất → Nhào nặn → Tạo hình → Phơi khô → Tráng men → Nung 1200°C → Kiểm tra',
+    'VERIFIED', 1, NOW()-INTERVAL '9 days', NULL),
 (4, 10, 'Đảo Phú Quốc', 3, 'Cơ sở sản xuất tiêu Phú Quốc',
     'LOT-TIEU-2026-003', '2026-01-05', '2028-01-04',
     'Tiêu đen Phú Quốc hạt nguyên, không phụ gia',
-    'Thu hoạch → Phơi nắng 5–7 ngày → Sàng lọc → Đóng gói hút chân không');
+    'Thu hoạch → Phơi nắng 5–7 ngày → Sàng lọc → Đóng gói hút chân không',
+    'PENDING', NULL, NULL, NULL);
 
 -- ============================================================================
 -- RESET SEQUENCES (đồng bộ lại auto-increment)

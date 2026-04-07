@@ -12,6 +12,12 @@ class CertificateStatus(str, enum.Enum):
     EXPIRED = "EXPIRED"           # Hết hạn
 
 
+class OriginStatus(str, enum.Enum):
+    PENDING = "PENDING"           # Chờ xác minh
+    VERIFIED = "VERIFIED"         # Đã xác minh
+    REJECTED = "REJECTED"         # Từ chối
+
+
 class ProductCertificate(Base):
     """Chứng nhận sản phẩm (VietGAP, OCOP, ISO...)"""
     __tablename__ = "product_certificates"
@@ -61,8 +67,16 @@ class ProductOrigin(Base):
     ingredients = Column(Text, nullable=True)                   # Nguyên liệu / thành phần
     process_summary = Column(Text, nullable=True)               # Mô tả quy trình sản xuất
 
+    verification_status = Column(
+        SQLEnum(OriginStatus), default=OriginStatus.PENDING
+    )
+    verified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     product = relationship("Product", foreign_keys=[product_id])
     region = relationship("Region", foreign_keys=[region_id])
+    verifier = relationship("User", foreign_keys=[verified_by])
