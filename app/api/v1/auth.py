@@ -68,8 +68,36 @@ class StandardResponse(BaseModel):
     errors: Optional[list] = None
 
 
+def _is_recaptcha_bypass_allowed(request: Request) -> bool:
+    """Allow bypass only for trusted clients with a dedicated bypass secret."""
+    if not settings.RECAPTCHA_BYPASS_ENABLED:
+        return False
+
+    bypass_secret = settings.RECAPTCHA_BYPASS_SECRET_KEY
+    if not bypass_secret:
+        return False
+
+    header_secret = request.headers.get("X-Recaptcha-Bypass-Token")
+    if not header_secret or header_secret != bypass_secret:
+        return False
+
+    client_type = (request.headers.get("X-Client-Type") or "").strip().lower()
+    allowed_clients = {
+        c.strip().lower()
+        for c in settings.RECAPTCHA_BYPASS_CLIENTS.split(",")
+        if c.strip()
+    }
+    if not allowed_clients:
+        return True
+
+    return client_type in allowed_clients
+
+
 async def verify_recaptcha_v3(token: Optional[str], request: Request) -> None:
     """Validate reCAPTCHA v3 token with Google siteverify API."""
+    if _is_recaptcha_bypass_allowed(request):
+        return
+
     if not settings.RECAPTCHA_ENABLED:
         return
 
