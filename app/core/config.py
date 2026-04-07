@@ -52,9 +52,12 @@ class Settings(BaseSettings):
     RECAPTCHA_VERIFY_URL: str = "https://www.google.com/recaptcha/api/siteverify"
     RECAPTCHA_MIN_SCORE: float = 0.5
     RECAPTCHA_EXPECTED_ACTION: str = "login"
+    RECAPTCHA_BYPASS_ENABLED: Union[bool, str] = False
+    RECAPTCHA_BYPASS_SECRET_KEY: str = ""
+    RECAPTCHA_BYPASS_CLIENTS: str = "mobile,postman"
 
     
-    @field_validator('DEBUG', 'SHOW_DOCS', 'RECAPTCHA_ENABLED', mode='before')
+    @field_validator('DEBUG', 'SHOW_DOCS', 'RECAPTCHA_ENABLED', 'RECAPTCHA_BYPASS_ENABLED', mode='before')
     @classmethod
     def parse_debug(cls, v: Union[bool, str, int]) -> bool:
         """Parse DEBUG/SHOW_DOCS từ nhiều kiểu dữ liệu"""
