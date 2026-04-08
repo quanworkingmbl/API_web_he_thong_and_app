@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
 from datetime import date, datetime, timedelta
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -25,7 +25,12 @@ router = APIRouter()
 # REQUEST/RESPONSE SCHEMAS
 # ==============================================================================
 
-class ModerationResponse(BaseModel):
+
+class AIBaseSchema(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+
+class ModerationResponse(AIBaseSchema):
     success: bool
     decision: str
     confidence: float
@@ -38,7 +43,7 @@ class ModerationResponse(BaseModel):
     estimated_cost_usd: float
 
 
-class GenerateDescriptionRequest(BaseModel):
+class GenerateDescriptionRequest(AIBaseSchema):
     name: str = Field(default="", description="Tên sản phẩm (nếu không dùng product_id)")
     category: str = ""
     region: str = ""
@@ -49,7 +54,7 @@ class GenerateDescriptionRequest(BaseModel):
     use_sonnet: bool = Field(False, description="Dùng Sonnet thay vì Haiku (chất lượng cao, chi phí cao hơn)")
 
 
-class GenerateBlogRequest(BaseModel):
+class GenerateBlogRequest(AIBaseSchema):
     topic: str = Field(..., min_length=5, max_length=300)
     main_keyword: str = ""
     secondary_keywords: str = ""
@@ -59,7 +64,7 @@ class GenerateBlogRequest(BaseModel):
     use_sonnet: bool = False
 
 
-class GenerateDescriptionResponse(BaseModel):
+class GenerateDescriptionResponse(AIBaseSchema):
     success: bool
     description: str
     model_used: str
@@ -70,7 +75,7 @@ class GenerateDescriptionResponse(BaseModel):
     latency_ms: int
 
 
-class GenerateBlogResponse(BaseModel):
+class GenerateBlogResponse(AIBaseSchema):
     success: bool
     content: str
     model_used: str
@@ -81,7 +86,7 @@ class GenerateBlogResponse(BaseModel):
     latency_ms: int
 
 
-class SearchResponse(BaseModel):
+class SearchResponse(AIBaseSchema):
     success: bool
     results: list
     query: str
