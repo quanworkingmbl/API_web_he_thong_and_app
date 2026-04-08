@@ -1,4 +1,5 @@
 from app.models.user import User, UserRole, UserOrganization
+from app.models.refresh_token import RefreshToken
 from app.models.role import Role
 from app.models.organization import Organization
 from app.models.media import Media
@@ -36,11 +37,13 @@ from app.models.shipping_service import ShippingRate, ShippingServiceType
 from app.models.review_image import ReviewImage
 from app.models.settlement_item import SettlementItem
 from app.models.permission import Permission, RolePermission
+from app.models.ai_log import AIModerationLog, AIGenerationCache, AICostLog, ProductEmbedding
 
 __all__ = [
     "User",
     "UserRole",
     "UserOrganization",
+    "RefreshToken",
     "Role",
     "Organization",
     "Media",
@@ -128,6 +131,11 @@ __all__ = [
     "SettlementItem",
     "Permission",
     "RolePermission",
+    # AI
+    "AIModerationLog",
+    "AIGenerationCache",
+    "AICostLog",
+    "ProductEmbedding",
 ]
 
 

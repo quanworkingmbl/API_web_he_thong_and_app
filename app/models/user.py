@@ -32,6 +32,7 @@ class User(Base):
     # Relationships
     roles = relationship("UserRole", back_populates="user")
     organizations = relationship("UserOrganization", back_populates="user")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
 class UserRole(Base):
     __tablename__ = "user_roles"
