@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_SECRET_KEY: str = ""
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
@@ -46,6 +48,20 @@ class Settings(BaseSettings):
     GHN_SHOP_ID: str = ""
     GHN_URL: str = "https://dev-online-gateway.ghn.vn/shiip/public-api"
 
+    # --- AWS Bedrock AI ---
+    BEDROCK_MODERATION_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    BEDROCK_CREATIVE_MODEL_ID: str = "anthropic.claude-3-sonnet-20240229-v1:0"
+    BEDROCK_EMBEDDING_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
+
+    # AI Operation Settings
+    AI_MODERATION_TIMEOUT: int = 6          # seconds
+    AI_DESCRIPTION_TIMEOUT: int = 15        # seconds
+    AI_BLOG_TIMEOUT: int = 30               # seconds
+    AI_EMBEDDING_TIMEOUT: int = 5           # seconds
+    AI_MAX_RETRIES: int = 2
+    AI_DAILY_BUDGET_USD: float = 5.0        # Cost guardrail - auto-downgrade khi vượt
+    AI_CACHE_TTL_HOURS: int = 24            # Cache expiration
+
     # Google reCAPTCHA v3
     RECAPTCHA_ENABLED: Union[bool, str] = True
     RECAPTCHA_SECRET_KEY: str = ""
@@ -72,6 +88,11 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+
+    @property
+    def refresh_token_secret_key(self) -> str:
+        # Fall back to access-token secret to keep backward compatibility.
+        return self.REFRESH_TOKEN_SECRET_KEY or self.SECRET_KEY
     
     class Config:
         env_file = ".env"

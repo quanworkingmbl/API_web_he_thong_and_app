@@ -25,6 +25,7 @@ from app.api.v1 import (
     traceability,
     seller_onboarding,
     promotions,
+    ai,
 )
 
 api_router = APIRouter()
@@ -75,4 +76,7 @@ api_router.include_router(promotions.router, prefix="/promotions", tags=["🎁 P
 
 # Mobile App API
 api_router.include_router(mobile_app.router, prefix="/mobile", tags=["Mobile App"])
+
+# AI Services
+api_router.include_router(ai.router, prefix="/ai", tags=["🤖 AI Services"])
 

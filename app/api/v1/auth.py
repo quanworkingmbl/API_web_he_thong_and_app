@@ -1,19 +1,29 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from typing import Optional
+from uuid import uuid4
 from app.core.database import get_db
-from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
+from app.core.security import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
+    hash_refresh_token,
+)
 from app.core.config import settings
 from app.models.user import User, UserRole, UserStatus
+from app.models.refresh_token import RefreshToken
 from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
 import httpx
 import re
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 security = HTTPBearer()
 
 class RegisterRequest(BaseModel):
@@ -33,9 +43,16 @@ class LoginRequest(BaseModel):
     password: str
     recaptcha: Optional[str] = None
 
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
 class TokenResponse(BaseModel):
     api_token: str
+    access_token: Optional[str] = None
     expires_at: str
+    refresh_token: Optional[str] = None
+    refresh_expires_at: Optional[str] = None
     token_type: str = "Bearer"
 
 class UserInfoResponse(BaseModel):
@@ -66,6 +83,116 @@ class StandardResponse(BaseModel):
     message: str
     data: Optional[dict] = None
     errors: Optional[list] = None
+
+
+def _to_utc_iso(dt: datetime) -> str:
+    return dt.isoformat() + "Z"
+
+
+def _get_client_ip(request: Request) -> Optional[str]:
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+def _extract_refresh_token(refresh_data: Optional[RefreshTokenRequest], request: Request) -> Optional[str]:
+    if refresh_data and refresh_data.refresh_token:
+        return refresh_data.refresh_token
+
+    cookie_token = request.cookies.get("refresh_token")
+    if cookie_token:
+        return cookie_token
+
+    header_token = request.headers.get("X-Refresh-Token")
+    if header_token:
+        return header_token
+
+    return None
+
+
+def _create_token_pair(
+    user: User,
+    request: Request,
+    db: Session,
+    family_id: Optional[str] = None,
+) -> dict:
+    now = datetime.utcnow()
+    access_expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    refresh_expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
+    access_expires_at = now + access_expires_delta
+    refresh_expires_at = now + refresh_expires_delta
+
+    access_token = create_access_token(
+        data={"sub": str(user.id), "email": user.email},
+        expires_delta=access_expires_delta,
+    )
+
+    refresh_jti = str(uuid4())
+    refresh_family_id = family_id or str(uuid4())
+    refresh_token = create_refresh_token(
+        data={
+            "sub": str(user.id),
+            "email": user.email,
+            "jti": refresh_jti,
+            "family_id": refresh_family_id,
+        },
+        expires_delta=refresh_expires_delta,
+    )
+
+    refresh_token_row = RefreshToken(
+        user_id=user.id,
+        jti=refresh_jti,
+        family_id=refresh_family_id,
+        token_hash=hash_refresh_token(refresh_token),
+        expires_at=refresh_expires_at,
+        created_by_ip=_get_client_ip(request),
+        created_by_user_agent=request.headers.get("User-Agent"),
+    )
+    db.add(refresh_token_row)
+
+    return {
+        "api_token": access_token,
+        "access_token": access_token,
+        "expires_at": _to_utc_iso(access_expires_at),
+        "refresh_token": refresh_token,
+        "refresh_expires_at": _to_utc_iso(refresh_expires_at),
+        "token_type": "Bearer",
+        "refresh_jti": refresh_jti,
+        "refresh_family_id": refresh_family_id,
+    }
+
+
+def _revoke_token_family(db: Session, user_id: int, family_id: str, reason: str) -> int:
+    now = datetime.utcnow()
+    tokens = db.query(RefreshToken).filter(
+        RefreshToken.user_id == user_id,
+        RefreshToken.family_id == family_id,
+        RefreshToken.revoked_at.is_(None),
+    ).all()
+
+    for token in tokens:
+        token.revoked_at = now
+        token.revoked_reason = reason
+
+    return len(tokens)
+
+
+def _revoke_all_active_user_tokens(db: Session, user_id: int, reason: str) -> int:
+    now = datetime.utcnow()
+    tokens = db.query(RefreshToken).filter(
+        RefreshToken.user_id == user_id,
+        RefreshToken.revoked_at.is_(None),
+    ).all()
+
+    for token in tokens:
+        token.revoked_at = now
+        token.revoked_reason = reason
+
+    return len(tokens)
 
 
 def _is_recaptcha_bypass_allowed(request: Request) -> bool:
@@ -390,22 +517,19 @@ async def login(login_data: LoginRequest, request: Request, db: Session = Depend
     # Check user status (BANNED/SUSPENDED)
     check_user_status(user)
     
-    expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": str(user.id), "email": user.email},
-        expires_delta=expires_delta
-    )
-    
-    # Use UTC time and add Z suffix for proper timezone
-    expires_at = datetime.utcnow() + expires_delta
+    token_pair = _create_token_pair(user=user, request=request, db=db)
+    db.commit()
     
     return StandardResponse(
         success=True,
         message="Login successful",
         data={
-            "api_token": access_token,
-            "token_type": "Bearer",
-            "expires_at": expires_at.isoformat() + "Z",  # Add Z for UTC timezone
+            "api_token": token_pair["api_token"],
+            "access_token": token_pair["access_token"],
+            "refresh_token": token_pair["refresh_token"],
+            "token_type": token_pair["token_type"],
+            "expires_at": token_pair["expires_at"],
+            "refresh_expires_at": token_pair["refresh_expires_at"],
             "user": {
                 "id": user.id,
                 "email": user.email,
@@ -465,42 +589,178 @@ async def get_current_user_info(
     )
 
 @router.post("/logout", response_model=StandardResponse)
-async def logout(current_user: User = Depends(get_current_user)):
+async def logout(
+    request: Request,
+    refresh_data: Optional[RefreshTokenRequest] = Body(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
     Logout endpoint
-    Note: Client should remove token from storage
-    JWT tokens cannot be invalidated server-side without a token blacklist
+    Revokes refresh token for current device when provided.
+    If no refresh token is provided, revokes all active refresh tokens of current user.
     """
+    revoked_count = 0
+    raw_refresh_token = _extract_refresh_token(refresh_data, request)
+
+    if raw_refresh_token:
+        payload = decode_refresh_token(raw_refresh_token)
+        if payload and str(payload.get("sub")) == str(current_user.id):
+            token_jti = payload.get("jti")
+            if token_jti:
+                token_row = db.query(RefreshToken).filter(
+                    RefreshToken.user_id == current_user.id,
+                    RefreshToken.jti == token_jti,
+                    RefreshToken.revoked_at.is_(None),
+                ).first()
+                if token_row:
+                    token_row.revoked_at = datetime.utcnow()
+                    token_row.revoked_reason = "logout"
+                    revoked_count = 1
+
+    if revoked_count == 0:
+        revoked_count = _revoke_all_active_user_tokens(
+            db,
+            user_id=current_user.id,
+            reason="logout_all_sessions",
+        )
+
+    db.commit()
+
     return StandardResponse(
         success=True,
-        message="Logged out successfully. Please remove token from client storage."
+        message="Logged out successfully. Please remove token from client storage.",
+        data={"revoked_refresh_tokens": revoked_count},
     )
 
 @router.post("/refresh", response_model=StandardResponse)
 async def refresh_token(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    request: Request,
+    refresh_data: Optional[RefreshTokenRequest] = Body(default=None),
+    db: Session = Depends(get_db),
 ):
     """
-    Refresh access token
-    Requires valid Bearer token in Authorization header
-    Returns new token with extended expiration
+    Refresh token endpoint using refresh-token rotation.
+    Accepts refresh token from JSON body, cookie (`refresh_token`) or header (`X-Refresh-Token`).
     """
-    expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": str(current_user.id), "email": current_user.email},
-        expires_delta=expires_delta
+    raw_refresh_token = _extract_refresh_token(refresh_data, request)
+    if not raw_refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token is required",
+        )
+
+    payload = decode_refresh_token(raw_refresh_token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    user_id = payload.get("sub")
+    token_jti = payload.get("jti")
+    family_id = payload.get("family_id")
+    if not user_id or not token_jti or not family_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token payload",
+        )
+
+    try:
+        user_id_int = int(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user ID in refresh token",
+        )
+
+    user = db.query(User).filter(
+        User.id == user_id_int,
+        User.deleted_at.is_(None),
+    ).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or has been deleted",
+        )
+
+    allow_inactive_for_onboarding = user.type in ("producer", "seller")
+    if user.activated != 1 and not allow_inactive_for_onboarding:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is not activated. Please contact administrator.",
+        )
+
+    check_user_status(user)
+
+    refresh_row = db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id,
+        RefreshToken.jti == token_jti,
+    ).first()
+
+    token_hash = hash_refresh_token(raw_refresh_token)
+    if (
+        refresh_row is None
+        or refresh_row.family_id != family_id
+        or refresh_row.token_hash != token_hash
+    ):
+        _revoke_token_family(
+            db,
+            user_id=user.id,
+            family_id=family_id,
+            reason="refresh_token_reuse_detected",
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token is invalid",
+        )
+
+    if refresh_row.revoked_at is not None:
+        _revoke_token_family(
+            db,
+            user_id=user.id,
+            family_id=family_id,
+            reason="refresh_token_reuse_detected",
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked",
+        )
+
+    if refresh_row.expires_at <= datetime.utcnow():
+        refresh_row.revoked_at = datetime.utcnow()
+        refresh_row.revoked_reason = "expired"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired",
+        )
+
+    token_pair = _create_token_pair(
+        user=user,
+        request=request,
+        db=db,
+        family_id=family_id,
     )
-    
-    expires_at = datetime.utcnow() + expires_delta
+
+    refresh_row.revoked_at = datetime.utcnow()
+    refresh_row.revoked_reason = "rotated"
+    refresh_row.replaced_by_jti = token_pair["refresh_jti"]
+
+    db.commit()
     
     return StandardResponse(
         success=True,
         message="Token refreshed successfully",
         data={
-            "api_token": access_token,
-            "token_type": "Bearer",
-            "expires_at": expires_at.isoformat()
+            "api_token": token_pair["api_token"],
+            "access_token": token_pair["access_token"],
+            "refresh_token": token_pair["refresh_token"],
+            "token_type": token_pair["token_type"],
+            "expires_at": token_pair["expires_at"],
+            "refresh_expires_at": token_pair["refresh_expires_at"],
         }
     )
 
