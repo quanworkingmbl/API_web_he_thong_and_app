@@ -30,6 +30,14 @@ from app.services.ai.prompts import (
 logger = logging.getLogger(__name__)
 
 
+def _is_bedrock_access_denied(error: Exception) -> bool:
+    message = str(error)
+    return (
+        "AccessDeniedException" in message
+        or "not authorized to perform: bedrock:InvokeModel" in message
+    )
+
+
 # ==============================================================================
 # POST-CHECK: Chặn claim bịa sau khi AI generate
 # ==============================================================================
@@ -131,8 +139,24 @@ class ContentGenerator:
                 timeout=settings.AI_DESCRIPTION_TIMEOUT,
             )
         except BedrockClientError as e:
-            logger.error("Description generation failed: %s", e)
-            raise
+            fallback_model = settings.BEDROCK_MODERATION_MODEL_ID
+            if model_id != fallback_model and _is_bedrock_access_denied(e):
+                logger.warning(
+                    "Description generation denied for model=%s; fallback to model=%s",
+                    model_id,
+                    fallback_model,
+                )
+                response = await bedrock_client.invoke_claude(
+                    prompt=user_prompt,
+                    system_prompt=DESCRIPTION_SYSTEM_PROMPT,
+                    model_id=fallback_model,
+                    max_tokens=800,
+                    temperature=0.4,
+                    timeout=settings.AI_DESCRIPTION_TIMEOUT,
+                )
+            else:
+                logger.error("Description generation failed: %s", e)
+                raise
 
         latency_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -226,8 +250,24 @@ class ContentGenerator:
                 timeout=settings.AI_BLOG_TIMEOUT,
             )
         except BedrockClientError as e:
-            logger.error("Blog generation failed: %s", e)
-            raise
+            fallback_model = settings.BEDROCK_MODERATION_MODEL_ID
+            if model_id != fallback_model and _is_bedrock_access_denied(e):
+                logger.warning(
+                    "Blog generation denied for model=%s; fallback to model=%s",
+                    model_id,
+                    fallback_model,
+                )
+                response = await bedrock_client.invoke_claude(
+                    prompt=user_prompt,
+                    system_prompt=BLOG_SYSTEM_PROMPT,
+                    model_id=fallback_model,
+                    max_tokens=2000,
+                    temperature=0.6,
+                    timeout=settings.AI_BLOG_TIMEOUT,
+                )
+            else:
+                logger.error("Blog generation failed: %s", e)
+                raise
 
         latency_ms = int((time.monotonic() - start_time) * 1000)
 

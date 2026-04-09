@@ -17,8 +17,17 @@ from pydantic import BaseModel, Field, ConfigDict
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.services.ai.bedrock_client import BedrockClientError
 
 router = APIRouter()
+
+
+def _is_bedrock_access_denied(error: Exception) -> bool:
+    message = str(error)
+    return (
+        "AccessDeniedException" in message
+        or "not authorized to perform: bedrock:InvokeModel" in message
+    )
 
 
 # ==============================================================================
@@ -257,6 +266,13 @@ async def generate_product_description(
             highlights=req.highlights or "",
             use_sonnet=req.use_sonnet,
         )
+    except BedrockClientError as e:
+        if _is_bedrock_access_denied(e):
+            raise HTTPException(
+                status_code=503,
+                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+            )
+        raise HTTPException(status_code=502, detail=f"AI generation service error: {str(e)}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -303,6 +319,13 @@ async def generate_description_freeform(
             highlights=request_data.highlights,
             use_sonnet=request_data.use_sonnet,
         )
+    except BedrockClientError as e:
+        if _is_bedrock_access_denied(e):
+            raise HTTPException(
+                status_code=503,
+                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+            )
+        raise HTTPException(status_code=502, detail=f"AI generation service error: {str(e)}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -343,6 +366,13 @@ async def generate_blog(
             notes=request_data.notes,
             use_sonnet=request_data.use_sonnet,
         )
+    except BedrockClientError as e:
+        if _is_bedrock_access_denied(e):
+            raise HTTPException(
+                status_code=503,
+                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+            )
+        raise HTTPException(status_code=502, detail=f"AI blog generation service error: {str(e)}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
