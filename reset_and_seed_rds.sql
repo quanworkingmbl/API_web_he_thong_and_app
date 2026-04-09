@@ -1,7 +1,8 @@
 -- ============================================================================
 -- RESET & SEED DATABASE - PostgreSQL RDS AWS
--- Cập nhật: 2026-04-05 – Tích hợp đầy đủ schema mới:
---   Order Security, Complaint Management, Payment Management
+-- Cập nhật: 2026-04-09 – Tích hợp đầy đủ schema mới:
+--   Order Security, Complaint Management, Payment Management,
+--   Cart Variant, User Status, Content Audit, Refresh Token, AI tables
 --
 -- CÁCH DÙNG: Chạy TOÀN BỘ file này trong pgAdmin / DBeaver
 --   File tự tạo enum/bảng mới nếu chưa có (idempotent schema)
@@ -10,44 +11,65 @@
 
 -- ############################################################################
 -- BƯỚC 1: TRUNCATE DỮ LIỆU CŨ (giữ cấu trúc bảng)
+-- Truncate động: chỉ truncate các bảng đang tồn tại để tránh lỗi khi schema thiếu
 -- ############################################################################
 
-TRUNCATE TABLE
-    payment_audit_logs,
-    complaint_status_logs,
-    complaint_comments,
-    order_status_logs,
-    return_requests,
-    product_origins,
-    product_certificates,
-    payouts,
-    settlements,
-    seller_wallets,
-    payment_transactions,
-    payments,
-    shipments,
-    complaints,
-    order_items,
-    orders,
-    cart_items,
-    carts,
-    promotions,
-    reviews,
-    product_approvals,
-    product_media,
-    contents,
-    partner_contracts,
-    seller_profiles,
-    user_roles,
-    user_organizations,
-    products,
-    categories,
-    regions,
-    medias,
-    users,
-    roles,
-    organizations
-RESTART IDENTITY CASCADE;
+DO $$
+DECLARE
+    table_list TEXT[] := ARRAY[
+        'ai_moderation_logs',
+        'ai_generation_cache',
+        'ai_cost_logs',
+        'product_embeddings',
+        'refresh_tokens',
+        'payment_audit_logs',
+        'complaint_status_logs',
+        'complaint_comments',
+        'content_audit_logs',
+        'product_price_logs',
+        'order_status_logs',
+        'return_requests',
+        'product_origins',
+        'product_certificates',
+        'payouts',
+        'settlements',
+        'seller_wallets',
+        'payment_transactions',
+        'payments',
+        'shipments',
+        'complaints',
+        'order_items',
+        'orders',
+        'cart_items',
+        'carts',
+        'promotions',
+        'reviews',
+        'product_approvals',
+        'product_media',
+        'contents',
+        'partner_contracts',
+        'seller_profiles',
+        'user_roles',
+        'user_organizations',
+        'products',
+        'categories',
+        'regions',
+        'medias',
+        'users',
+        'roles',
+        'organizations'
+    ];
+    existing_tables TEXT;
+BEGIN
+    SELECT string_agg(format('%I', t), ', ')
+    INTO existing_tables
+    FROM unnest(table_list) AS t
+    WHERE to_regclass(format('public.%I', t)) IS NOT NULL;
+
+    IF existing_tables IS NOT NULL THEN
+        EXECUTE 'TRUNCATE TABLE ' || existing_tables || ' RESTART IDENTITY CASCADE';
+    END IF;
+END $$;
 
 
 -- ############################################################################
@@ -82,6 +104,189 @@ DO $$ BEGIN
     ALTER TYPE paymentstatus ADD VALUE IF NOT EXISTS 'PARTIAL_REFUNDED';
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
+
+DO $$ BEGIN
+    CREATE TYPE userstatus AS ENUM
+        ('ACTIVE','SUSPENDED','BANNED');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE contentauditaction AS ENUM
+        ('CREATE','UPDATE','APPROVE','REJECT','DELETE','RESTORE');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+-- Cột mới cho users
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS status          userstatus NOT NULL DEFAULT 'ACTIVE',
+    ADD COLUMN IF NOT EXISTS status_reason   TEXT,
+    ADD COLUMN IF NOT EXISTS status_expire_at TIMESTAMPTZ;
+
+-- Cột mới cho contents
+ALTER TABLE contents
+    ADD COLUMN IF NOT EXISTS is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS deleted_at      TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS deleted_by      INTEGER,
+    ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_contents_deleted_by'
+    ) THEN
+        ALTER TABLE contents
+        ADD CONSTRAINT fk_contents_deleted_by
+        FOREIGN KEY (deleted_by)
+        REFERENCES users(id);
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS ix_contents_is_active ON contents (is_active);
+
+CREATE TABLE IF NOT EXISTS content_audit_logs (
+    id         SERIAL PRIMARY KEY,
+    content_id INTEGER NOT NULL REFERENCES contents(id),
+    action     contentauditaction NOT NULL,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    old_status VARCHAR(20),
+    new_status VARCHAR(20),
+    notes      TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_content_audit_logs_id ON content_audit_logs (id);
+CREATE INDEX IF NOT EXISTS ix_content_audit_logs_content_id ON content_audit_logs (content_id);
+
+CREATE TABLE IF NOT EXISTS product_price_logs (
+    id         SERIAL PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    old_price  NUMERIC(15,2) NOT NULL,
+    new_price  NUMERIC(15,2) NOT NULL,
+    changed_by INTEGER NOT NULL REFERENCES users(id),
+    reason     TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_product_price_logs_id ON product_price_logs (id);
+CREATE INDEX IF NOT EXISTS ix_product_price_logs_product_id ON product_price_logs (product_id);
+
+-- Cột/FK mới cho cart_items.variant_id
+ALTER TABLE cart_items
+    ADD COLUMN IF NOT EXISTS variant_id INTEGER;
+CREATE INDEX IF NOT EXISTS ix_cart_items_variant_id ON cart_items (variant_id);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'cart_items'
+          AND column_name = 'variant_id'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'product_variants'
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_cart_items_variant_id'
+    )
+    THEN
+        ALTER TABLE cart_items
+        ADD CONSTRAINT fk_cart_items_variant_id
+        FOREIGN KEY (variant_id)
+        REFERENCES product_variants(id)
+        ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- Bảng mới cho auth refresh token
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id                    SERIAL PRIMARY KEY,
+    user_id               INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    jti                   VARCHAR(64) NOT NULL UNIQUE,
+    family_id             VARCHAR(64) NOT NULL,
+    token_hash            VARCHAR(128) NOT NULL UNIQUE,
+    expires_at            TIMESTAMPTZ NOT NULL,
+    revoked_at            TIMESTAMPTZ,
+    replaced_by_jti       VARCHAR(64),
+    created_by_ip         VARCHAR(64),
+    created_by_user_agent VARCHAR(512),
+    revoked_reason        TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_refresh_tokens_id ON refresh_tokens (id);
+CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON refresh_tokens (user_id);
+CREATE INDEX IF NOT EXISTS ix_refresh_tokens_family_id ON refresh_tokens (family_id);
+CREATE INDEX IF NOT EXISTS ix_refresh_tokens_expires_at ON refresh_tokens (expires_at);
+
+-- Bảng AI
+CREATE TABLE IF NOT EXISTS ai_moderation_logs (
+    id                 SERIAL PRIMARY KEY,
+    product_id         INTEGER REFERENCES products(id),
+    content_id         INTEGER REFERENCES contents(id),
+    rule_engine_result VARCHAR(20),
+    rule_engine_flags  TEXT,
+    model_used         VARCHAR(100) NOT NULL,
+    ai_decision        VARCHAR(20) NOT NULL,
+    ai_confidence      DOUBLE PRECISION,
+    ai_reasons         TEXT,
+    ai_flags           TEXT,
+    escalated          BOOLEAN DEFAULT FALSE,
+    escalation_reason  VARCHAR(200),
+    processing_time_ms INTEGER,
+    input_tokens       INTEGER DEFAULT 0,
+    output_tokens      INTEGER DEFAULT 0,
+    estimated_cost_usd DOUBLE PRECISION DEFAULT 0.0,
+    raw_response       TEXT,
+    created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_ai_moderation_logs_id ON ai_moderation_logs (id);
+CREATE INDEX IF NOT EXISTS ix_ai_moderation_logs_product_id ON ai_moderation_logs (product_id);
+CREATE INDEX IF NOT EXISTS ix_ai_moderation_logs_content_id ON ai_moderation_logs (content_id);
+
+CREATE TABLE IF NOT EXISTS ai_generation_cache (
+    id          SERIAL PRIMARY KEY,
+    input_hash  VARCHAR(64) NOT NULL UNIQUE,
+    task_type   VARCHAR(30) NOT NULL,
+    model_used  VARCHAR(100),
+    input_text  TEXT,
+    output_text TEXT,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    expires_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_ai_generation_cache_id ON ai_generation_cache (id);
+CREATE INDEX IF NOT EXISTS ix_ai_generation_cache_input_hash ON ai_generation_cache (input_hash);
+CREATE INDEX IF NOT EXISTS ix_ai_generation_cache_expires_at ON ai_generation_cache (expires_at);
+
+CREATE TABLE IF NOT EXISTS ai_cost_logs (
+    id                  SERIAL PRIMARY KEY,
+    log_date            DATE NOT NULL,
+    model_id            VARCHAR(100) NOT NULL,
+    task_type           VARCHAR(30) NOT NULL,
+    request_count       INTEGER DEFAULT 0,
+    total_input_tokens  INTEGER DEFAULT 0,
+    total_output_tokens INTEGER DEFAULT 0,
+    total_cost_usd      DOUBLE PRECISION DEFAULT 0.0,
+    CONSTRAINT uq_cost_date_model_task UNIQUE (log_date, model_id, task_type)
+);
+CREATE INDEX IF NOT EXISTS ix_ai_cost_logs_id ON ai_cost_logs (id);
+CREATE INDEX IF NOT EXISTS ix_ai_cost_logs_log_date ON ai_cost_logs (log_date);
+
+CREATE TABLE IF NOT EXISTS product_embeddings (
+    id               SERIAL PRIMARY KEY,
+    product_id       INTEGER NOT NULL UNIQUE REFERENCES products(id),
+    embedding_text   TEXT,
+    embedding_vector TEXT,
+    vector_dimension INTEGER,
+    model_version    VARCHAR(100),
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_product_embeddings_id ON product_embeddings (id);
+CREATE INDEX IF NOT EXISTS ix_product_embeddings_product_id ON product_embeddings (product_id);
 
 -- Cột mới cho orders
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
@@ -550,13 +755,13 @@ INSERT INTO promotions (id, code, name, description, promotion_type, discount_va
 -- ============================================================================
 INSERT INTO carts (id, user_id) VALUES (1,6),(2,7),(3,8);
 
-INSERT INTO cart_items (cart_id, product_id, quantity, unit_price) VALUES
-(1, 3,  2,  50000.00),
-(1, 10, 1, 250000.00),
-(2, 5,  1, 350000.00),
-(2, 6,  2, 280000.00),
-(3, 1,  3,  25000.00),
-(3, 9,  1, 180000.00);
+INSERT INTO cart_items (cart_id, product_id, variant_id, quantity, unit_price) VALUES
+(1, 3,  NULL, 2,  50000.00),
+(1, 10, NULL, 1, 250000.00),
+(2, 5,  NULL, 1, 350000.00),
+(2, 6,  NULL, 2, 280000.00),
+(3, 1,  NULL, 3,  25000.00),
+(3, 9,  NULL, 1, 180000.00);
 
 -- ============================================================================
 -- 21. SHIPMENTS
