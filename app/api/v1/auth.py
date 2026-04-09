@@ -21,10 +21,12 @@ from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
 import httpx
 import re
+import logging
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 security = HTTPBearer()
+logger = logging.getLogger(__name__)
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -240,32 +242,55 @@ async def verify_recaptcha_v3(token: Optional[str], request: Request) -> None:
             detail="reCAPTCHA token is required",
         )
 
+    client_ip = _get_client_ip(request)
     payload = {
         "secret": settings.RECAPTCHA_SECRET_KEY,
         "response": token,
     }
-    if request.client and request.client.host:
-        payload["remoteip"] = request.client.host
+    if client_ip:
+        payload["remoteip"] = client_ip
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(settings.RECAPTCHA_VERIFY_URL, data=payload)
             response.raise_for_status()
             verify_result = response.json()
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        logger.warning("reCAPTCHA verify HTTP error: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to verify reCAPTCHA right now",
         )
 
     if not verify_result.get("success"):
+        error_codes = verify_result.get("error-codes") or []
+        logger.warning(
+            "reCAPTCHA verify failed: error_codes=%s hostname=%s action=%s score=%s client_ip=%s",
+            error_codes,
+            verify_result.get("hostname"),
+            verify_result.get("action"),
+            verify_result.get("score"),
+            client_ip,
+        )
+
+        detail = "reCAPTCHA verification failed"
+        if settings.DEBUG and error_codes:
+            detail = f"reCAPTCHA verification failed: {', '.join(error_codes)}"
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="reCAPTCHA verification failed",
+            detail=detail,
         )
 
     action = verify_result.get("action")
     if action != settings.RECAPTCHA_EXPECTED_ACTION:
+        logger.warning(
+            "reCAPTCHA action mismatch: got=%s expected=%s hostname=%s client_ip=%s",
+            action,
+            settings.RECAPTCHA_EXPECTED_ACTION,
+            verify_result.get("hostname"),
+            client_ip,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid reCAPTCHA action",
@@ -273,6 +298,14 @@ async def verify_recaptcha_v3(token: Optional[str], request: Request) -> None:
 
     score = float(verify_result.get("score", 0.0) or 0.0)
     if score < settings.RECAPTCHA_MIN_SCORE:
+        logger.warning(
+            "reCAPTCHA score too low: score=%.3f min=%.3f action=%s hostname=%s client_ip=%s",
+            score,
+            settings.RECAPTCHA_MIN_SCORE,
+            action,
+            verify_result.get("hostname"),
+            client_ip,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="reCAPTCHA score too low",
