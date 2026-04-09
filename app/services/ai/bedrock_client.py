@@ -67,13 +67,22 @@ class BedrockClient:
                     region_name=settings.AWS_REGION,
                     retries={"max_attempts": 0},  # Tự quản lý retry
                 )
-                self._client = boto3.client(
-                    "bedrock-runtime",
-                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                    config=boto_config,
+                access_key = (settings.AWS_ACCESS_KEY_ID or "").strip()
+                secret_key = (settings.AWS_SECRET_ACCESS_KEY or "").strip()
+
+                client_kwargs: dict[str, Any] = {"config": boto_config}
+                auth_mode = "iam_role"
+                if access_key and secret_key:
+                    client_kwargs["aws_access_key_id"] = access_key
+                    client_kwargs["aws_secret_access_key"] = secret_key
+                    auth_mode = "env_keys"
+
+                self._client = boto3.client("bedrock-runtime", **client_kwargs)
+                logger.info(
+                    "BedrockClient initialized successfully (region=%s, auth=%s)",
+                    settings.AWS_REGION,
+                    auth_mode,
                 )
-                logger.info("BedrockClient initialized successfully (region=%s)", settings.AWS_REGION)
             except Exception as e:
                 logger.error("Failed to initialize BedrockClient: %s", e)
                 self._client = None

@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
-from typing import List, Union
+from typing import List, Union, Optional
 import os
 
 class Settings(BaseSettings):
@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     API_SECRET_KEY: str = "VLU15122004"
 
     # AWS S3 Storage
-    AWS_ACCESS_KEY_ID: str = ""
-    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_REGION: str = "us-east-1"
     AWS_S3_BUCKET: str = ""
 

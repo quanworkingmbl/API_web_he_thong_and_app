@@ -33,13 +33,18 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 def get_s3_client():
     """Trả về boto3 S3 client kết nối AWS S3"""
-    return boto3.client(
-        "s3",
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-        region_name=AWS_REGION,
-        config=Config(signature_version="s3v4"),
-    )
+    client_kwargs = {
+        "region_name": AWS_REGION,
+        "config": Config(signature_version="s3v4"),
+    }
+
+    access_key = (AWS_ACCESS_KEY_ID or "").strip()
+    secret_key = (AWS_SECRET_ACCESS_KEY or "").strip()
+    if access_key and secret_key:
+        client_kwargs["aws_access_key_id"] = access_key
+        client_kwargs["aws_secret_access_key"] = secret_key
+
+    return boto3.client("s3", **client_kwargs)
 
 
 
