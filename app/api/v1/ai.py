@@ -146,6 +146,13 @@ async def moderate_product(
             label=product.label or "",
             is_high_value=is_high_value,
         )
+    except BedrockClientError as e:
+        if _is_bedrock_access_denied(e):
+            raise HTTPException(
+                status_code=503,
+                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+            )
+        raise HTTPException(status_code=502, detail=f"AI moderation service error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI moderation error: {str(e)}")
 
@@ -192,6 +199,13 @@ async def moderate_content(
             content_text=content.content or "",
             content_type=content.content_type or "",
         )
+    except BedrockClientError as e:
+        if _is_bedrock_access_denied(e):
+            raise HTTPException(
+                status_code=503,
+                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+            )
+        raise HTTPException(status_code=502, detail=f"AI moderation service error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI moderation error: {str(e)}")
 

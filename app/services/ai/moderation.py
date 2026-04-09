@@ -26,6 +26,14 @@ from app.services.ai.prompts import (
 logger = logging.getLogger(__name__)
 
 
+def _is_bedrock_access_denied(error: Exception) -> bool:
+    message = str(error)
+    return (
+        "AccessDeniedException" in message
+        or "not authorized to perform: bedrock:InvokeModel" in message
+    )
+
+
 @dataclass
 class ModerationResult:
     decision: str                   # APPROVE / REVIEW / REJECT
@@ -110,6 +118,9 @@ class ModerationService:
             )
         except BedrockClientError as e:
             logger.error("Moderation LLM failed: %s", e)
+            if _is_bedrock_access_denied(e):
+                # Bubble up IAM/model permission errors so API can return 503 clearly.
+                raise
             # Fallback: REVIEW (an toàn)
             result = ModerationResult(
                 decision="REVIEW",
@@ -232,6 +243,9 @@ class ModerationService:
             return result
 
         except BedrockClientError as e:
+            if _is_bedrock_access_denied(e):
+                # Bubble up IAM/model permission errors so API can return 503 clearly.
+                raise
             result = ModerationResult(
                 decision="REVIEW",
                 confidence=0.0,
