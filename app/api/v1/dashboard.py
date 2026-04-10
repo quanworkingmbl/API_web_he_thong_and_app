@@ -8,9 +8,17 @@ from app.models.user import User
 from app.api.v1.auth import get_current_user
 from app.core.permissions import check_dashboard_access
 from pydantic import BaseModel
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 router = APIRouter()
+
+
+def _to_vnd_int(value: Optional[Decimal]) -> int:
+    """Chuẩn hóa tiền về số nguyên VND để API trả dạng số nhất quán."""
+    if value is None:
+        return 0
+    decimal_value = value if isinstance(value, Decimal) else Decimal(str(value))
+    return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 # ==============================================================================
 # RESPONSE SCHEMAS
@@ -113,9 +121,9 @@ async def get_dashboard_overview(
                 "pending": pending_orders
             },
             "revenue": {
-                "total": str(total_revenue),
-                "platform_fee": str(total_platform_fee),
-                "this_month": str(this_month_revenue)
+                "total": _to_vnd_int(total_revenue),
+                "platform_fee": _to_vnd_int(total_platform_fee),
+                "this_month": _to_vnd_int(this_month_revenue)
             }
         }
     }
@@ -159,9 +167,9 @@ async def get_revenue_stats(
         "success": True,
         "data": {
             "period": period,
-            "total_revenue": str(total_revenue),
-            "platform_commission": str(platform_commission),
-            "seller_revenue": str(seller_revenue),
+            "total_revenue": _to_vnd_int(total_revenue),
+            "platform_commission": _to_vnd_int(platform_commission),
+            "seller_revenue": _to_vnd_int(seller_revenue),
             "order_count": order_count,
         }
     }
@@ -240,7 +248,7 @@ async def get_order_stats(
                     "id": o.id,
                     "order_number": o.order_number,
                     "customer_name": o.customer_name,
-                    "total_amount": str(o.total_amount),
+                    "total_amount": _to_vnd_int(o.total_amount),
                     "status": o.status.value if hasattr(o.status, 'value') else str(o.status),
                     "created_at": o.created_at.isoformat() if o.created_at else None,
                 }
