@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from typing import Optional, List
 from datetime import datetime, timedelta, date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from app.core.database import get_db
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.product import Product, ProductStatus
@@ -61,6 +61,14 @@ def _require_seller(current_user: User):
     if current_user.type not in allowed_types:
         raise HTTPException(status_code=403, detail="Chỉ người bán mới có quyền truy cập")
     return current_user
+
+
+def _to_vnd_int(value: Optional[Decimal]) -> Optional[int]:
+    """Chuẩn hóa tiền về số nguyên VND để API trả dạng số."""
+    if value is None:
+        return None
+    decimal_value = value if isinstance(value, Decimal) else Decimal(str(value))
+    return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _validate_origin_payload(origin_data: dict, db: Session):
@@ -209,9 +217,9 @@ async def get_seller_dashboard(
                 "by_status": orders_by_status
             },
             "revenue": {
-                "total_seller_amount": str(total_revenue),
-                "total_platform_fee": str(total_platform_fee),
-                "last_30_days": str(recent_revenue)
+                "total_seller_amount": _to_vnd_int(total_revenue),
+                "total_platform_fee": _to_vnd_int(total_platform_fee),
+                "last_30_days": _to_vnd_int(recent_revenue)
             },
             "products": {
                 "total": total_products,
@@ -254,9 +262,9 @@ async def get_seller_orders(
             "customer_name": o.customer_name,
             "customer_phone": o.customer_phone,
             "shipping_address": o.shipping_address,
-            "total_amount": str(o.total_amount),
-            "seller_amount": str(o.seller_amount),
-            "platform_fee_amount": str(o.platform_fee_amount),
+            "total_amount": _to_vnd_int(o.total_amount),
+            "seller_amount": _to_vnd_int(o.seller_amount),
+            "platform_fee_amount": _to_vnd_int(o.platform_fee_amount),
             "status": o.status.value if hasattr(o.status, "value") else str(o.status),
             "payment_method": o.payment_method.value if hasattr(o.payment_method, "value") else str(o.payment_method),
             "payment_status": o.payment_status,
@@ -265,8 +273,8 @@ async def get_seller_orders(
                 {
                     "product_name": item.product_name,
                     "quantity": item.quantity,
-                    "unit_price": str(item.unit_price),
-                    "total_price": str(item.total_price)
+                    "unit_price": _to_vnd_int(item.unit_price),
+                    "total_price": _to_vnd_int(item.total_price)
                 }
                 for item in items
             ],
@@ -477,7 +485,7 @@ async def get_seller_products(
             {
                 "id": p.id,
                 "name": p.name,
-                "price": str(p.price),
+                "price": _to_vnd_int(p.price),
                 "stock_quantity": p.stock_quantity,
                 "is_active": p.is_active,
                 "label": p.label,
@@ -551,7 +559,7 @@ async def create_seller_product(
         "data": {
             "id": new_product.id,
             "name": new_product.name,
-            "price": str(new_product.price),
+            "price": _to_vnd_int(new_product.price),
             "stock_quantity": new_product.stock_quantity,
             "label": new_product.label,
             "status": "PENDING",
@@ -673,7 +681,7 @@ async def update_seller_product(
         "data": {
             "id": product.id,
             "name": product.name,
-            "price": str(product.price),
+            "price": _to_vnd_int(product.price),
             "stock_quantity": product.stock_quantity,
             "is_active": product.is_active,
             "label": product.label,
@@ -1066,7 +1074,7 @@ async def get_seller_contracts(
                 "contract_type": c.contract_type,
                 "start_date": c.start_date.isoformat(),
                 "end_date": c.end_date.isoformat() if c.end_date else None,
-                "amount": str(c.amount) if c.amount else None,
+                "amount": _to_vnd_int(c.amount) if c.amount is not None else None,
                 "status": c.status.value if hasattr(c.status, 'value') else str(c.status),
                 "terms": c.terms,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
