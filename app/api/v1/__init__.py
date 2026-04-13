@@ -26,6 +26,7 @@ from app.api.v1 import (
     seller_onboarding,
     promotions,
     ai,
+    settings,
 )
 
 api_router = APIRouter()
@@ -80,3 +81,5 @@ api_router.include_router(mobile_app.router, prefix="/mobile", tags=["Mobile App
 # AI Services
 api_router.include_router(ai.router, prefix="/ai", tags=["🤖 AI Services"])
 
+# System Settings
+api_router.include_router(settings.router, prefix="/admin/settings", tags=["⚙️ System Settings"])

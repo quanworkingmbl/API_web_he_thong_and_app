@@ -1,14 +1,20 @@
 """
 Mobile App API - Dành cho ứng dụng di động
 Bao gồm các API cho:
+- Home: Trang chủ aggregated
 - Posts: Producer đăng bài giới thiệu sản phẩm
 - Products: Người dùng xem danh sách sản phẩm
+- Shops: Trang cửa hàng
 - Shopping: Giỏ hàng và thanh toán
+- Orders: Theo dõi đơn hàng + timeline
+- Addresses: Sổ địa chỉ
+- Promotions: Áp mã giảm giá
 - Profile: Quản lý thông tin cá nhân
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sql_func
 from typing import Optional, List
 from datetime import datetime
 from app.core.database import get_db
@@ -16,8 +22,16 @@ from app.models.content import Content, ContentStatus, ContentAuditLog, ContentA
 from app.models.product import Product, ProductStatus
 from app.models.traceability import ProductOrigin, ProductCertificate, OriginStatus, CertificateStatus
 from app.models.product_variant import ProductVariant
+from app.models.product_media import ProductMedia
 from app.models.user import User
-from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
+from app.models.order import Order, OrderItem, OrderStatus, OrderStatusLog, PaymentMethod
+from app.models.category import Category
+from app.models.store import Store
+from app.models.address import Address, Province, District, Ward
+from app.models.promotion import Promotion, PromotionStatus
+from app.models.promotion_usage import PromotionUsage
+from app.models.complaint import Review
+from app.models.shipment import Shipment
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.permissions import check_seller_kyc_verified
 from app.services.order_state import (
@@ -132,9 +146,75 @@ class CheckoutRequest(BaseModel):
     shipping_province: Optional[str] = None
     shipping_district: Optional[str] = None
     shipping_ward: Optional[str] = None
-    payment_method: str = Field(default="COD", pattern="^(COD|BANK_TRANSFER|MOMO|VNPAY|ZALOPAY)$")
+    payment_method: str = Field(default="COD", pattern="^(COD|BANK_TRANSFER|MOMO|VNPAY|ZALOPAY|PLATFORM_CREDITS)$")
     customer_note: Optional[str] = None
+    coupon_code: Optional[str] = None
     items: List[CartItemRequest]
+
+
+class AddressRequest(BaseModel):
+    recipient_name: str = Field(..., min_length=2, max_length=255)
+    phone: str = Field(..., min_length=10, max_length=20)
+    province_code: str = Field(..., max_length=20)
+    district_code: str = Field(..., max_length=20)
+    ward_code: str = Field(..., max_length=20)
+    address_line: str = Field(..., min_length=5)
+    is_default: bool = False
+
+
+class ApplyPromotionRequest(BaseModel):
+    coupon_code: str = Field(..., min_length=3, max_length=50)
+    subtotal: Decimal = Field(..., ge=0)
+
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=255)
+    gender: Optional[str] = None
+
+
+class ConfirmReceivedRequest(BaseModel):
+    note: Optional[str] = Field(None, max_length=500)
+
+
+# ==============================================================================
+# HELPERS
+# ==============================================================================
+
+def _get_product_review_stats(db: Session, product_id: int) -> dict:
+    """Lấy thống kê review cho sản phẩm."""
+    stats = db.query(
+        sql_func.count(Review.id).label("total"),
+        sql_func.avg(Review.rating).label("avg_rating")
+    ).filter(Review.product_id == product_id).first()
+    return {
+        "total_reviews": stats.total or 0,
+        "avg_rating": round(float(stats.avg_rating), 1) if stats.avg_rating else 0.0,
+    }
+
+
+def _build_address_response(addr: Address, db: Session) -> dict:
+    """Build address dict với tên tỉnh/quận/phường."""
+    province = db.query(Province).filter(Province.code == addr.province_code).first()
+    district = db.query(District).filter(District.code == addr.district_code).first()
+    ward = db.query(Ward).filter(Ward.code == addr.ward_code).first()
+    province_name = province.name if province else addr.province_code
+    district_name = district.name if district else addr.district_code
+    ward_name = ward.name if ward else addr.ward_code
+    return {
+        "id": addr.id,
+        "recipient_name": addr.recipient_name,
+        "phone": addr.phone,
+        "province_code": addr.province_code,
+        "province_name": province_name,
+        "district_code": addr.district_code,
+        "district_name": district_name,
+        "ward_code": addr.ward_code,
+        "ward_name": ward_name,
+        "address_line": addr.address_line,
+        "full_address": f"{addr.address_line}, {ward_name}, {district_name}, {province_name}",
+        "is_default": addr.is_default,
+    }
+
 
 
 # ==============================================================================
@@ -458,7 +538,106 @@ async def delete_my_post(
 
 
 # ==============================================================================
-# PRODUCTS API - Cho người dùng xem sản phẩm
+# HOME API – Trang chủ aggregated (1 call)
+# ==============================================================================
+
+@router.get("/home", summary="Trang chủ aggregated")
+async def get_mobile_home(
+    db: Session = Depends(get_db)
+):
+    """
+    Trả về toàn bộ data cần cho trang chủ mobile trong 1 request:
+    - Danh mục
+    - Sản phẩm nổi bật (featured)
+    - Sản phẩm mới
+    - Mã khuyến mãi đang hoạt động
+    """
+    # Categories
+    categories = db.query(Category).filter(Category.is_active == True).all()
+    cat_list = []
+    for c in categories:
+        product_count = db.query(Product).filter(
+            Product.category_id == c.id,
+            Product.status == ProductStatus.APPROVED,
+            Product.is_active == True,
+        ).count()
+        cat_list.append({
+            "id": c.id,
+            "name": c.name,
+            "slug": c.slug,
+            "image_url": c.image_url if hasattr(c, 'image_url') else None,
+            "product_count": product_count,
+        })
+
+    # Featured products (OCOP or CLEAN_AGRICULTURE label, limit 10)
+    featured_q = db.query(Product).filter(
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
+        Product.label.in_(["OCOP", "CLEAN_AGRICULTURE"]),
+    ).order_by(Product.created_at.desc()).limit(10).all()
+
+    # New products (limit 20)
+    new_q = db.query(Product).filter(
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
+    ).order_by(Product.created_at.desc()).limit(20).all()
+
+    def _build_product_card(p):
+        producer = db.query(User).filter(User.id == p.producer_id).first()
+        category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
+        review_stats = _get_product_review_stats(db, p.id)
+        return {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description[:150] + "..." if p.description and len(p.description) > 150 else p.description,
+            "price": str(p.price),
+            "producer_id": p.producer_id,
+            "producer_name": producer.name if producer else "Unknown",
+            "category_id": p.category_id,
+            "category_name": category.name if category else None,
+            "label": p.label,
+            "images": p.images,
+            "stock_quantity": p.stock_quantity,
+            "avg_rating": review_stats["avg_rating"],
+            "review_count": review_stats["total_reviews"],
+        }
+
+    # Promotions (active, public)
+    now = datetime.utcnow()
+    promos = db.query(Promotion).filter(
+        Promotion.is_public == True,
+        Promotion.status == PromotionStatus.ACTIVE,
+        Promotion.start_date <= now,
+        Promotion.end_date >= now,
+    ).order_by(Promotion.end_date.asc()).limit(5).all()
+
+    promo_list = [
+        {
+            "id": pr.id,
+            "code": pr.code,
+            "name": pr.name,
+            "description": pr.description,
+            "promotion_type": pr.promotion_type.value if hasattr(pr.promotion_type, 'value') else str(pr.promotion_type),
+            "discount_value": str(pr.discount_value),
+            "min_order_amount": str(pr.min_order_amount),
+            "end_date": pr.end_date.isoformat(),
+        }
+        for pr in promos
+    ]
+
+    return {
+        "success": True,
+        "data": {
+            "categories": cat_list,
+            "featured_products": [_build_product_card(p) for p in featured_q],
+            "new_products": [_build_product_card(p) for p in new_q],
+            "promotions": promo_list,
+        }
+    }
+
+
+# ==============================================================================
+# PRODUCTS API - Cho người dùng xem sản phẩm (ENRICHED)
 # ==============================================================================
 
 @router.get("/products")
@@ -466,20 +645,27 @@ async def get_public_products(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     producer_id: Optional[int] = Query(None),
+    category_id: Optional[int] = Query(None),
     label: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     min_price: Optional[Decimal] = Query(None),
     max_price: Optional[Decimal] = Query(None),
+    sort_by: Optional[str] = Query(None, description="price_asc, price_desc, newest, rating"),
     db: Session = Depends(get_db)
 ):
     """
-    Lấy danh sách sản phẩm đã duyệt
+    Lấy danh sách sản phẩm đã duyệt — ENRICHED cho mobile
     Public endpoint - không cần đăng nhập
     """
-    query = db.query(Product).filter(Product.status == ProductStatus.APPROVED)
-    
+    query = db.query(Product).filter(
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
+    )
+
     if producer_id:
         query = query.filter(Product.producer_id == producer_id)
+    if category_id:
+        query = query.filter(Product.category_id == category_id)
     if label:
         query = query.filter(Product.label == label)
     if search:
@@ -488,25 +674,40 @@ async def get_public_products(
         query = query.filter(Product.price >= min_price)
     if max_price:
         query = query.filter(Product.price <= max_price)
-    
+
+    # Sorting
+    if sort_by == "price_asc":
+        query = query.order_by(Product.price.asc())
+    elif sort_by == "price_desc":
+        query = query.order_by(Product.price.desc())
+    else:
+        query = query.order_by(Product.created_at.desc())
+
     total = query.count()
     skip = (page - 1) * limit
-    products = query.order_by(Product.created_at.desc()).offset(skip).limit(limit).all()
-    
+    products = query.offset(skip).limit(limit).all()
+
     product_list = []
     for p in products:
         producer = db.query(User).filter(User.id == p.producer_id).first()
+        category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
+        review_stats = _get_product_review_stats(db, p.id)
         product_list.append({
             "id": p.id,
             "name": p.name,
-            "description": p.description[:100] + "..." if p.description and len(p.description) > 100 else p.description,
+            "description": p.description[:150] + "..." if p.description and len(p.description) > 150 else p.description,
             "price": str(p.price),
             "producer_id": p.producer_id,
             "producer_name": producer.name if producer else "Unknown",
+            "category_id": p.category_id,
+            "category_name": category.name if category else None,
             "label": p.label,
-            "images": p.images
+            "images": p.images,
+            "stock_quantity": p.stock_quantity,
+            "avg_rating": review_stats["avg_rating"],
+            "review_count": review_stats["total_reviews"],
         })
-    
+
     return {
         "success": True,
         "data": product_list,
@@ -524,16 +725,68 @@ async def get_product_detail(
     product_id: int,
     db: Session = Depends(get_db)
 ):
-    """Xem chi tiết sản phẩm - Public"""
+    """Xem chi tiết sản phẩm — ENRICHED: store, variants, stock, VAT, reviews, media"""
     product = db.query(Product).filter(
         Product.id == product_id,
         Product.status == ProductStatus.APPROVED
     ).first()
-    
+
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    
+
     producer = db.query(User).filter(User.id == product.producer_id).first()
+    category = db.query(Category).filter(Category.id == product.category_id).first() if product.category_id else None
+
+    # Store info
+    store = db.query(Store).filter(
+        Store.seller_id == product.producer_id, Store.is_active == True
+    ).first()
+    store_payload = None
+    if store:
+        store_payload = {
+            "id": store.id,
+            "store_name": store.store_name,
+            "slug": store.slug,
+            "logo_url": store.logo_url,
+            "description": store.description,
+        }
+
+    # Variants
+    variants = db.query(ProductVariant).filter(
+        ProductVariant.product_id == product.id,
+        ProductVariant.is_active == True,
+    ).all()
+    variants_payload = [
+        {
+            "id": v.id,
+            "sku": v.sku,
+            "variant_name": v.variant_name,
+            "price": str(v.price),
+            "stock_quantity": v.stock_quantity,
+            "image_url": v.image_url,
+        }
+        for v in variants
+    ]
+
+    # Media
+    media_items = db.query(ProductMedia).filter(
+        ProductMedia.product_id == product.id
+    ).order_by(ProductMedia.sort_order).all()
+    media_payload = [
+        {
+            "id": m.id,
+            "media_type": m.media_type.value if hasattr(m.media_type, 'value') else str(m.media_type),
+            "url": m.url,
+            "alt_text": m.alt_text,
+            "is_primary": m.is_primary,
+        }
+        for m in media_items
+    ]
+
+    # Reviews summary
+    review_stats = _get_product_review_stats(db, product.id)
+
+    # Traceability
     origin = db.query(ProductOrigin).filter(
         ProductOrigin.product_id == product.id,
         ProductOrigin.verification_status == OriginStatus.VERIFIED,
@@ -567,7 +820,7 @@ async def get_product_detail(
         }
         for cert in certificates
     ]
-    
+
     return {
         "success": True,
         "data": {
@@ -575,11 +828,22 @@ async def get_product_detail(
             "name": product.name,
             "description": product.description,
             "price": str(product.price),
+            "stock_quantity": product.stock_quantity,
+            "vat_rate": str(product.vat_rate) if product.vat_rate else "10.00",
+            "unit": product.unit if hasattr(product, 'unit') and product.unit else None,
+            "weight": str(product.weight) if hasattr(product, 'weight') and product.weight else None,
+            "sku": product.sku if hasattr(product, 'sku') and product.sku else None,
+            "category_id": product.category_id,
+            "category_name": category.name if category else None,
             "producer_id": product.producer_id,
             "producer_name": producer.name if producer else "Unknown",
             "producer_type": producer.type if producer else None,
+            "store": store_payload,
             "label": product.label,
             "images": product.images,
+            "media": media_payload,
+            "variants": variants_payload,
+            "reviews_summary": review_stats,
             "traceability": {
                 "origin": origin_payload,
                 "certificates": certificates_payload,
@@ -590,7 +854,176 @@ async def get_product_detail(
 
 
 # ==============================================================================
-# SHOPPING API - Giỏ hàng và Thanh toán
+# SHOPS API – Trang cửa hàng
+# ==============================================================================
+
+@router.get("/shops/{seller_id}", summary="Trang cửa hàng")
+async def get_shop_page(
+    seller_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=50),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Lấy thông tin cửa hàng + sản phẩm của seller."""
+    seller = db.query(User).filter(User.id == seller_id).first()
+    if not seller:
+        raise HTTPException(status_code=404, detail="Cửa hàng không tồn tại")
+
+    store = db.query(Store).filter(
+        Store.seller_id == seller_id, Store.is_active == True
+    ).first()
+
+    # Tổng sản phẩm
+    total_products = db.query(Product).filter(
+        Product.producer_id == seller_id,
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
+    ).count()
+
+    # Avg rating từ tất cả product reviews
+    all_product_ids = [
+        pid for (pid,) in db.query(Product.id).filter(
+            Product.producer_id == seller_id,
+            Product.status == ProductStatus.APPROVED,
+        ).all()
+    ]
+    shop_stats = {"avg_rating": 0.0, "total_reviews": 0}
+    if all_product_ids:
+        stats = db.query(
+            sql_func.count(Review.id).label("total"),
+            sql_func.avg(Review.rating).label("avg"),
+        ).filter(Review.product_id.in_(all_product_ids)).first()
+        shop_stats = {
+            "avg_rating": round(float(stats.avg), 1) if stats.avg else 0.0,
+            "total_reviews": stats.total or 0,
+        }
+
+    # Shop info
+    shop_info = {
+        "seller_id": seller_id,
+        "seller_name": seller.name,
+        "store_name": store.store_name if store else seller.name,
+        "slug": store.slug if store else None,
+        "logo_url": store.logo_url if store else None,
+        "description": store.description if store else None,
+        "contact_phone": store.contact_phone if store else None,
+        "total_products": total_products,
+        "avg_rating": shop_stats["avg_rating"],
+        "total_reviews": shop_stats["total_reviews"],
+        "member_since": seller.created_at.isoformat() if seller.created_at else None,
+    }
+
+    # Products
+    product_q = db.query(Product).filter(
+        Product.producer_id == seller_id,
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
+    )
+    if search:
+        product_q = product_q.filter(Product.name.ilike(f"%{search}%"))
+
+    total = product_q.count()
+    skip = (page - 1) * limit
+    products = product_q.order_by(Product.created_at.desc()).offset(skip).limit(limit).all()
+
+    product_list = []
+    for p in products:
+        r_stats = _get_product_review_stats(db, p.id)
+        product_list.append({
+            "id": p.id,
+            "name": p.name,
+            "price": str(p.price),
+            "images": p.images,
+            "label": p.label,
+            "stock_quantity": p.stock_quantity,
+            "avg_rating": r_stats["avg_rating"],
+            "review_count": r_stats["total_reviews"],
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "shop": shop_info,
+            "products": product_list,
+        },
+        "meta": {"total": total, "page": page, "limit": limit, "total_pages": (total + limit - 1) // limit}
+    }
+
+
+# ==============================================================================
+# PROMOTIONS API – Áp mã giảm giá
+# ==============================================================================
+
+@router.post("/promotions/apply", summary="Áp mã giảm giá")
+async def apply_promotion(
+    promo_data: ApplyPromotionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Validate & tính discount cho coupon code tại bước checkout."""
+    now = datetime.utcnow()
+    promo = db.query(Promotion).filter(
+        Promotion.code == promo_data.coupon_code.upper(),
+        Promotion.status == PromotionStatus.ACTIVE,
+        Promotion.start_date <= now,
+        Promotion.end_date >= now,
+    ).first()
+
+    if not promo:
+        return {"success": False, "data": {"valid": False, "message": "Mã khuyến mãi không tồn tại hoặc đã hết hạn"}}
+
+    # Check usage limit
+    if promo.usage_limit and promo.used_count >= promo.usage_limit:
+        return {"success": False, "data": {"valid": False, "message": "Mã khuyến mãi đã hết lượt sử dụng"}}
+
+    # Check min order
+    if promo_data.subtotal < promo.min_order_amount:
+        return {
+            "success": False,
+            "data": {
+                "valid": False,
+                "message": f"Đơn hàng tối thiểu {promo.min_order_amount:,.0f}đ để áp mã này",
+            }
+        }
+
+    # Check if user already used this promo
+    already_used = db.query(PromotionUsage).filter(
+        PromotionUsage.promotion_id == promo.id,
+        PromotionUsage.user_id == current_user.id,
+    ).first()
+    if already_used:
+        return {"success": False, "data": {"valid": False, "message": "Bạn đã sử dụng mã này rồi"}}
+
+    # Calculate discount
+    ptype = promo.promotion_type.value if hasattr(promo.promotion_type, 'value') else str(promo.promotion_type)
+    if ptype == "PERCENTAGE":
+        discount = promo_data.subtotal * promo.discount_value / Decimal("100")
+    else:
+        discount = promo.discount_value
+
+    # Cap discount
+    if promo.max_discount_amount and discount > promo.max_discount_amount:
+        discount = promo.max_discount_amount
+
+    new_subtotal = promo_data.subtotal - discount
+
+    return {
+        "success": True,
+        "data": {
+            "valid": True,
+            "promotion_id": promo.id,
+            "promotion_name": promo.name,
+            "promotion_type": ptype,
+            "discount_amount": str(discount),
+            "new_subtotal": str(new_subtotal),
+            "message": f"Áp mã thành công: Giảm {discount:,.0f}đ",
+        }
+    }
+
+
+# ==============================================================================
+# SHOPPING API - Giỏ hàng và Thanh toán (ENRICHED)
 # ==============================================================================
 
 @router.post("/checkout")
@@ -601,6 +1034,7 @@ async def create_order(
 ):
     """
     Tạo đơn hàng từ giỏ hàng.
+    Hỗ trợ: coupon_code, PLATFORM_CREDITS payment method.
     """
     if not checkout_data.items or len(checkout_data.items) == 0:
         raise HTTPException(status_code=400, detail="Cart is empty")
@@ -661,19 +1095,49 @@ async def create_order(
             }
         )
 
-    # ── Bước 2: Tạo đơn hàng – tách theo từng người bán (FIX 3) ───────────────
+    # ── Bước 1.5: Validate coupon nếu có ──
+    coupon_discount = Decimal("0")
+    applied_promo = None
+    if checkout_data.coupon_code:
+        now = datetime.utcnow()
+        promo = db.query(Promotion).filter(
+            Promotion.code == checkout_data.coupon_code.upper(),
+            Promotion.status == PromotionStatus.ACTIVE,
+            Promotion.start_date <= now,
+            Promotion.end_date >= now,
+        ).first()
+        if promo:
+            grand_subtotal = sum(
+                i["total_price"] for items in sellers_map.values() for i in items
+            )
+            if grand_subtotal >= promo.min_order_amount:
+                ptype = promo.promotion_type.value if hasattr(promo.promotion_type, 'value') else str(promo.promotion_type)
+                if ptype == "PERCENTAGE":
+                    coupon_discount = grand_subtotal * promo.discount_value / Decimal("100")
+                else:
+                    coupon_discount = promo.discount_value
+                if promo.max_discount_amount and coupon_discount > promo.max_discount_amount:
+                    coupon_discount = promo.max_discount_amount
+                applied_promo = promo
+
+    # ── Bước 2: Tạo đơn hàng – tách theo từng người bán ───────────────
     platform_fee_percentage = Decimal("5.0")
     created_orders = []
+    num_sellers = len(sellers_map)
+    coupon_per_seller = coupon_discount / num_sellers if num_sellers > 0 else Decimal("0")
 
     for seller_id, items_of_seller in sellers_map.items():
         subtotal = sum(i["total_price"] for i in items_of_seller)
-        shipping_fee = Decimal("30000")          # 30.000 VND flat rate / đơn
-        discount_amount = Decimal("0")
+        shipping_fee = Decimal("30000")
+        discount_amount = coupon_per_seller
         total_amount = subtotal + shipping_fee - discount_amount
         platform_fee_amount = subtotal * platform_fee_percentage / Decimal("100")
         seller_amount = subtotal - platform_fee_amount
 
         order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+
+        # Payment status: nếu PLATFORM_CREDITS → auto PAID
+        payment_status = "PAID" if checkout_data.payment_method == "PLATFORM_CREDITS" else "UNPAID"
 
         new_order = Order(
             order_number=order_number,
@@ -695,11 +1159,12 @@ async def create_order(
             seller_amount=seller_amount,
             status=OrderStatus.PENDING,
             payment_method=checkout_data.payment_method,
-            payment_status="UNPAID",
+            payment_status=payment_status,
             customer_note=checkout_data.customer_note,
+            coupon_code=checkout_data.coupon_code,
         )
         db.add(new_order)
-        db.flush()  # lấy new_order.id trước khi tạo items
+        db.flush()
 
         for item_data in items_of_seller:
             p = item_data["product"]
@@ -718,7 +1183,16 @@ async def create_order(
             )
             decrement_stock(db, p, item_data["quantity"], item_data["variant_id"])
 
-        # [AUDIT] Ghi log trạng thái khởi tạo
+        # Ghi promo usage
+        if applied_promo:
+            db.add(PromotionUsage(
+                promotion_id=applied_promo.id,
+                user_id=current_user.id,
+                order_id=new_order.id,
+                discount_amount=coupon_per_seller,
+            ))
+            applied_promo.used_count += 1
+
         log_status_change(
             db=db,
             order_id=new_order.id,
@@ -735,11 +1209,11 @@ async def create_order(
             "order_number": new_order.order_number,
             "seller_id": seller_id,
             "total_amount": str(total_amount),
+            "discount_amount": str(discount_amount),
         })
 
     db.commit()
 
-    # Trả về 1 đơn nếu chỉ có 1 seller, trả về danh sách nếu nhiều seller
     if len(created_orders) == 1:
         order = created_orders[0]
         return {
@@ -749,6 +1223,7 @@ async def create_order(
                 "order_id": order["order_id"],
                 "order_number": order["order_number"],
                 "total_amount": order["total_amount"],
+                "discount_amount": order["discount_amount"],
                 "status": "PENDING",
                 "payment_method": checkout_data.payment_method,
             },
@@ -764,6 +1239,10 @@ async def create_order(
         }
 
 
+# ==============================================================================
+# ORDERS API – Enriched (items, seller, timeline)
+# ==============================================================================
+
 @router.get("/orders/my")
 async def get_my_orders(
     page: int = Query(1, ge=1),
@@ -772,37 +1251,48 @@ async def get_my_orders(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Lấy danh sách đơn hàng của người dùng đang đăng nhập"""
-    query = db.query(Order).filter(Order.customer_id == current_user.id)
-    
+    """Lấy danh sách đơn hàng — ENRICHED: trả thêm items, seller_name, first_item_image"""
+    query = db.query(Order).filter(Order.customer_id == current_user.id, Order.is_active == True)
+
     if status:
         query = query.filter(Order.status == status)
-    
+
     total = query.count()
     skip = (page - 1) * limit
     orders = query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
-    
+
     order_list = []
     for o in orders:
         items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
+        seller = db.query(User).filter(User.id == o.seller_id).first()
+        first_image = items[0].product_image if items else None
         order_list.append({
             "id": o.id,
             "order_number": o.order_number,
+            "seller_name": seller.name if seller else None,
             "total_amount": str(o.total_amount),
             "status": o.status.value if hasattr(o.status, 'value') else str(o.status),
+            "payment_method": o.payment_method.value if hasattr(o.payment_method, 'value') else str(o.payment_method),
             "payment_status": o.payment_status,
             "item_count": len(items),
+            "first_item_image": first_image,
+            "items": [
+                {
+                    "product_name": item.product_name,
+                    "product_image": item.product_image,
+                    "unit_price": str(item.unit_price),
+                    "quantity": item.quantity,
+                    "total_price": str(item.total_price),
+                }
+                for item in items
+            ],
             "created_at": o.created_at.isoformat()
         })
-    
+
     return {
         "success": True,
         "data": order_list,
-        "meta": {
-            "total": total,
-            "page": page,
-            "limit": limit
-        }
+        "meta": {"total": total, "page": page, "limit": limit, "total_pages": (total + limit - 1) // limit}
     }
 
 
@@ -812,23 +1302,54 @@ async def get_my_order_detail(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Xem chi tiết đơn hàng của người dùng"""
+    """Xem chi tiết đơn hàng — ENRICHED: timeline, shipment, can_cancel, can_review"""
     order = db.query(Order).filter(
         Order.id == order_id,
         Order.customer_id == current_user.id
     ).first()
-    
+
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+
     items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
     seller = db.query(User).filter(User.id == order.seller_id).first()
-    
+
+    # Timeline
+    logs = db.query(OrderStatusLog).filter(
+        OrderStatusLog.order_id == order.id
+    ).order_by(OrderStatusLog.timestamp.asc()).all()
+    timeline = [
+        {
+            "status": log.new_status,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            "actor_role": log.role,
+            "note": log.note,
+        }
+        for log in logs
+    ]
+
+    # Shipment info
+    shipment = db.query(Shipment).filter(Shipment.order_id == order.id).first()
+    shipment_info = None
+    if shipment:
+        shipment_info = {
+            "tracking_code": shipment.tracking_code,
+            "provider": shipment.provider.value if hasattr(shipment.provider, 'value') else str(shipment.provider) if shipment.provider else None,
+            "status": shipment.status.value if hasattr(shipment.status, 'value') else str(shipment.status) if shipment.status else None,
+            "fee": str(shipment.fee) if shipment.fee else None,
+        }
+
+    # Capabilities
+    current_status = order.status if hasattr(order.status, 'value') else order.status
+    can_cancel = current_status in (OrderStatus.PENDING, OrderStatus.CONFIRMED)
+    can_review = current_status == OrderStatus.DELIVERED
+
     return {
         "success": True,
         "data": {
             "id": order.id,
             "order_number": order.order_number,
+            "seller_id": order.seller_id,
             "seller_name": seller.name if seller else None,
             "subtotal": str(order.subtotal),
             "shipping_fee": str(order.shipping_fee),
@@ -839,9 +1360,17 @@ async def get_my_order_detail(
             "payment_status": order.payment_status,
             "shipping_address": order.shipping_address,
             "customer_note": order.customer_note,
+            "coupon_code": order.coupon_code,
+            "can_cancel": can_cancel,
+            "can_review": can_review,
             "created_at": order.created_at.isoformat(),
+            "confirmed_at": order.confirmed_at.isoformat() if order.confirmed_at else None,
+            "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
+            "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
             "items": [
                 {
+                    "id": item.id,
+                    "product_id": item.product_id,
                     "product_name": item.product_name,
                     "product_image": item.product_image,
                     "unit_price": str(item.unit_price),
@@ -849,8 +1378,125 @@ async def get_my_order_detail(
                     "total_price": str(item.total_price)
                 }
                 for item in items
-            ]
+            ],
+            "timeline": timeline,
+            "shipment": shipment_info,
         }
+    }
+
+
+# ==============================================================================
+# ORDER TIMELINE
+# ==============================================================================
+
+@router.get("/orders/my/{order_id}/timeline", summary="Timeline đơn hàng")
+async def get_order_timeline(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Lấy lịch sử thay đổi trạng thái đơn hàng."""
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.customer_id == current_user.id,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    logs = db.query(OrderStatusLog).filter(
+        OrderStatusLog.order_id == order_id
+    ).order_by(OrderStatusLog.timestamp.asc()).all()
+
+    shipment = db.query(Shipment).filter(Shipment.order_id == order_id).first()
+    shipment_info = None
+    if shipment:
+        shipment_info = {
+            "tracking_code": shipment.tracking_code,
+            "provider": shipment.provider.value if hasattr(shipment.provider, 'value') else str(shipment.provider) if shipment.provider else None,
+            "status": shipment.status.value if hasattr(shipment.status, 'value') else str(shipment.status) if shipment.status else None,
+        }
+
+    return {
+        "success": True,
+        "data": {
+            "order_id": order_id,
+            "order_number": order.order_number,
+            "current_status": order.status.value if hasattr(order.status, 'value') else str(order.status),
+            "timeline": [
+                {
+                    "status": log.new_status,
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                    "actor_role": log.role,
+                    "note": log.note,
+                }
+                for log in logs
+            ],
+            "shipment": shipment_info,
+        }
+    }
+
+
+# ==============================================================================
+# CONFIRM RECEIVED — Consumer xác nhận nhận hàng
+# ==============================================================================
+
+@router.post("/orders/my/{order_id}/confirm-received", summary="Xác nhận nhận hàng")
+async def confirm_order_received(
+    order_id: int,
+    body: Optional[ConfirmReceivedRequest] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Consumer xác nhận đã nhận hàng → DELIVERED + payment_status=PAID.
+    Chỉ thực hiện được khi đơn ở trạng thái SHIPPING.
+    """
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.customer_id == current_user.id,
+        Order.is_active == True,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    if order.status != OrderStatus.SHIPPING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ xác nhận nhận hàng khi đơn đang giao. Trạng thái hiện tại: {order.status.value if hasattr(order.status, 'value') else order.status}"
+        )
+
+    old_status = order.status.value if hasattr(order.status, 'value') else str(order.status)
+    order.status = OrderStatus.DELIVERED
+    order.delivered_at = datetime.utcnow()
+
+    # Auto PAID
+    new_pay = resolve_payment_status(order, OrderStatus.DELIVERED)
+    if new_pay is not None:
+        order.payment_status = new_pay
+    else:
+        order.payment_status = "PAID"
+
+    note = body.note if body and body.note else "Consumer xác nhận đã nhận hàng"
+    log_status_change(
+        db=db,
+        order_id=order_id,
+        old_status=old_status,
+        new_status=OrderStatus.DELIVERED.value,
+        actor_id=current_user.id,
+        role="consumer",
+        note=note,
+        auto_flush=True,
+    )
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã xác nhận nhận hàng. Cảm ơn bạn!",
+        "order_id": order_id,
+        "new_status": "DELIVERED",
+        "payment_status": order.payment_status,
+        "can_review": True,
     }
 
 
@@ -877,7 +1523,7 @@ async def cancel_my_order(
     """
     order = db.query(Order).filter(
         Order.id == order_id,
-        Order.customer_id == current_user.id,  # ownership check trực tiếp
+        Order.customer_id == current_user.id,
         Order.is_active == True
     ).first()
 
@@ -886,10 +1532,8 @@ async def cancel_my_order(
 
     old_status = order.status
 
-    # [STATE MACHINE] Chỉ cho phép hủy từ PENDING hoặc CONFIRMED
     validate_status_transition(old_status, OrderStatus.CANCELLED, role="consumer")
 
-    # Hoàn tồn: đã trừ khi đặt hàng (PENDING/CONFIRMED trước khi hủy)
     if old_status in (OrderStatus.PENDING, OrderStatus.CONFIRMED):
         items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
         for item in items:
@@ -897,13 +1541,11 @@ async def cancel_my_order(
             if product:
                 increment_stock(db, product, item.quantity, item.variant_id)
 
-    # Cập nhật đơn
     order.status = OrderStatus.CANCELLED
     order.cancelled_at = datetime.utcnow()
     if cancel_data.cancel_reason:
         order.cancel_reason = cancel_data.cancel_reason
 
-    # [AUDIT] Ghi log
     log_status_change(
         db=db,
         order_id=order_id,
@@ -927,7 +1569,117 @@ async def cancel_my_order(
 
 
 # ==============================================================================
-# PROFILE API - Quản lý thông tin cá nhân
+# ADDRESSES API – Sổ địa chỉ
+# ==============================================================================
+
+@router.get("/addresses", summary="Lấy sổ địa chỉ")
+async def get_my_addresses(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Lấy danh sách địa chỉ của người dùng."""
+    addresses = db.query(Address).filter(
+        Address.user_id == current_user.id
+    ).order_by(Address.is_default.desc(), Address.created_at.desc()).all()
+
+    return {
+        "success": True,
+        "data": [_build_address_response(a, db) for a in addresses]
+    }
+
+
+@router.post("/addresses", summary="Thêm địa chỉ")
+async def create_address(
+    addr_data: AddressRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Thêm địa chỉ mới vào sổ."""
+    # Nếu set default → reset các addr cũ
+    if addr_data.is_default:
+        db.query(Address).filter(
+            Address.user_id == current_user.id, Address.is_default == True
+        ).update({"is_default": False})
+
+    new_addr = Address(
+        user_id=current_user.id,
+        recipient_name=addr_data.recipient_name,
+        phone=addr_data.phone,
+        province_code=addr_data.province_code,
+        district_code=addr_data.district_code,
+        ward_code=addr_data.ward_code,
+        address_line=addr_data.address_line,
+        is_default=addr_data.is_default,
+    )
+    db.add(new_addr)
+    db.commit()
+    db.refresh(new_addr)
+
+    return {
+        "success": True,
+        "message": "Đã thêm địa chỉ",
+        "data": _build_address_response(new_addr, db)
+    }
+
+
+@router.put("/addresses/{address_id}", summary="Sửa địa chỉ")
+async def update_address(
+    address_id: int,
+    addr_data: AddressRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Cập nhật địa chỉ trong sổ."""
+    addr = db.query(Address).filter(
+        Address.id == address_id, Address.user_id == current_user.id
+    ).first()
+    if not addr:
+        raise HTTPException(status_code=404, detail="Địa chỉ không tồn tại")
+
+    if addr_data.is_default:
+        db.query(Address).filter(
+            Address.user_id == current_user.id, Address.is_default == True
+        ).update({"is_default": False})
+
+    addr.recipient_name = addr_data.recipient_name
+    addr.phone = addr_data.phone
+    addr.province_code = addr_data.province_code
+    addr.district_code = addr_data.district_code
+    addr.ward_code = addr_data.ward_code
+    addr.address_line = addr_data.address_line
+    addr.is_default = addr_data.is_default
+
+    db.commit()
+    db.refresh(addr)
+
+    return {
+        "success": True,
+        "message": "Đã cập nhật địa chỉ",
+        "data": _build_address_response(addr, db)
+    }
+
+
+@router.delete("/addresses/{address_id}", summary="Xóa địa chỉ")
+async def delete_address(
+    address_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Xóa địa chỉ khỏi sổ."""
+    addr = db.query(Address).filter(
+        Address.id == address_id, Address.user_id == current_user.id
+    ).first()
+    if not addr:
+        raise HTTPException(status_code=404, detail="Địa chỉ không tồn tại")
+
+    db.delete(addr)
+    db.commit()
+
+    return {"success": True, "message": "Đã xóa địa chỉ"}
+
+
+# ==============================================================================
+# PROFILE API - Quản lý thông tin cá nhân (ENRICHED)
 # ==============================================================================
 
 @router.get("/profile")
@@ -935,7 +1687,21 @@ async def get_my_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Lấy thông tin profile của người dùng đăng nhập"""
+    """Lấy thông tin profile — ENRICHED: addresses, order_stats"""
+    # Addresses
+    addresses = db.query(Address).filter(
+        Address.user_id == current_user.id
+    ).order_by(Address.is_default.desc()).all()
+
+    # Order stats
+    total_orders = db.query(Order).filter(Order.customer_id == current_user.id).count()
+    pending_orders = db.query(Order).filter(
+        Order.customer_id == current_user.id, Order.status == OrderStatus.PENDING
+    ).count()
+    delivered_orders = db.query(Order).filter(
+        Order.customer_id == current_user.id, Order.status == OrderStatus.DELIVERED
+    ).count()
+
     return {
         "success": True,
         "data": {
@@ -945,27 +1711,32 @@ async def get_my_profile(
             "type": current_user.type,
             "gender": current_user.gender,
             "activated": current_user.activated,
-            "created_at": current_user.created_at.isoformat() if current_user.created_at else None
+            "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            "addresses": [_build_address_response(a, db) for a in addresses],
+            "order_stats": {
+                "total": total_orders,
+                "pending": pending_orders,
+                "delivered": delivered_orders,
+            }
         }
     }
 
 
 @router.put("/profile")
 async def update_my_profile(
-    name: Optional[str] = None,
-    gender: Optional[str] = None,
+    profile_data: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Cập nhật thông tin profile"""
-    if name:
-        current_user.name = name
-    if gender:
-        current_user.gender = gender
-    
+    if profile_data.name:
+        current_user.name = profile_data.name
+    if profile_data.gender is not None:
+        current_user.gender = profile_data.gender
+
     db.commit()
     db.refresh(current_user)
-    
+
     return {
         "success": True,
         "message": "Profile updated successfully",
@@ -975,3 +1746,4 @@ async def update_my_profile(
             "gender": current_user.gender
         }
     }
+

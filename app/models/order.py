@@ -21,6 +21,8 @@ class PaymentMethod(str, enum.Enum):
     MOMO = "MOMO"                 # Ví MoMo
     VNPAY = "VNPAY"               # VNPay
     ZALOPAY = "ZALOPAY"           # ZaloPay
+    PLATFORM_CREDITS = "PLATFORM_CREDITS"  # Tiền sàn (credits)
+
 
 
 class Order(Base):
