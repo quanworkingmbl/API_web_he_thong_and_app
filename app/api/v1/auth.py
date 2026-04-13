@@ -2,6 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
+from sqlalchemy import text as sql_text
 from datetime import timedelta, datetime, timezone
 from typing import Optional
 from uuid import uuid4
@@ -180,30 +181,41 @@ def _create_token_pair(
 
 
 def _revoke_token_family(db: Session, user_id: int, family_id: str, reason: str) -> int:
-    return db.query(RefreshToken).filter(
-        RefreshToken.user_id == user_id,
-        RefreshToken.family_id == family_id,
-        RefreshToken.revoked_at.is_(None),
-    ).update(
+    result = db.execute(
+        sql_text(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = NOW(), revoked_reason = :reason
+            WHERE user_id = :user_id
+              AND family_id = :family_id
+              AND revoked_at IS NULL
+            """
+        ),
         {
-            RefreshToken.revoked_at: sql_func.now(),
-            RefreshToken.revoked_reason: reason,
+            "reason": reason,
+            "user_id": user_id,
+            "family_id": family_id,
         },
-        synchronize_session=False,
     )
+    return int(result.rowcount or 0)
 
 
 def _revoke_all_active_user_tokens(db: Session, user_id: int, reason: str) -> int:
-    return db.query(RefreshToken).filter(
-        RefreshToken.user_id == user_id,
-        RefreshToken.revoked_at.is_(None),
-    ).update(
+    result = db.execute(
+        sql_text(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = NOW(), revoked_reason = :reason
+            WHERE user_id = :user_id
+              AND revoked_at IS NULL
+            """
+        ),
         {
-            RefreshToken.revoked_at: sql_func.now(),
-            RefreshToken.revoked_reason: reason,
+            "reason": reason,
+            "user_id": user_id,
         },
-        synchronize_session=False,
     )
+    return int(result.rowcount or 0)
 
 
 def _is_recaptcha_bypass_allowed(request: Request) -> bool:
@@ -657,8 +669,13 @@ async def logout(
                     RefreshToken.revoked_at.is_(None),
                 ).first()
                 if token_row:
-                    token_row.revoked_at = _utcnow()
-                    token_row.revoked_reason = "logout"
+                    db.query(RefreshToken).filter(RefreshToken.id == token_row.id).update(
+                        {
+                            RefreshToken.revoked_at: sql_func.now(),
+                            RefreshToken.revoked_reason: "logout",
+                        },
+                        synchronize_session=False,
+                    )
                     revoked_count = 1
 
     if revoked_count == 0:
@@ -773,8 +790,13 @@ async def refresh_token(
         )
 
     if _to_utc_aware(refresh_row.expires_at) <= _utcnow():
-        refresh_row.revoked_at = _utcnow()
-        refresh_row.revoked_reason = "expired"
+        db.query(RefreshToken).filter(RefreshToken.id == refresh_row.id).update(
+            {
+                RefreshToken.revoked_at: sql_func.now(),
+                RefreshToken.revoked_reason: "expired",
+            },
+            synchronize_session=False,
+        )
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -788,9 +810,14 @@ async def refresh_token(
         family_id=family_id,
     )
 
-    refresh_row.revoked_at = _utcnow()
-    refresh_row.revoked_reason = "rotated"
-    refresh_row.replaced_by_jti = token_pair["refresh_jti"]
+    db.query(RefreshToken).filter(RefreshToken.id == refresh_row.id).update(
+        {
+            RefreshToken.revoked_at: sql_func.now(),
+            RefreshToken.revoked_reason: "rotated",
+            RefreshToken.replaced_by_jti: token_pair["refresh_jti"],
+        },
+        synchronize_session=False,
+    )
 
     db.commit()
     
