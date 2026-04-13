@@ -34,6 +34,7 @@ class ProductResponse(BaseModel):
     name: str
     description: Optional[str]
     price: Decimal
+    is_active: bool
     producer_id: int
     producer_name: Optional[str] = None
     category_id: Optional[int] = None
@@ -41,6 +42,14 @@ class ProductResponse(BaseModel):
     status: str
     label: Optional[str]
     images: Optional[str]
+    # Extended fields
+    sku: Optional[str] = None
+    unit: Optional[str] = None
+    weight: Optional[int] = None
+    stock_quantity: Optional[int] = None
+    vat_rate: Optional[Decimal] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
     created_at: str
     updated_at: Optional[str]
 
@@ -61,7 +70,15 @@ class CreateProductRequest(BaseModel):
     category_id: Optional[int] = None
     label: Optional[str] = None
     images: Optional[str] = None  # JSON array of image URLs
-    
+    # Extended product fields
+    sku: Optional[str] = Field(None, max_length=100)
+    unit: Optional[str] = Field(None, max_length=20)
+    weight: Optional[int] = Field(None, ge=0)
+    stock_quantity: Optional[int] = Field(None, ge=0)
+    vat_rate: Optional[Decimal] = Field(None, ge=0, le=100)
+    seo_title: Optional[str] = Field(None, max_length=255)
+    seo_description: Optional[str] = None
+
     @validator('price')
     def validate_price(cls, v):
         if v <= 0:
@@ -80,7 +97,16 @@ class UpdateProductRequest(BaseModel):
     category_id: Optional[int] = None
     label: Optional[str] = None
     images: Optional[str] = None
-    
+    is_active: Optional[bool] = None
+    # Extended product fields
+    sku: Optional[str] = Field(None, max_length=100)
+    unit: Optional[str] = Field(None, max_length=20)
+    weight: Optional[int] = Field(None, ge=0)
+    stock_quantity: Optional[int] = Field(None, ge=0)
+    vat_rate: Optional[Decimal] = Field(None, ge=0, le=100)
+    seo_title: Optional[str] = Field(None, max_length=255)
+    seo_description: Optional[str] = None
+
     @validator('price')
     def validate_price(cls, v):
         if v is not None:
@@ -230,7 +256,7 @@ async def get_products(
     total = query.count()
     skip = (page - 1) * limit
     products = query.order_by(Product.created_at.desc()).offset(skip).limit(limit).all()
-    
+
     # Get producer names and category names
     product_list = []
     for p in products:
@@ -241,6 +267,7 @@ async def get_products(
             name=p.name,
             description=p.description,
             price=p.price,
+            is_active=bool(p.is_active),
             producer_id=p.producer_id,
             producer_name=producer.name if producer else None,
             category_id=p.category_id,
@@ -248,10 +275,17 @@ async def get_products(
             status=p.status.value if hasattr(p.status, 'value') else str(p.status),
             label=p.label,
             images=p.images,
+            sku=p.sku,
+            unit=p.unit,
+            weight=p.weight,
+            stock_quantity=p.stock_quantity,
+            vat_rate=p.vat_rate,
+            seo_title=p.seo_title,
+            seo_description=p.seo_description,
             created_at=p.created_at.isoformat() if p.created_at else "",
             updated_at=p.updated_at.isoformat() if p.updated_at else None
         ))
-    
+
     return ProductListResponse(
         data=product_list,
         meta={
@@ -293,6 +327,7 @@ async def get_product_by_id(
         name=product.name,
         description=product.description,
         price=product.price,
+        is_active=bool(product.is_active),
         producer_id=product.producer_id,
         producer_name=producer.name if producer else None,
         category_id=product.category_id,
@@ -300,6 +335,13 @@ async def get_product_by_id(
         status=product.status.value if hasattr(product.status, 'value') else str(product.status),
         label=product.label,
         images=product.images,
+        sku=product.sku,
+        unit=product.unit,
+        weight=product.weight,
+        stock_quantity=product.stock_quantity,
+        vat_rate=product.vat_rate,
+        seo_title=product.seo_title,
+        seo_description=product.seo_description,
         created_at=product.created_at.isoformat() if product.created_at else "",
         updated_at=product.updated_at.isoformat() if product.updated_at else None
     )
@@ -358,6 +400,13 @@ async def create_product(
         status=ProductStatus.PENDING,
         label=product_data.label,
         images=product_data.images,
+        sku=product_data.sku,
+        unit=product_data.unit,
+        weight=product_data.weight,
+        stock_quantity=product_data.stock_quantity or 0,
+        vat_rate=product_data.vat_rate,
+        seo_title=product_data.seo_title,
+        seo_description=product_data.seo_description,
     )
 
     db.add(new_product)
@@ -371,6 +420,7 @@ async def create_product(
         name=new_product.name,
         description=new_product.description,
         price=new_product.price,
+        is_active=bool(new_product.is_active),
         producer_id=new_product.producer_id,
         producer_name=producer.name,
         category_id=new_product.category_id,
@@ -378,6 +428,13 @@ async def create_product(
         status=new_product.status.value if hasattr(new_product.status, 'value') else str(new_product.status),
         label=new_product.label,
         images=new_product.images,
+        sku=new_product.sku,
+        unit=new_product.unit,
+        weight=new_product.weight,
+        stock_quantity=new_product.stock_quantity,
+        vat_rate=new_product.vat_rate,
+        seo_title=new_product.seo_title,
+        seo_description=new_product.seo_description,
         created_at=new_product.created_at.isoformat() if new_product.created_at else "",
         updated_at=None
     )
@@ -450,6 +507,7 @@ async def update_product(
         name=product.name,
         description=product.description,
         price=product.price,
+        is_active=bool(product.is_active),
         producer_id=product.producer_id,
         producer_name=producer.name if producer else None,
         category_id=product.category_id,
@@ -457,6 +515,13 @@ async def update_product(
         status=product.status.value if hasattr(product.status, 'value') else str(product.status),
         label=product.label,
         images=product.images,
+        sku=product.sku,
+        unit=product.unit,
+        weight=product.weight,
+        stock_quantity=product.stock_quantity,
+        vat_rate=product.vat_rate,
+        seo_title=product.seo_title,
+        seo_description=product.seo_description,
         created_at=product.created_at.isoformat() if product.created_at else "",
         updated_at=product.updated_at.isoformat() if product.updated_at else None
     )
