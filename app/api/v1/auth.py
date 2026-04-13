@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sql_func
 from datetime import timedelta, datetime, timezone
 from typing import Optional
 from uuid import uuid4
@@ -179,32 +180,30 @@ def _create_token_pair(
 
 
 def _revoke_token_family(db: Session, user_id: int, family_id: str, reason: str) -> int:
-    now = _utcnow()
-    tokens = db.query(RefreshToken).filter(
+    return db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
         RefreshToken.family_id == family_id,
         RefreshToken.revoked_at.is_(None),
-    ).all()
-
-    for token in tokens:
-        token.revoked_at = now
-        token.revoked_reason = reason
-
-    return len(tokens)
+    ).update(
+        {
+            RefreshToken.revoked_at: sql_func.now(),
+            RefreshToken.revoked_reason: reason,
+        },
+        synchronize_session=False,
+    )
 
 
 def _revoke_all_active_user_tokens(db: Session, user_id: int, reason: str) -> int:
-    now = _utcnow()
-    tokens = db.query(RefreshToken).filter(
+    return db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
         RefreshToken.revoked_at.is_(None),
-    ).all()
-
-    for token in tokens:
-        token.revoked_at = now
-        token.revoked_reason = reason
-
-    return len(tokens)
+    ).update(
+        {
+            RefreshToken.revoked_at: sql_func.now(),
+            RefreshToken.revoked_reason: reason,
+        },
+        synchronize_session=False,
+    )
 
 
 def _is_recaptcha_bypass_allowed(request: Request) -> bool:
