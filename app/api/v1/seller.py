@@ -8,7 +8,7 @@ Endpoints:
 - PUT  /seller/orders/{id}/reject     – Từ chối đơn   → CANCELLED
 - PUT  /seller/orders/{id}/ship       – Chuyển sang Đang giao hàng → SHIPPING
 - GET  /seller/products               – Danh sách sản phẩm của seller
-- POST /seller/products               – Tạo sản phẩm mới (auto producer_id)
+- POST /seller/products               – Tạo sản phẩm mới (auto seller_id)
 - PUT  /seller/products/{id}          – Chỉnh sửa sản phẩm đầy đủ (ownership check)
 - DELETE /seller/products/{id}        – Xóa sản phẩm (ownership check)
 - PUT  /seller/products/{id}/stock    – Cập nhật tồn kho nhanh
@@ -98,43 +98,65 @@ class RejectOrderRequest(BaseModel):
 
 class CreateSellerOriginRequest(BaseModel):
     village_name: str = Field(..., min_length=2, max_length=255)
+    facility_name: Optional[str] = Field(None, max_length=255)   # Tên cơ sở sản xuất cụ thể
     region_id: Optional[int] = None
-    producer_name: str = Field(..., min_length=2, max_length=255)
+    seller_name: str = Field(..., min_length=2, max_length=255)
     batch_number: str = Field(..., min_length=1, max_length=100)
     production_date: date
     expiry_date: Optional[date] = None
     ingredients: str = Field(..., min_length=2)
     process_summary: str = Field(..., min_length=10)
+    usage_instructions: Optional[str] = None     # Hướng dẫn sử dụng
+    storage_instructions: Optional[str] = None   # Hướng dẫn bảo quản
+    warnings: Optional[str] = None               # Cảnh báo an toàn
 
 
 class UpdateSellerOriginRequest(BaseModel):
     village_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    facility_name: Optional[str] = Field(None, max_length=255)
     region_id: Optional[int] = None
-    producer_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    seller_name: Optional[str] = Field(None, min_length=2, max_length=255)
     batch_number: Optional[str] = Field(None, min_length=1, max_length=100)
     production_date: Optional[date] = None
     expiry_date: Optional[date] = None
     ingredients: Optional[str] = Field(None, min_length=2)
     process_summary: Optional[str] = Field(None, min_length=10)
+    usage_instructions: Optional[str] = None
+    storage_instructions: Optional[str] = None
+    warnings: Optional[str] = None
 
 
 class CreateSellerProductRequest(BaseModel):
-    """Schema tạo sản phẩm mới – dùng tại Web Seller Portal"""
+    """Schema tạo sản phẩm mới – dùng tại Web Seller Portal
+    NOTE: label bị loại bỏ – chỉ Admin mới được gán nhãn OCOP/VietGAP...
+    """
     name: str = Field(..., min_length=2, max_length=255)
     description: Optional[str] = None
     price: Decimal = Field(..., ge=0)
-    label: Optional[str] = Field(None, pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT|OCOP)$")
+    category_id: Optional[int] = None
+    # product_type: AGRICULTURAL (Nông sản) | HANDICRAFT (Thủ công mỹ nghệ)
+    # Dùng để hiển thị form khác nhau trên UI (weight cho NS, quantity cho TCMN)
+    product_type: Optional[str] = Field(None, pattern="^(AGRICULTURAL|HANDICRAFT)$")
+    unit: Optional[str] = Field(None, max_length=20)       # Đơn vị: bó, kg, hộp, cái...
+    weight: Optional[int] = Field(None, ge=0)              # Gram (chỉ dùng cho nông sản)
+    packaging_type: Optional[str] = Field(None, max_length=50)  # thùng, lon, hộp...
     images: Optional[str] = None   # JSON array of image URLs
     stock_quantity: int = Field(default=0, ge=0)
     origin: CreateSellerOriginRequest
 
 
 class UpdateSellerProductRequest(BaseModel):
-    """Schema chỉnh sửa sản phẩm – dùng tại Web Seller Portal"""
+    """Schema chỉnh sửa sản phẩm – dùng tại Web Seller Portal
+    NOTE: label không có ở đây – Admin-only field
+    """
     name: Optional[str] = Field(None, min_length=2, max_length=255)
     description: Optional[str] = None
     price: Optional[Decimal] = Field(None, ge=0)
-    label: Optional[str] = Field(None, pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT|OCOP)$")
+    category_id: Optional[int] = None
+    product_type: Optional[str] = Field(None, pattern="^(AGRICULTURAL|HANDICRAFT)$")
+    unit: Optional[str] = Field(None, max_length=20)
+    weight: Optional[int] = Field(None, ge=0)
+    packaging_type: Optional[str] = Field(None, max_length=50)
     images: Optional[str] = None
     stock_quantity: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
@@ -193,13 +215,13 @@ async def get_seller_dashboard(
     recent_revenue = sum(o.seller_amount for o in recent_revenue_orders)
 
     # Sản phẩm
-    total_products = db.query(Product).filter(Product.producer_id == seller_id).count()
+    total_products = db.query(Product).filter(Product.seller_id == seller_id).count()
     approved_products = db.query(Product).filter(
-        Product.producer_id == seller_id,
+        Product.seller_id == seller_id,
         Product.status == ProductStatus.APPROVED
     ).count()
     low_stock_products = db.query(Product).filter(
-        Product.producer_id == seller_id,
+        Product.seller_id == seller_id,
         Product.stock_quantity < 5
     ).count()
 
@@ -469,7 +491,7 @@ async def get_seller_products(
     """Lấy danh sách sản phẩm của seller đang đăng nhập."""
     _require_seller(current_user)
 
-    query = db.query(Product).filter(Product.producer_id == current_user.id)
+    query = db.query(Product).filter(Product.seller_id == current_user.id)
     if status:
         query = query.filter(Product.status == status)
     if search:
@@ -479,22 +501,80 @@ async def get_seller_products(
     skip = (page - 1) * limit
     products = query.order_by(Product.created_at.desc()).offset(skip).limit(limit).all()
 
+    # Bulk lấy category và origin để tránh N+1 query
+    product_ids = [p.id for p in products]
+    category_ids = list({p.category_id for p in products if p.category_id})
+
+    from app.models.category import Category as CategoryModel
+    from app.models.traceability import ProductOrigin as OriginModel, ProductApproval as ApprovalModel
+    categories_map = {
+        c.id: c.name
+        for c in db.query(CategoryModel).filter(CategoryModel.id.in_(category_ids)).all()
+    } if category_ids else {}
+
+    origins_map = {
+        o.product_id: o
+        for o in db.query(OriginModel).filter(OriginModel.product_id.in_(product_ids)).all()
+    } if product_ids else {}
+
+    # Lấy lý do reject mới nhất nếu có
+    from app.models.product import ProductApproval
+    latest_rejections: dict = {}
+    if product_ids:
+        from sqlalchemy import desc as _desc
+        for approval in (
+            db.query(ProductApproval)
+            .filter(
+                ProductApproval.product_id.in_(product_ids),
+                ProductApproval.status == 'REJECTED',
+            )
+            .order_by(_desc(ProductApproval.created_at))
+            .all()
+        ):
+            if approval.product_id not in latest_rejections:
+                latest_rejections[approval.product_id] = approval.notes
+
+    data = []
+    for p in products:
+        origin = origins_map.get(p.id)
+        origin_status = (
+            origin.verification_status.value
+            if origin and hasattr(origin.verification_status, "value")
+            else (str(origin.verification_status) if origin else None)
+        )
+        product_status = p.status.value if hasattr(p.status, "value") else str(p.status)
+        rejection_reason = (
+            latest_rejections.get(p.id)
+            if product_status == "REJECTED"
+            else None
+        )
+        label_val = p.label.value if p.label and hasattr(p.label, "value") else p.label
+        data.append({
+            "id": p.id,
+            "sku": p.sku,
+            "name": p.name,
+            "price": _to_vnd_int(p.price),
+            "vat_rate": float(p.vat_rate) if p.vat_rate is not None else 10.0,
+            "unit": p.unit,
+            "weight": p.weight,
+            "packaging_type": p.packaging_type,
+            "product_type": p.product_type,
+            "stock_quantity": p.stock_quantity,
+            "is_active": p.is_active,
+            "label": label_val,
+            "status": product_status,
+            "rejection_reason": rejection_reason,
+            "category_id": p.category_id,
+            "category_name": categories_map.get(p.category_id) if p.category_id else None,
+            "origin_status": origin_status,
+            "images": p.images,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        })
+
     return {
         "success": True,
-        "data": [
-            {
-                "id": p.id,
-                "name": p.name,
-                "price": _to_vnd_int(p.price),
-                "stock_quantity": p.stock_quantity,
-                "is_active": p.is_active,
-                "label": p.label,
-                "status": p.status.value if hasattr(p.status, "value") else str(p.status),
-                "images": p.images,
-                "created_at": p.created_at.isoformat() if p.created_at else None
-            }
-            for p in products
-        ],
+        "data": data,
         "meta": {
             "total": total,
             "page": page,
@@ -512,7 +592,7 @@ async def create_seller_product(
 ):
     """
     Seller tạo sản phẩm mới từ Web Seller Portal.
-    - `producer_id` tự động gán = `current_user.id` (không nhập tay).
+    - `seller_id` tự động gán = `current_user.id` (không nhập tay).
     - Sản phẩm tạo xong ở trạng thái **PENDING** chờ Admin duyệt.
     """
     _require_seller(current_user)
@@ -525,11 +605,17 @@ async def create_seller_product(
         name=product_data.name,
         description=product_data.description,
         price=product_data.price,
-        producer_id=current_user.id,          # ← auto gán, không để client truyền
+        seller_id=current_user.id,            # ← auto gán, không để client truyền
+        category_id=product_data.category_id,
         status=ProductStatus.PENDING,
-        label=product_data.label,
+        # label không gán ở đây – Admin-only field
+        product_type=product_data.product_type,
+        unit=product_data.unit,
+        weight=product_data.weight,
+        packaging_type=product_data.packaging_type,
         images=product_data.images,
         stock_quantity=product_data.stock_quantity,
+        vat_rate=10,   # mặc định 10% VAT – Seller không thể thay đổi
         is_active=True,
     )
     db.add(new_product)
@@ -538,13 +624,17 @@ async def create_seller_product(
     origin = ProductOrigin(
         product_id=new_product.id,
         village_name=origin_data.get("village_name"),
+        facility_name=origin_data.get("facility_name"),
         region_id=origin_data.get("region_id"),
-        producer_name=origin_data.get("producer_name"),
+        seller_name=origin_data.get("seller_name"),
         batch_number=origin_data.get("batch_number"),
         production_date=origin_data.get("production_date"),
         expiry_date=origin_data.get("expiry_date"),
         ingredients=origin_data.get("ingredients"),
         process_summary=origin_data.get("process_summary"),
+        usage_instructions=origin_data.get("usage_instructions"),
+        storage_instructions=origin_data.get("storage_instructions"),
+        warnings=origin_data.get("warnings"),
         verification_status=OriginStatus.PENDING,
     )
     db.add(origin)
@@ -560,8 +650,12 @@ async def create_seller_product(
             "id": new_product.id,
             "name": new_product.name,
             "price": _to_vnd_int(new_product.price),
+            "vat_rate": float(new_product.vat_rate) if new_product.vat_rate else 10.0,
             "stock_quantity": new_product.stock_quantity,
-            "label": new_product.label,
+            "product_type": new_product.product_type,
+            "unit": new_product.unit,
+            "weight": new_product.weight,
+            "packaging_type": new_product.packaging_type,
             "status": "PENDING",
             "origin_status": origin.verification_status.value if hasattr(origin.verification_status, "value") else str(origin.verification_status),
             "images": new_product.images,
@@ -587,7 +681,7 @@ async def update_seller_product(
 
     product = db.query(Product).filter(
         Product.id == product_id,
-        Product.producer_id == current_user.id   # ← ownership check
+        Product.seller_id == current_user.id   # ← ownership check
     ).first()
     if not product:
         raise HTTPException(
@@ -615,7 +709,7 @@ async def update_seller_product(
             existing_values = {
                 "village_name": origin_record.village_name,
                 "region_id": origin_record.region_id,
-                "producer_name": origin_record.producer_name,
+                "seller_name": origin_record.seller_name,
                 "batch_number": origin_record.batch_number,
                 "production_date": origin_record.production_date,
                 "expiry_date": origin_record.expiry_date,
@@ -627,7 +721,7 @@ async def update_seller_product(
 
         required_origin_fields = [
             "village_name",
-            "producer_name",
+            "seller_name",
             "batch_number",
             "production_date",
             "ingredients",
@@ -650,7 +744,7 @@ async def update_seller_product(
                 product_id=product.id,
                 village_name=merged_origin.get("village_name"),
                 region_id=merged_origin.get("region_id"),
-                producer_name=merged_origin.get("producer_name"),
+                seller_name=merged_origin.get("seller_name"),
                 batch_number=merged_origin.get("batch_number"),
                 production_date=merged_origin.get("production_date"),
                 expiry_date=merged_origin.get("expiry_date"),
@@ -709,7 +803,7 @@ async def update_product_stock(
 
     product = db.query(Product).filter(
         Product.id == product_id,
-        Product.producer_id == current_user.id
+        Product.seller_id == current_user.id
     ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không có quyền")
@@ -734,9 +828,9 @@ async def get_seller_profile(
     """Thông tin profile của seller."""
     _require_seller(current_user)
 
-    total_products = db.query(Product).filter(Product.producer_id == current_user.id).count()
+    total_products = db.query(Product).filter(Product.seller_id == current_user.id).count()
     approved_products = db.query(Product).filter(
-        Product.producer_id == current_user.id,
+        Product.seller_id == current_user.id,
         Product.status == ProductStatus.APPROVED
     ).count()
     total_orders = db.query(Order).filter(Order.seller_id == current_user.id).count()
@@ -780,7 +874,7 @@ async def delete_seller_product(
 
     product = db.query(Product).filter(
         Product.id == product_id,
-        Product.producer_id == current_user.id
+        Product.seller_id == current_user.id
     ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không có quyền xóa")

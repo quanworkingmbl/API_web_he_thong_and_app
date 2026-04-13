@@ -107,8 +107,8 @@ class MobileProductResponse(BaseModel):
     name: str
     description: Optional[str]
     price: Decimal
-    producer_id: int
-    producer_name: str
+    seller_id: int
+    seller_name: str
     label: Optional[str]
     images: Optional[str]
     status: str
@@ -583,7 +583,7 @@ async def get_mobile_home(
     ).order_by(Product.created_at.desc()).limit(20).all()
 
     def _build_product_card(p):
-        producer = db.query(User).filter(User.id == p.producer_id).first()
+        producer = db.query(User).filter(User.id == p.seller_id).first()
         category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
         review_stats = _get_product_review_stats(db, p.id)
         return {
@@ -591,8 +591,8 @@ async def get_mobile_home(
             "name": p.name,
             "description": p.description[:150] + "..." if p.description and len(p.description) > 150 else p.description,
             "price": str(p.price),
-            "producer_id": p.producer_id,
-            "producer_name": producer.name if producer else "Unknown",
+            "seller_id": p.seller_id,
+            "seller_name": producer.name if producer else "Unknown",
             "category_id": p.category_id,
             "category_name": category.name if category else None,
             "label": p.label,
@@ -644,7 +644,7 @@ async def get_mobile_home(
 async def get_public_products(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
-    producer_id: Optional[int] = Query(None),
+    seller_id: Optional[int] = Query(None),
     category_id: Optional[int] = Query(None),
     label: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
@@ -662,8 +662,8 @@ async def get_public_products(
         Product.is_active == True,
     )
 
-    if producer_id:
-        query = query.filter(Product.producer_id == producer_id)
+    if seller_id:
+        query = query.filter(Product.seller_id == seller_id)
     if category_id:
         query = query.filter(Product.category_id == category_id)
     if label:
@@ -689,7 +689,7 @@ async def get_public_products(
 
     product_list = []
     for p in products:
-        producer = db.query(User).filter(User.id == p.producer_id).first()
+        producer = db.query(User).filter(User.id == p.seller_id).first()
         category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
         review_stats = _get_product_review_stats(db, p.id)
         product_list.append({
@@ -697,8 +697,8 @@ async def get_public_products(
             "name": p.name,
             "description": p.description[:150] + "..." if p.description and len(p.description) > 150 else p.description,
             "price": str(p.price),
-            "producer_id": p.producer_id,
-            "producer_name": producer.name if producer else "Unknown",
+            "seller_id": p.seller_id,
+            "seller_name": producer.name if producer else "Unknown",
             "category_id": p.category_id,
             "category_name": category.name if category else None,
             "label": p.label,
@@ -734,12 +734,12 @@ async def get_product_detail(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    producer = db.query(User).filter(User.id == product.producer_id).first()
+    producer = db.query(User).filter(User.id == product.seller_id).first()
     category = db.query(Category).filter(Category.id == product.category_id).first() if product.category_id else None
 
     # Store info
     store = db.query(Store).filter(
-        Store.seller_id == product.producer_id, Store.is_active == True
+        Store.seller_id == product.seller_id, Store.is_active == True
     ).first()
     store_payload = None
     if store:
@@ -801,7 +801,7 @@ async def get_product_detail(
         origin_payload = {
             "village_name": origin.village_name,
             "region_id": origin.region_id,
-            "producer_name": origin.producer_name,
+            "seller_name": origin.seller_name,
             "batch_number": origin.batch_number,
             "production_date": origin.production_date.isoformat() if origin.production_date else None,
             "expiry_date": origin.expiry_date.isoformat() if origin.expiry_date else None,
@@ -835,8 +835,8 @@ async def get_product_detail(
             "sku": product.sku if hasattr(product, 'sku') and product.sku else None,
             "category_id": product.category_id,
             "category_name": category.name if category else None,
-            "producer_id": product.producer_id,
-            "producer_name": producer.name if producer else "Unknown",
+            "seller_id": product.seller_id,
+            "seller_name": producer.name if producer else "Unknown",
             "producer_type": producer.type if producer else None,
             "store": store_payload,
             "label": product.label,
@@ -876,7 +876,7 @@ async def get_shop_page(
 
     # Tổng sản phẩm
     total_products = db.query(Product).filter(
-        Product.producer_id == seller_id,
+        Product.seller_id == seller_id,
         Product.status == ProductStatus.APPROVED,
         Product.is_active == True,
     ).count()
@@ -884,7 +884,7 @@ async def get_shop_page(
     # Avg rating từ tất cả product reviews
     all_product_ids = [
         pid for (pid,) in db.query(Product.id).filter(
-            Product.producer_id == seller_id,
+            Product.seller_id == seller_id,
             Product.status == ProductStatus.APPROVED,
         ).all()
     ]
@@ -916,7 +916,7 @@ async def get_shop_page(
 
     # Products
     product_q = db.query(Product).filter(
-        Product.producer_id == seller_id,
+        Product.seller_id == seller_id,
         Product.status == ProductStatus.APPROVED,
         Product.is_active == True,
     )
@@ -1082,7 +1082,7 @@ async def create_order(
         product = locked_map[item.product_id]
         _, unit_price = validate_line_for_sale(db, product, item.quantity, item.variant_id)
         total_price = unit_price * item.quantity
-        sid = product.producer_id
+        sid = product.seller_id
         if sid not in sellers_map:
             sellers_map[sid] = []
         sellers_map[sid].append(
@@ -1172,7 +1172,7 @@ async def create_order(
                 OrderItem(
                     order_id=new_order.id,
                     product_id=p.id,
-                    seller_id=p.producer_id,
+                    seller_id=p.seller_id,
                     variant_id=item_data["variant_id"],
                     product_name=p.name,
                     product_image=p.images,

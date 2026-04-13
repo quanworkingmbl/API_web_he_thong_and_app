@@ -148,7 +148,7 @@ def check_ownership(
         HTTPException 403: If user doesn't own the resource and is not admin
 
     Usage:
-        check_ownership(product.producer_id, current_user)
+        check_ownership(product.seller_id, current_user)
         check_ownership(order.customer_id, current_user, allow_admin=False)
     """
     is_owner = resource_user_id == current_user.id
@@ -171,7 +171,7 @@ def check_seller_ownership(
     Specifically for seller/producer resources.
 
     Args:
-        seller_id: The seller_id or producer_id who owns the resource
+        seller_id: The seller_id or seller_id who owns the resource
         current_user: Current authenticated user
         allow_admin: If True, admin can access any resource (default: True)
 

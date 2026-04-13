@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from typing import Optional
 from uuid import uuid4
 from app.core.database import get_db
@@ -87,8 +87,18 @@ class StandardResponse(BaseModel):
     errors: Optional[list] = None
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _to_utc_aware(dt: datetime) -> datetime:
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _to_utc_iso(dt: datetime) -> str:
-    return dt.isoformat() + "Z"
+    return _to_utc_aware(dt).isoformat().replace("+00:00", "Z")
 
 
 def _get_client_ip(request: Request) -> Optional[str]:
@@ -121,7 +131,7 @@ def _create_token_pair(
     db: Session,
     family_id: Optional[str] = None,
 ) -> dict:
-    now = datetime.utcnow()
+    now = _utcnow()
     access_expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
@@ -169,7 +179,7 @@ def _create_token_pair(
 
 
 def _revoke_token_family(db: Session, user_id: int, family_id: str, reason: str) -> int:
-    now = datetime.utcnow()
+    now = _utcnow()
     tokens = db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
         RefreshToken.family_id == family_id,
@@ -184,7 +194,7 @@ def _revoke_token_family(db: Session, user_id: int, family_id: str, reason: str)
 
 
 def _revoke_all_active_user_tokens(db: Session, user_id: int, reason: str) -> int:
-    now = datetime.utcnow()
+    now = _utcnow()
     tokens = db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
         RefreshToken.revoked_at.is_(None),
@@ -337,9 +347,10 @@ def check_user_status(user: User) -> None:
     if user.status == UserStatus.SUSPENDED:
         # Check if suspension has expired
         if user.status_expire_at:
-            if datetime.utcnow() < user.status_expire_at:
+            status_expire_at = _to_utc_aware(user.status_expire_at)
+            if _utcnow() < status_expire_at:
                 # Still suspended
-                expire_str = user.status_expire_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                expire_str = status_expire_at.strftime("%Y-%m-%d %H:%M:%S UTC")
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Account is suspended until {expire_str}. Reason: {user.status_reason or 'No reason provided'}"
@@ -647,7 +658,7 @@ async def logout(
                     RefreshToken.revoked_at.is_(None),
                 ).first()
                 if token_row:
-                    token_row.revoked_at = datetime.utcnow()
+                    token_row.revoked_at = _utcnow()
                     token_row.revoked_reason = "logout"
                     revoked_count = 1
 
@@ -762,8 +773,8 @@ async def refresh_token(
             detail="Refresh token has been revoked",
         )
 
-    if refresh_row.expires_at <= datetime.utcnow():
-        refresh_row.revoked_at = datetime.utcnow()
+    if _to_utc_aware(refresh_row.expires_at) <= _utcnow():
+        refresh_row.revoked_at = _utcnow()
         refresh_row.revoked_reason = "expired"
         db.commit()
         raise HTTPException(
@@ -778,7 +789,7 @@ async def refresh_token(
         family_id=family_id,
     )
 
-    refresh_row.revoked_at = datetime.utcnow()
+    refresh_row.revoked_at = _utcnow()
     refresh_row.revoked_reason = "rotated"
     refresh_row.replaced_by_jti = token_pair["refresh_jti"]
 
@@ -819,7 +830,7 @@ async def update_profile(
     for key, value in update_data.items():
         setattr(current_user, key, value)
 
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = _utcnow()
     db.commit()
     db.refresh(current_user)
 

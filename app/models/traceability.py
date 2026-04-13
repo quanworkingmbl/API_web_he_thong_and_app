@@ -51,22 +51,30 @@ class ProductOrigin(Base):
     __tablename__ = "product_origins"
 
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, unique=True)
+    # NOTE: unique=True enforce 1 product → 1 origin ở cả DB layer lẫn code layer
 
-    # Thông tin nơi sản xuất
+    # ── Thông tin nơi sản xuất ──────────────────────────────────────────────
     village_name = Column(String(255), nullable=True)           # Tên làng nghề / vùng sản xuất
+    facility_name = Column(String(255), nullable=True)          # Tên cơ sở sản xuất (rõ hơn village_name)
     region_id = Column(Integer, ForeignKey("regions.id"), nullable=True)
-    producer_name = Column(String(255), nullable=True)          # Tên hộ / HTX sản xuất
+    producer_name = Column(String(255), nullable=True)          # Tên hộ / HTX / nhà SX thực tế
 
-    # Lô sản xuất
-    batch_number = Column(String(100), nullable=True)           # Mã lô
+    # ── Lô sản xuất ─────────────────────────────────────────────────────────
+    batch_number = Column(String(100), nullable=True)           # Mã lô nghĩa là mẫ của sản phẩm 
     production_date = Column(Date, nullable=True)
     expiry_date = Column(Date, nullable=True)
 
-    # Thành phần & quy trình
+    # ── Thành phần & quy trình ──────────────────────────────────────────────
     ingredients = Column(Text, nullable=True)                   # Nguyên liệu / thành phần
     process_summary = Column(Text, nullable=True)               # Mô tả quy trình sản xuất
 
+    # ── Hướng dẫn sử dụng & bảo quản (bắt buộc theo Luật ATTP) ────────────
+    usage_instructions = Column(Text, nullable=True)            # Hướng dẫn sử dụng
+    storage_instructions = Column(Text, nullable=True)          # Hướng dẫn bảo quản
+    warnings = Column(Text, nullable=True)                      # Cảnh báo / lưu ý an toàn
+
+    # ── Trạng thái xác minh ─────────────────────────────────────────────────
     verification_status = Column(
         SQLEnum(OriginStatus), default=OriginStatus.PENDING
     )
