@@ -50,7 +50,7 @@ class CreateOriginRequest(BaseModel):
     product_id: int
     village_name: Optional[str] = None
     region_id: Optional[int] = None
-    producer_name: Optional[str] = None
+    seller_name: Optional[str] = None
     batch_number: Optional[str] = None
     production_date: Optional[date] = None
     expiry_date: Optional[date] = None
@@ -81,7 +81,7 @@ def _check_product_owner(product_id: int, user: User, db: Session) -> Product:
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
-    if user.type != "admin" and product.producer_id != user.id:
+    if user.type != "admin" and product.seller_id != user.id:
         raise HTTPException(status_code=403, detail="Bạn không sở hữu sản phẩm này")
     return product
 
@@ -92,7 +92,7 @@ def _serialize_origin(origin: ProductOrigin, include_status: bool = False) -> di
         "product_id": origin.product_id,
         "village_name": origin.village_name,
         "region_id": origin.region_id,
-        "producer_name": origin.producer_name,
+        "seller_name": origin.seller_name,
         "batch_number": origin.batch_number,
         "production_date": origin.production_date.isoformat() if origin.production_date else None,
         "expiry_date": origin.expiry_date.isoformat() if origin.expiry_date else None,
@@ -295,7 +295,7 @@ async def get_product_origin_for_review(
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
 
     origin = db.query(ProductOrigin).filter(ProductOrigin.product_id == product_id).first()
-    producer = db.query(User).filter(User.id == product.producer_id).first()
+    producer = db.query(User).filter(User.id == product.seller_id).first()
 
     if not origin:
         return {
@@ -304,8 +304,8 @@ async def get_product_origin_for_review(
                 "product": {
                     "id": product.id,
                     "name": product.name,
-                    "producer_id": product.producer_id,
-                    "producer_name": producer.name if producer else None,
+                    "seller_id": product.seller_id,
+                    "seller_name": producer.name if producer else None,
                 },
                 "origin": None,
             },
@@ -323,8 +323,8 @@ async def get_product_origin_for_review(
             "product": {
                 "id": product.id,
                 "name": product.name,
-                "producer_id": product.producer_id,
-                "producer_name": producer.name if producer else None,
+                "seller_id": product.seller_id,
+                "seller_name": producer.name if producer else None,
             },
             "origin": payload,
         },
@@ -404,7 +404,7 @@ async def get_product_traceability(
         ProductCertificate.product_id == product_id,
         ProductCertificate.verification_status == CertificateStatus.VERIFIED
     ).all()
-    producer = db.query(User).filter(User.id == product.producer_id).first()
+    producer = db.query(User).filter(User.id == product.seller_id).first()
 
     origin_payload = None
     if origin:
@@ -419,8 +419,8 @@ async def get_product_traceability(
                 "id": product.id,
                 "name": product.name,
                 "label": product.label,
-                "producer_id": product.producer_id,
-                "producer_name": producer.name if producer else None,
+                "seller_id": product.seller_id,
+                "seller_name": producer.name if producer else None,
             },
             "origin": origin_payload,
             "certificates": [

@@ -6,10 +6,9 @@ from app.core.database import Base
 
 
 class BusinessType(str, enum.Enum):
-    INDIVIDUAL = "INDIVIDUAL"       # Hộ kinh doanh cá thể
-    HOUSEHOLD = "HOUSEHOLD"         # Hộ gia đình
+    HOUSEHOLD = "HOUSEHOLD"         # Hộ kinh doanh gia đình
     COOPERATIVE = "COOPERATIVE"     # Hợp tác xã
-    COMPANY = "COMPANY"             # Doanh nghiệp
+    COMPANY = "COMPANY"             # Doanh nghiệp / Công ty
 
 
 class VerificationStatus(str, enum.Enum):
@@ -27,7 +26,7 @@ class SellerProfile(Base):
 
     # Thông tin kinh doanh
     business_name = Column(String(255), nullable=False)         # Tên cơ sở / shop
-    business_type = Column(SQLEnum(BusinessType), default=BusinessType.INDIVIDUAL)
+    business_type = Column(SQLEnum(BusinessType), default=BusinessType.HOUSEHOLD)
     description = Column(Text, nullable=True)                   # Mô tả cơ sở
     address = Column(Text, nullable=True)                       # Địa chỉ cơ sở
 

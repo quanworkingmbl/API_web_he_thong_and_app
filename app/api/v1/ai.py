@@ -251,7 +251,7 @@ async def generate_product_description(
 
     # Ownership check cho seller
     is_admin = current_user.type in ("admin", "content_manager")
-    if not is_admin and product.producer_id != current_user.id:
+    if not is_admin and product.seller_id != current_user.id:
         raise HTTPException(status_code=403, detail="Bạn chỉ có thể sinh mô tả cho sản phẩm của mình")
 
     # Lấy thông tin bổ sung
