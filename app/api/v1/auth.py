@@ -753,16 +753,32 @@ async def refresh_token(
 
     check_user_status(user)
 
-    refresh_row = db.query(RefreshToken).filter(
-        RefreshToken.user_id == user.id,
-        RefreshToken.jti == token_jti,
-    ).first()
+    refresh_row = db.execute(
+        sql_text(
+            """
+            SELECT
+                id,
+                family_id,
+                token_hash,
+                (revoked_at IS NOT NULL) AS is_revoked,
+                (expires_at <= NOW()) AS is_expired
+            FROM refresh_tokens
+            WHERE user_id = :user_id
+              AND jti = :jti
+            LIMIT 1
+            """
+        ),
+        {
+            "user_id": user.id,
+            "jti": token_jti,
+        },
+    ).mappings().first()
 
     token_hash = hash_refresh_token(raw_refresh_token)
     if (
         refresh_row is None
-        or refresh_row.family_id != family_id
-        or refresh_row.token_hash != token_hash
+        or refresh_row["family_id"] != family_id
+        or refresh_row["token_hash"] != token_hash
     ):
         _revoke_token_family(
             db,
@@ -776,7 +792,7 @@ async def refresh_token(
             detail="Refresh token is invalid",
         )
 
-    if refresh_row.revoked_at is not None:
+    if refresh_row["is_revoked"]:
         _revoke_token_family(
             db,
             user_id=user.id,
@@ -789,13 +805,19 @@ async def refresh_token(
             detail="Refresh token has been revoked",
         )
 
-    if _to_utc_aware(refresh_row.expires_at) <= _utcnow():
-        db.query(RefreshToken).filter(RefreshToken.id == refresh_row.id).update(
+    if refresh_row["is_expired"]:
+        db.execute(
+            sql_text(
+                """
+                UPDATE refresh_tokens
+                SET revoked_at = NOW(), revoked_reason = 'expired'
+                WHERE id = :id
+                  AND revoked_at IS NULL
+                """
+            ),
             {
-                RefreshToken.revoked_at: sql_func.now(),
-                RefreshToken.revoked_reason: "expired",
+                "id": refresh_row["id"],
             },
-            synchronize_session=False,
         )
         db.commit()
         raise HTTPException(
@@ -810,13 +832,20 @@ async def refresh_token(
         family_id=family_id,
     )
 
-    db.query(RefreshToken).filter(RefreshToken.id == refresh_row.id).update(
+    db.execute(
+        sql_text(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = NOW(),
+                revoked_reason = 'rotated',
+                replaced_by_jti = :replaced_by_jti
+            WHERE id = :id
+            """
+        ),
         {
-            RefreshToken.revoked_at: sql_func.now(),
-            RefreshToken.revoked_reason: "rotated",
-            RefreshToken.replaced_by_jti: token_pair["refresh_jti"],
+            "id": refresh_row["id"],
+            "replaced_by_jti": token_pair["refresh_jti"],
         },
-        synchronize_session=False,
     )
 
     db.commit()
