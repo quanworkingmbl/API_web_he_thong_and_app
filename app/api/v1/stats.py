@@ -29,7 +29,7 @@ class ConsumerStatsResponse(BaseModel):
 class TrendingProductResponse(BaseModel):
     id: int
     name: str
-    producer_name: str
+    seller_name: Optional[str] = None
     order_count: int
     rating: float
 

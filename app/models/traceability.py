@@ -58,7 +58,8 @@ class ProductOrigin(Base):
     village_name = Column(String(255), nullable=True)           # Tên làng nghề / vùng sản xuất
     facility_name = Column(String(255), nullable=True)          # Tên cơ sở sản xuất (rõ hơn village_name)
     region_id = Column(Integer, ForeignKey("regions.id"), nullable=True)
-    producer_name = Column(String(255), nullable=True)          # Tên hộ / HTX / nhà SX thực tế
+    # DB cũ dùng tên cột producer_name; chuẩn API mới dùng seller_name.
+    seller_name = Column("producer_name", String(255), nullable=True)  # Tên hộ / HTX / nhà SX thực tế
 
     # ── Lô sản xuất ─────────────────────────────────────────────────────────
     batch_number = Column(String(100), nullable=True)           # Mã lô nghĩa là mẫ của sản phẩm 
@@ -73,6 +74,15 @@ class ProductOrigin(Base):
     usage_instructions = Column(Text, nullable=True)            # Hướng dẫn sử dụng
     storage_instructions = Column(Text, nullable=True)          # Hướng dẫn bảo quản
     warnings = Column(Text, nullable=True)                      # Cảnh báo / lưu ý an toàn
+
+    # Backward-compat: cho phép code cũ vẫn đọc/ghi origin.producer_name.
+    @property
+    def producer_name(self):
+        return self.seller_name
+
+    @producer_name.setter
+    def producer_name(self, value):
+        self.seller_name = value
 
     # ── Trạng thái xác minh ─────────────────────────────────────────────────
     verification_status = Column(
