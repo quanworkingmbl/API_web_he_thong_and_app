@@ -506,7 +506,8 @@ async def get_seller_products(
     category_ids = list({p.category_id for p in products if p.category_id})
 
     from app.models.category import Category as CategoryModel
-    from app.models.traceability import ProductOrigin as OriginModel, ProductApproval as ApprovalModel
+    from app.models.traceability import ProductOrigin as OriginModel
+    from app.models.product import ProductApproval as ApprovalModel
     categories_map = {
         c.id: c.name
         for c in db.query(CategoryModel).filter(CategoryModel.id.in_(category_ids)).all()
@@ -518,17 +519,16 @@ async def get_seller_products(
     } if product_ids else {}
 
     # Lấy lý do reject mới nhất nếu có
-    from app.models.product import ProductApproval
     latest_rejections: dict = {}
     if product_ids:
         from sqlalchemy import desc as _desc
         for approval in (
-            db.query(ProductApproval)
+            db.query(ApprovalModel)
             .filter(
-                ProductApproval.product_id.in_(product_ids),
-                ProductApproval.status == 'REJECTED',
+                ApprovalModel.product_id.in_(product_ids),
+                ApprovalModel.status == 'REJECTED',
             )
-            .order_by(_desc(ProductApproval.created_at))
+            .order_by(_desc(ApprovalModel.created_at))
             .all()
         ):
             if approval.product_id not in latest_rejections:

@@ -149,6 +149,7 @@ class CheckoutRequest(BaseModel):
     payment_method: str = Field(default="COD", pattern="^(COD|BANK_TRANSFER|MOMO|VNPAY|ZALOPAY|PLATFORM_CREDITS)$")
     customer_note: Optional[str] = None
     coupon_code: Optional[str] = None
+    seller_id: Optional[int] = None
     items: List[CartItemRequest]
 
 
@@ -1120,123 +1121,115 @@ async def create_order(
                     coupon_discount = promo.max_discount_amount
                 applied_promo = promo
 
-    # ── Bước 2: Tạo đơn hàng – tách theo từng người bán ───────────────
+    seller_ids = list(sellers_map.keys())
+    if len(seller_ids) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Kiểu A: Giỏ hàng chỉ được chứa sản phẩm của một người bán",
+        )
+
+    detected_seller_id = seller_ids[0]
+    if checkout_data.seller_id is not None and checkout_data.seller_id != detected_seller_id:
+        raise HTTPException(
+            status_code=400,
+            detail="seller_id không khớp với sản phẩm trong giỏ hàng",
+        )
+
+    # ── Bước 2: Tạo 1 đơn hàng duy nhất cho 1 seller (Kiểu A) ───────────────
     platform_fee_percentage = Decimal("5.0")
-    created_orders = []
-    num_sellers = len(sellers_map)
-    coupon_per_seller = coupon_discount / num_sellers if num_sellers > 0 else Decimal("0")
+    items_of_seller = sellers_map[detected_seller_id]
+    subtotal = sum(i["total_price"] for i in items_of_seller)
+    shipping_fee = Decimal("30000")
+    discount_amount = coupon_discount
+    total_amount = subtotal + shipping_fee - discount_amount
+    platform_fee_amount = subtotal * platform_fee_percentage / Decimal("100")
+    seller_amount = subtotal - platform_fee_amount
 
-    for seller_id, items_of_seller in sellers_map.items():
-        subtotal = sum(i["total_price"] for i in items_of_seller)
-        shipping_fee = Decimal("30000")
-        discount_amount = coupon_per_seller
-        total_amount = subtotal + shipping_fee - discount_amount
-        platform_fee_amount = subtotal * platform_fee_percentage / Decimal("100")
-        seller_amount = subtotal - platform_fee_amount
+    order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
 
-        order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+    # Payment status: nếu PLATFORM_CREDITS → auto PAID
+    payment_status = "PAID" if checkout_data.payment_method == "PLATFORM_CREDITS" else "UNPAID"
 
-        # Payment status: nếu PLATFORM_CREDITS → auto PAID
-        payment_status = "PAID" if checkout_data.payment_method == "PLATFORM_CREDITS" else "UNPAID"
+    new_order = Order(
+        order_number=order_number,
+        customer_id=current_user.id,
+        customer_name=checkout_data.customer_name,
+        customer_phone=checkout_data.customer_phone,
+        customer_email=checkout_data.customer_email,
+        shipping_address=checkout_data.shipping_address,
+        shipping_province=checkout_data.shipping_province,
+        shipping_district=checkout_data.shipping_district,
+        shipping_ward=checkout_data.shipping_ward,
+        seller_id=detected_seller_id,
+        subtotal=subtotal,
+        shipping_fee=shipping_fee,
+        discount_amount=discount_amount,
+        total_amount=total_amount,
+        platform_fee_percentage=platform_fee_percentage,
+        platform_fee_amount=platform_fee_amount,
+        seller_amount=seller_amount,
+        status=OrderStatus.PENDING,
+        payment_method=checkout_data.payment_method,
+        payment_status=payment_status,
+        customer_note=checkout_data.customer_note,
+        coupon_code=checkout_data.coupon_code,
+    )
+    db.add(new_order)
+    db.flush()
 
-        new_order = Order(
-            order_number=order_number,
-            customer_id=current_user.id,
-            customer_name=checkout_data.customer_name,
-            customer_phone=checkout_data.customer_phone,
-            customer_email=checkout_data.customer_email,
-            shipping_address=checkout_data.shipping_address,
-            shipping_province=checkout_data.shipping_province,
-            shipping_district=checkout_data.shipping_district,
-            shipping_ward=checkout_data.shipping_ward,
-            seller_id=seller_id,
-            subtotal=subtotal,
-            shipping_fee=shipping_fee,
-            discount_amount=discount_amount,
-            total_amount=total_amount,
-            platform_fee_percentage=platform_fee_percentage,
-            platform_fee_amount=platform_fee_amount,
-            seller_amount=seller_amount,
-            status=OrderStatus.PENDING,
-            payment_method=checkout_data.payment_method,
-            payment_status=payment_status,
-            customer_note=checkout_data.customer_note,
-            coupon_code=checkout_data.coupon_code,
-        )
-        db.add(new_order)
-        db.flush()
-
-        for item_data in items_of_seller:
-            p = item_data["product"]
-            db.add(
-                OrderItem(
-                    order_id=new_order.id,
-                    product_id=p.id,
-                    seller_id=p.seller_id,
-                    variant_id=item_data["variant_id"],
-                    product_name=p.name,
-                    product_image=p.images,
-                    unit_price=item_data["unit_price"],
-                    quantity=item_data["quantity"],
-                    total_price=item_data["total_price"],
-                )
-            )
-            decrement_stock(db, p, item_data["quantity"], item_data["variant_id"])
-
-        # Ghi promo usage
-        if applied_promo:
-            db.add(PromotionUsage(
-                promotion_id=applied_promo.id,
-                user_id=current_user.id,
+    for item_data in items_of_seller:
+        p = item_data["product"]
+        db.add(
+            OrderItem(
                 order_id=new_order.id,
-                discount_amount=coupon_per_seller,
-            ))
-            applied_promo.used_count += 1
-
-        log_status_change(
-            db=db,
-            order_id=new_order.id,
-            old_status=None,
-            new_status=OrderStatus.PENDING.value,
-            actor_id=current_user.id,
-            role="consumer",
-            note=f"Đặt hàng qua mobile app. Phương thức: {checkout_data.payment_method}",
-            auto_flush=True,
+                product_id=p.id,
+                seller_id=p.seller_id,
+                variant_id=item_data["variant_id"],
+                product_name=p.name,
+                product_image=p.images,
+                unit_price=item_data["unit_price"],
+                quantity=item_data["quantity"],
+                total_price=item_data["total_price"],
+            )
         )
+        decrement_stock(db, p, item_data["quantity"], item_data["variant_id"])
 
-        created_orders.append({
-            "order_id": new_order.id,
-            "order_number": new_order.order_number,
-            "seller_id": seller_id,
-            "total_amount": str(total_amount),
-            "discount_amount": str(discount_amount),
-        })
+    # Ghi promo usage
+    if applied_promo:
+        db.add(PromotionUsage(
+            promotion_id=applied_promo.id,
+            user_id=current_user.id,
+            order_id=new_order.id,
+            discount_amount=discount_amount,
+        ))
+        applied_promo.used_count += 1
+
+    log_status_change(
+        db=db,
+        order_id=new_order.id,
+        old_status=None,
+        new_status=OrderStatus.PENDING.value,
+        actor_id=current_user.id,
+        role="consumer",
+        note=f"Đặt hàng qua mobile app. Phương thức: {checkout_data.payment_method}",
+        auto_flush=True,
+    )
 
     db.commit()
 
-    if len(created_orders) == 1:
-        order = created_orders[0]
-        return {
-            "success": True,
-            "message": "Đặt hàng thành công",
-            "data": {
-                "order_id": order["order_id"],
-                "order_number": order["order_number"],
-                "total_amount": order["total_amount"],
-                "discount_amount": order["discount_amount"],
-                "status": "PENDING",
-                "payment_method": checkout_data.payment_method,
-            },
-        }
-    else:
-        return {
-            "success": True,
-            "message": f"Đặt hàng thành công. Giỏ hàng được tách thành {len(created_orders)} đơn theo từng người bán.",
-            "data": {
-                "orders": created_orders,
-                "payment_method": checkout_data.payment_method,
-            },
-        }
+    return {
+        "success": True,
+        "message": "Đặt hàng thành công",
+        "data": {
+            "order_id": new_order.id,
+            "order_number": new_order.order_number,
+            "seller_id": detected_seller_id,
+            "total_amount": str(total_amount),
+            "discount_amount": str(discount_amount),
+            "status": "PENDING",
+            "payment_method": checkout_data.payment_method,
+        },
+    }
 
 
 # ==============================================================================

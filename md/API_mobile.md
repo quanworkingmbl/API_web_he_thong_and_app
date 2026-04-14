@@ -248,6 +248,7 @@
       {
         "id": 1,
         "product_id": 1,
+        "seller_id": 3,
         "product_name": "Gạo ST25",
         "product_image": "https://...",
         "unit_price": 85000,
@@ -266,34 +267,42 @@
 ```json
 // Request
 {
+  "customer_name": "Nguyễn Văn A",
+  "customer_phone": "0909123456",
+  "customer_email": "a@gmail.com",
   "shipping_address": "123 Nguyễn Huệ, Q1, TP.HCM",
-  "payment_method": "COD",          // COD | VNPAY
+  "seller_id": 3,
+  "payment_method": "COD",          // COD | BANK_TRANSFER | MOMO | VNPAY | ZALOPAY | PLATFORM_CREDITS
   "customer_note": "Giao giờ hành chính",
-  "promotion_code": "SUMMER2026"    // optional
+  "coupon_code": "SUMMER2026",      // optional
+  "items": [
+    { "product_id": 1, "quantity": 2, "variant_id": null },
+    { "product_id": 4, "quantity": 1, "variant_id": 11 }
+  ]
 }
 
 // Response (COD)
 {
   "success": true,
-  "orders": [
-    { "order_id": 1, "order_number": "ORD-2026-001", "total_amount": 170000 }
-  ]
-}
-
-// Response (VNPAY)
-{
-  "success": true,
-  "orders": [...],
-  "payment_url": "https://sandbox.vnpayment.vn/..."
+  "data": {
+    "order_id": 1,
+    "order_number": "ORD-2026-001",
+    "seller_id": 3,
+    "total_amount": "170000",
+    "discount_amount": "10000",
+    "status": "PENDING",
+    "payment_method": "COD"
+  }
 }
 ```
 
 > **Luồng checkout**:
-> 1. Nhóm giỏ hàng theo seller → tạo đơn riêng cho mỗi seller
-> 2. Kiểm tra & trừ tồn kho (có row-level locking tránh race condition)
-> 3. Áp mã khuyến mãi nếu có
-> 4. Xóa giỏ hàng sau đặt thành công
-> 5. `COD` → trả kết quả luôn | `VNPAY` → trả `payment_url` để mở WebView
+> 1. **Kiểu A**: giỏ hàng chỉ được chứa sản phẩm của **1 seller**
+> 2. Nếu có nhiều seller trong payload `items` → trả lỗi `400`
+> 3. Nếu client gửi `seller_id` nhưng không khớp dữ liệu item → trả lỗi `400`
+> 4. Kiểm tra & trừ tồn kho (có row-level locking tránh race condition)
+> 5. Áp mã khuyến mãi nếu có
+> 6. Tạo **một** đơn hàng duy nhất cho seller đó
 
 ---
 
@@ -461,7 +470,7 @@
 }
 ```
 
-> Áp dụng mã KM khi checkout: điền `promotion_code` vào body của `POST /api/mobile/checkout`.
+> Áp dụng mã KM khi checkout: điền `coupon_code` vào body của `POST /api/mobile/checkout`.
 
 ---
 

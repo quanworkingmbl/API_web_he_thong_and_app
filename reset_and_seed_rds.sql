@@ -407,17 +407,18 @@ INSERT INTO roles (id, role_name, description) VALUES
 
 -- ============================================================================
 -- 3. USERS  (password: "password123")
--- Columns: id, email, password_hash, name, gender, activated, type
+-- Columns: id, email, password_hash, name, gender, activated, type,
+--   status, status_reason, status_expire_at
 -- ============================================================================
-INSERT INTO users (id, email, password_hash, name, gender, activated, type) VALUES
-(1, 'admin@example.com',     '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Quản trị viên', 'male',   1, 'admin'),
-(2, 'content@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Nguyễn Văn An', 'male',   1, 'content_manager'),
-(3, 'seller1@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Trần Thị Bình', 'female', 1, 'seller'),
-(4, 'seller2@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Lê Văn Cường',  'male',   1, 'seller'),
-(5, 'seller3@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Phạm Thị Dung', 'female', 1, 'seller'),
-(6, 'customer1@example.com', '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Hoàng Văn Em',  'male',   1, 'customer'),
-(7, 'customer2@example.com', '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Đỗ Thị Phương', 'female', 1, 'customer'),
-(8, 'customer3@example.com', '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Vũ Minh Quân',  'male',   1, 'customer');
+INSERT INTO users (id, email, password_hash, name, gender, activated, type, status, status_reason, status_expire_at) VALUES
+(1, 'admin@example.com',     '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Quản trị viên', 'male',   1, 'admin',           'ACTIVE',    NULL,                                          NULL),
+(2, 'content@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Nguyễn Văn An', 'male',   1, 'content_manager', 'ACTIVE',    NULL,                                          NULL),
+(3, 'seller1@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Trần Thị Bình', 'female', 1, 'seller',          'ACTIVE',    NULL,                                          NULL),
+(4, 'seller2@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Lê Văn Cường',  'male',   1, 'seller',          'ACTIVE',    NULL,                                          NULL),
+(5, 'seller3@example.com',   '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Phạm Thị Dung', 'female', 1, 'seller',          'SUSPENDED', 'Chưa hoàn tất hồ sơ xác minh cửa hàng',       NOW() + INTERVAL '7 days'),
+(6, 'customer1@example.com', '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Hoàng Văn Em',  'male',   1, 'customer',        'ACTIVE',    NULL,                                          NULL),
+(7, 'customer2@example.com', '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Đỗ Thị Phương', 'female', 1, 'customer',        'ACTIVE',    NULL,                                          NULL),
+(8, 'customer3@example.com', '$2b$12$n4piNSOxGuKKshPXAe4VwuBWA92k0NNwKExGm4nbCYRg/IOwSz3gO', 'Vũ Minh Quân',  'male',   1, 'customer',        'BANNED',    'Vi phạm chính sách đánh giá spam',             NULL);
 
 -- ============================================================================
 -- 4. USER_ROLES
@@ -621,12 +622,13 @@ INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantit
 -- ============================================================================
 INSERT INTO payments (id, order_id, customer_id, seller_id, amount, currency,
     platform_fee_percentage, platform_fee_amount, seller_amount, status, payment_cycle,
-    vnpay_transaction_no, vnpay_response_code, vnpay_bank_code, amount_from_gateway, amount_mismatch) VALUES
-(1, 1, 6, 3,  85000.00, 'VND', 5.00,  4250.00,  80750.00, 'COMPLETED', 'WEEKLY',  NULL, NULL, NULL, NULL, FALSE),
-(2, 2, 7, 4, 370000.00, 'VND', 5.00, 18500.00, 351500.00, 'COMPLETED', 'WEEKLY',  NULL, NULL, NULL, NULL, FALSE),
-(3, 3, 6, 5, 475000.00, 'VND', 5.00, 23750.00, 451250.00, 'PENDING',   'MONTHLY', NULL, NULL, NULL, NULL, FALSE),
+    vnpay_transaction_no, vnpay_response_code, vnpay_bank_code, amount_from_gateway, amount_mismatch,
+    refunded_amount, refund_note, refunded_at) VALUES
+(1, 1, 6, 3,  85000.00, 'VND', 5.00,  4250.00,  80750.00, 'PARTIAL_REFUNDED', 'WEEKLY',  NULL, NULL, NULL, NULL, FALSE, 30000.00, 'Hoàn tiền một phần do yêu cầu trả hàng RR-001', NOW()-INTERVAL '1 day'),
+(2, 2, 7, 4, 370000.00, 'VND', 5.00, 18500.00, 351500.00, 'COMPLETED',        'WEEKLY',  NULL, NULL, NULL, NULL, FALSE, NULL,     NULL,                                         NULL),
+(3, 3, 6, 5, 475000.00, 'VND', 5.00, 23750.00, 451250.00, 'PENDING',          'MONTHLY', NULL, NULL, NULL, NULL, FALSE, NULL,     NULL,                                         NULL),
 (4, 4, 8, 3, 235000.00, 'VND', 5.00, 11750.00, 223250.00, 'COMPLETED', 'WEEKLY',
-    'VNP-TXN-20260405-004', '00', 'NCB', 235000.00, FALSE);
+    'VNP-TXN-20260405-004', '00', 'NCB', 235000.00, FALSE, NULL, NULL, NULL);
 
 -- ============================================================================
 -- 15. PAYMENT_TRANSACTIONS
@@ -643,6 +645,7 @@ INSERT INTO payment_transactions (payment_id, transaction_type, amount, status, 
 -- ============================================================================
 INSERT INTO payment_audit_logs (payment_id, action, actor_id, amount, note, ip_address, timestamp) VALUES
 (1,    'IPN_RECEIVED',  NULL, 85000.00,  'COD thu tiền khi giao hàng. GHN webhook DELIVERED.',              NULL,            NOW()-INTERVAL '2 days'),
+(1,    'REFUND_PROCESSED', 2, 30000.00,  'Hoàn tiền một phần theo yêu cầu trả hàng #1',                     '10.10.10.10',   NOW()-INTERVAL '1 day 2 hours'),
 (2,    'IPN_RECEIVED',  NULL, 370000.00, 'BANK_TRANSFER xác nhận. txn=BANK-TXN-002, bank=BIDV',             NULL,            NOW()-INTERVAL '2 days'),
 (4,    'VNPAY_RETURN',  NULL, 235000.00, 'return url. code=00, mismatch=False. txn=VNP-TXN-20260405-004',   '192.168.1.100', NOW()),
 (4,    'IPN_RECEIVED',  NULL, 235000.00, 'txn=VNP-TXN-20260405-004, code=00, bank=NCB',                     NULL,            NOW()),
@@ -668,20 +671,22 @@ INSERT INTO partner_contracts (id, contract_number, partner_id, contract_type,
 -- 17. COMPLAINTS
 -- ============================================================================
 INSERT INTO complaints (product_id, order_id, user_id, complaint_type,
-    category, priority, title, description, status, handled_by, resolution,
-    assigned_at, first_response_at, resolved_at) VALUES
+    category, priority, title, description, images, status, handled_by, resolution, resolution_type,
+    assigned_at, first_response_at, resolved_at, closed_at) VALUES
 (7, NULL, 6, 'PRODUCT_QUALITY',
     'QUALITY', 'MEDIUM',
     'Sản phẩm giỏ đan tre chưa được duyệt',
     'Tôi muốn mua giỏ đan tre nhưng sản phẩm chưa được duyệt để đặt hàng',
-    'RESOLVED', 2, 'Đã liên hệ người bán để bổ sung ảnh và hoàn thiện thông tin',
-    NOW()-INTERVAL '8 days', NOW()-INTERVAL '7 days', NOW()-INTERVAL '6 days'),
+    '["https://cdn.local/complaints/cp-001-1.jpg"]',
+    'RESOLVED', 2, 'Đã liên hệ người bán để bổ sung ảnh và hoàn thiện thông tin', 'SELLER_COORDINATION',
+    NOW()-INTERVAL '8 days', NOW()-INTERVAL '7 days', NOW()-INTERVAL '6 days', NOW()-INTERVAL '5 days'),
 (NULL, 2, 7, 'DELIVERY',
     'DELIVERY', 'HIGH',
     'Đơn hàng giao chậm hơn dự kiến',
     'Đơn ORD-2026-002 đã 2 ngày chưa thấy cập nhật trạng thái vận chuyển',
-    'IN_PROGRESS', 2, NULL,
-    NOW()-INTERVAL '2 days', NOW()-INTERVAL '1 day', NULL);
+    '["https://cdn.local/complaints/cp-002-1.jpg","https://cdn.local/complaints/cp-002-2.jpg"]',
+    'IN_PROGRESS', 2, NULL, 'CARRIER_ESCALATION',
+    NOW()-INTERVAL '2 days', NOW()-INTERVAL '1 day', NULL, NULL);
 
 -- ============================================================================
 -- 17b. COMPLAINT_COMMENTS & COMPLAINT_STATUS_LOGS
@@ -709,19 +714,19 @@ INSERT INTO complaint_status_logs (complaint_id, old_status, new_status, actor_i
 -- 18. CONTENTS
 -- ============================================================================
 INSERT INTO contents (id, title, content, content_type, author_id, product_id,
-    status, approved_by, approved_at) VALUES
+    status, approved_by, approved_at, is_active, deleted_at, deleted_by, rejection_reason) VALUES
 (1, 'Hướng dẫn chọn rau sạch',
     'Bài viết hướng dẫn cách nhận biết và chọn rau sạch an toàn...',
-    'ARTICLE', 3, 1, 'APPROVED', 2, NOW()-INTERVAL '10 days'),
+    'ARTICLE', 3, 1, 'APPROVED', 2, NOW()-INTERVAL '10 days', TRUE,  NULL,                 NULL, NULL),
 (2, 'Giới thiệu gốm Bát Tràng',
     'Bài viết về nghề làm gốm truyền thống Bát Tràng, lịch sử hơn 500 năm...',
-    'ARTICLE', 4, 5, 'APPROVED', 2, NOW()-INTERVAL '8 days'),
+    'ARTICLE', 4, 5, 'APPROVED', 2, NOW()-INTERVAL '8 days',  TRUE,  NULL,                 NULL, NULL),
 (3, 'Video quy trình sản xuất khăn thêu',
     'Video giới thiệu quy trình thêu tay truyền thống của nghệ nhân Huế...',
-    'VIDEO', 5, 8, 'PENDING', NULL, NULL),
+    'VIDEO', 5, 8, 'REJECTED', NULL, NULL, TRUE,  NULL,                 NULL, 'Thiếu thông tin bản quyền hình ảnh/video.'),
 (4, 'Câu chuyện của người nông dân',
     'Hành trình khởi nghiệp từ cánh đồng của chị Trần Thị Bình...',
-    'ARTICLE', 2, NULL, 'APPROVED', 1, NOW()-INTERVAL '5 days');
+    'ARTICLE', 2, NULL, 'APPROVED', 1, NOW()-INTERVAL '5 days', FALSE, NOW()-INTERVAL '1 day', 1,    NULL);
 
 -- ============================================================================
 -- 19. PROMOTIONS
@@ -830,6 +835,11 @@ INSERT INTO return_requests (id, order_id, user_id, return_type, reason, images,
     'Rau bị héo khi nhận, không đảm bảo chất lượng như mô tả', '[]',
     'REFUNDED', 'Đã xác minh và hoàn tiền cho khách trong 24h', 2, NOW()-INTERVAL '1 day');
 
+-- Liên kết complaint đã xử lý với yêu cầu trả hàng
+UPDATE complaints
+SET return_request_id = 1
+WHERE id = 1;
+
 -- ============================================================================
 -- 26. PRODUCT_CERTIFICATES
 -- ============================================================================
@@ -872,6 +882,94 @@ INSERT INTO product_origins (id, product_id, village_name, region_id, producer_n
     'PENDING', NULL, NULL, NULL);
 
 -- ============================================================================
+-- 28. CONTENT_AUDIT_LOGS
+-- ============================================================================
+INSERT INTO content_audit_logs (id, content_id, action, user_id, old_status, new_status, notes, created_at) VALUES
+(1, 1, 'CREATE',  3, NULL,      'PENDING',  'Seller tạo bài viết ban đầu',                              NOW()-INTERVAL '11 days'),
+(2, 1, 'APPROVE', 2, 'PENDING', 'APPROVED', 'Duyệt bài viết hướng dẫn rau sạch',                        NOW()-INTERVAL '10 days'),
+(3, 3, 'CREATE',  5, NULL,      'PENDING',  'Tạo nội dung video giới thiệu quy trình',                  NOW()-INTERVAL '3 days'),
+(4, 3, 'REJECT',  2, 'PENDING', 'REJECTED', 'Thiếu giấy tờ bản quyền hình ảnh trong video',             NOW()-INTERVAL '2 days'),
+(5, 4, 'DELETE',  1, 'APPROVED','APPROVED', 'Ẩn tạm nội dung để chỉnh sửa thông tin tác giả',           NOW()-INTERVAL '1 day');
+
+-- ============================================================================
+-- 29. PRODUCT_PRICE_LOGS
+-- ============================================================================
+INSERT INTO product_price_logs (id, product_id, old_price, new_price, changed_by, reason, created_at) VALUES
+(1, 4,  110000.00, 120000.00, 1, 'Điều chỉnh giá theo mùa vụ xoài',                 NOW()-INTERVAL '15 days'),
+(2, 6,  260000.00, 280000.00, 4, 'Cập nhật chi phí nguyên liệu gốm',                 NOW()-INTERVAL '9 days'),
+(3, 10, 240000.00, 250000.00, 2, 'Điều chỉnh theo biến động nguồn cung hồ tiêu',     NOW()-INTERVAL '4 days');
+
+-- ============================================================================
+-- 30. REFRESH_TOKENS
+-- ============================================================================
+INSERT INTO refresh_tokens (
+    id, user_id, jti, family_id, token_hash, expires_at,
+    revoked_at, replaced_by_jti, created_by_ip, created_by_user_agent,
+    revoked_reason, created_at, updated_at
+) VALUES
+(1, 6, 'jti_u6_fam1_0001', 'fam_u6_2026_04',
+    '9f6d1d4d9f7bbac9b7a3fd4a8a7f9f12901a30f95e5b6c2f31dbf6f24fce0011',
+    NOW() + INTERVAL '20 days', NULL, NULL, '171.244.1.10', 'iOSApp/1.4.2', NULL,
+    NOW()-INTERVAL '1 day', NOW()-INTERVAL '1 day'),
+(2, 6, 'jti_u6_fam1_0000', 'fam_u6_2026_04',
+    'e1adff4beea24bb3e1b1f9f80447f2d060f37d7a7d49651d283f2d4f7b430022',
+    NOW() + INTERVAL '10 days', NOW()-INTERVAL '2 days', 'jti_u6_fam1_0001', '171.244.1.10', 'iOSApp/1.4.1', 'ROTATED',
+    NOW()-INTERVAL '6 days', NOW()-INTERVAL '2 days'),
+(3, 7, 'jti_u7_fam1_0001', 'fam_u7_2026_04',
+    'd2bc1a3e4d8f7aa29a50f0b7e6c65ed9090ecb8e83c23a8f35c7ec6d1810a033',
+    NOW() + INTERVAL '25 days', NULL, NULL, '203.113.8.15', 'AndroidApp/2.0.0', NULL,
+    NOW()-INTERVAL '8 hours', NOW()-INTERVAL '8 hours');
+
+-- ============================================================================
+-- 31. AI_MODERATION_LOGS
+-- ============================================================================
+INSERT INTO ai_moderation_logs (
+    id, product_id, content_id, rule_engine_result, rule_engine_flags,
+    model_used, ai_decision, ai_confidence, ai_reasons, ai_flags,
+    escalated, escalation_reason, processing_time_ms,
+    input_tokens, output_tokens, estimated_cost_usd, raw_response, created_at
+) VALUES
+(1, 7, NULL, 'FLAGGED', 'missing_product_images',
+    'gpt-4o-mini', 'REVIEW', 0.82, 'Thiếu ảnh minh họa sản phẩm tối thiểu', 'image_missing',
+    TRUE, 'Cần duyệt thủ công bởi content_manager', 612,
+    820, 156, 0.0042, '{"decision":"REVIEW","reason":"missing images"}', NOW()-INTERVAL '7 days'),
+(2, NULL, 3, 'FLAGGED', 'copyright_risk',
+    'gpt-4o-mini', 'REJECT', 0.91, 'Nghi ngờ vi phạm bản quyền tư liệu video', 'copyright',
+    TRUE, 'Yêu cầu người đăng bổ sung bằng chứng bản quyền', 734,
+    1040, 201, 0.0061, '{"decision":"REJECT","reason":"copyright risk"}', NOW()-INTERVAL '2 days'),
+(3, 1, NULL, 'PASS', NULL,
+    'gpt-4o-mini', 'APPROVE', 0.97, 'Mô tả sản phẩm hợp lệ, không phát hiện rủi ro', NULL,
+    FALSE, NULL, 401,
+    560, 98, 0.0026, '{"decision":"APPROVE"}', NOW()-INTERVAL '10 days');
+
+-- ============================================================================
+-- 32. AI_GENERATION_CACHE
+-- ============================================================================
+INSERT INTO ai_generation_cache (id, input_hash, task_type, model_used, input_text, output_text, created_at, expires_at) VALUES
+(1, 'a5a4559b7f7f8f62e0e84f985fd3f7f3a2b98d1d08aa5c96f0d3a0c7c2f10001', 'PRODUCT_SUMMARY', 'gpt-4o-mini',
+    'Rau cải xanh hữu cơ, không thuốc trừ sâu, thu hoạch trong ngày',
+    'Rau cải xanh hữu cơ tươi sạch, an toàn cho bữa cơm gia đình.', NOW()-INTERVAL '4 days', NOW()+INTERVAL '3 days'),
+(2, 'b3b7f994f02f90a3de66d9c3ca0d9d2ab5e06d89c5b99cc4a61ea90ec7810002', 'SEO_TITLE', 'gpt-4o-mini',
+    'Bình gốm Bát Tràng thủ công cao cấp',
+    'Bình gốm Bát Tràng thủ công: Tinh hoa gốm Việt cho không gian sống', NOW()-INTERVAL '2 days', NOW()+INTERVAL '5 days');
+
+-- ============================================================================
+-- 33. AI_COST_LOGS
+-- ============================================================================
+INSERT INTO ai_cost_logs (id, log_date, model_id, task_type, request_count, total_input_tokens, total_output_tokens, total_cost_usd) VALUES
+(1, CURRENT_DATE - 2, 'gpt-4o-mini', 'MODERATION',       32, 28450, 5410, 0.2184),
+(2, CURRENT_DATE - 1, 'gpt-4o-mini', 'PRODUCT_SUMMARY',  18, 13220, 3780, 0.1241),
+(3, CURRENT_DATE - 1, 'gpt-4o-mini', 'SEO_TITLE',        11,  4210,  980, 0.0395);
+
+-- ============================================================================
+-- 34. PRODUCT_EMBEDDINGS
+-- ============================================================================
+INSERT INTO product_embeddings (id, product_id, embedding_text, embedding_vector, vector_dimension, model_version, created_at, updated_at) VALUES
+(1, 1,  'Rau cải xanh hữu cơ tươi sạch không thuốc trừ sâu', '[0.012,0.155,0.447,0.083,0.390,0.221,0.064,0.118]', 8, 'text-embedding-3-small@2026-03', NOW()-INTERVAL '10 days', NOW()-INTERVAL '10 days'),
+(2, 5,  'Bình gốm Bát Tràng thủ công truyền thống cao cấp',  '[0.332,0.071,0.214,0.455,0.102,0.184,0.290,0.016]', 8, 'text-embedding-3-small@2026-03', NOW()-INTERVAL '8 days',  NOW()-INTERVAL '8 days'),
+(3, 10, 'Tiêu đen Phú Quốc nguyên hạt thơm nồng tự nhiên',   '[0.087,0.241,0.301,0.094,0.510,0.068,0.132,0.225]', 8, 'text-embedding-3-small@2026-03', NOW()-INTERVAL '4 days',  NOW()-INTERVAL '4 days');
+
+-- ============================================================================
 -- RESET SEQUENCES (đồng bộ lại auto-increment)
 -- ============================================================================
 SELECT setval('organizations_id_seq',        (SELECT MAX(id) FROM organizations));
@@ -895,6 +993,13 @@ SELECT setval('payouts_id_seq',              (SELECT MAX(id) FROM payouts));
 SELECT setval('return_requests_id_seq',      (SELECT MAX(id) FROM return_requests));
 SELECT setval('product_certificates_id_seq', (SELECT MAX(id) FROM product_certificates));
 SELECT setval('product_origins_id_seq',      (SELECT MAX(id) FROM product_origins));
+SELECT setval('content_audit_logs_id_seq',   (SELECT MAX(id) FROM content_audit_logs));
+SELECT setval('product_price_logs_id_seq',   (SELECT MAX(id) FROM product_price_logs));
+SELECT setval('refresh_tokens_id_seq',       (SELECT MAX(id) FROM refresh_tokens));
+SELECT setval('ai_moderation_logs_id_seq',   (SELECT MAX(id) FROM ai_moderation_logs));
+SELECT setval('ai_generation_cache_id_seq',  (SELECT MAX(id) FROM ai_generation_cache));
+SELECT setval('ai_cost_logs_id_seq',         (SELECT MAX(id) FROM ai_cost_logs));
+SELECT setval('product_embeddings_id_seq',   (SELECT MAX(id) FROM product_embeddings));
 SELECT setval('order_status_logs_id_seq',    (SELECT MAX(id) FROM order_status_logs));
 SELECT setval('complaint_comments_id_seq',   (SELECT MAX(id) FROM complaint_comments));
 SELECT setval('complaint_status_logs_id_seq',(SELECT MAX(id) FROM complaint_status_logs));
