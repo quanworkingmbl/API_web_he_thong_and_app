@@ -24,6 +24,7 @@ from app.models.traceability import ProductOrigin, ProductCertificate, OriginSta
 from app.models.region import Region
 from app.models.product_variant import ProductVariant
 from app.models.product_media import ProductMedia
+from app.models.cart import Cart, CartItem
 from app.models.user import User
 from app.models.order import Order, OrderItem, OrderStatus, OrderStatusLog, PaymentMethod
 from app.models.category import Category
@@ -42,6 +43,7 @@ from app.services.order_state import (
     resolve_payment_status,
 )
 from app.services.inventory import validate_line_for_sale, decrement_stock, increment_stock
+from app.services.inventory import get_available_stock
 from pydantic import BaseModel, Field
 from decimal import Decimal
 import uuid
@@ -137,6 +139,10 @@ class CartItemRequest(BaseModel):
     product_id: int
     quantity: int = Field(..., ge=1)
     variant_id: Optional[int] = None
+
+
+class UpdateCartItemRequest(BaseModel):
+    quantity: int = Field(..., ge=1)
 
 
 class CheckoutRequest(BaseModel):
@@ -394,6 +400,119 @@ def _build_address_response(addr: Address, db: Session) -> dict:
         "full_address": f"{addr.address_line}, {ward_name}, {district_name}, {province_name}",
         "is_default": addr.is_default,
     }
+
+
+def _extract_primary_image(raw_images: Any) -> Optional[str]:
+    if raw_images is None:
+        return None
+
+    if isinstance(raw_images, list):
+        for item in raw_images:
+            text = str(item).strip()
+            if text and text.lower() != "null":
+                return text
+        return None
+
+    if isinstance(raw_images, dict):
+        text = str(raw_images.get("url", "")).strip()
+        return text if text else None
+
+    text = str(raw_images).strip()
+    if not text or text.lower() == "null":
+        return None
+
+    if text.startswith("[") or text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            return _extract_primary_image(parsed)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    return text
+
+
+def _get_or_create_mobile_cart(user_id: int, db: Session) -> Cart:
+    cart = db.query(Cart).filter(Cart.user_id == user_id).first()
+    if not cart:
+        cart = Cart(user_id=user_id)
+        db.add(cart)
+        db.commit()
+        db.refresh(cart)
+    return cart
+
+
+def _mobile_cart_line_filter(db: Session, cart_id: int, product_id: int, variant_id: Optional[int]):
+    query = db.query(CartItem).filter(
+        CartItem.cart_id == cart_id,
+        CartItem.product_id == product_id,
+    )
+    if variant_id is not None:
+        query = query.filter(CartItem.variant_id == variant_id)
+    else:
+        query = query.filter(CartItem.variant_id.is_(None))
+    return query
+
+
+def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
+    items_data = []
+    subtotal = Decimal("0")
+
+    for item in cart.items:
+        product = db.query(Product).filter(Product.id == item.product_id).first()
+        if not product:
+            continue
+
+        seller = db.query(User).filter(User.id == product.seller_id).first()
+        category = db.query(Category).filter(Category.id == product.category_id).first() if product.category_id else None
+
+        stock_quantity = get_available_stock(db, product, item.variant_id)
+        line_subtotal = item.unit_price * item.quantity
+        subtotal += line_subtotal
+
+        items_data.append(
+            {
+                "id": item.id,
+                "product_id": product.id,
+                "variant_id": item.variant_id,
+                "seller_id": product.seller_id,
+                "seller_name": seller.name if seller else "Cửa hàng Agrarian",
+                "product_name": product.name,
+                "product_image": _extract_primary_image(product.images),
+                "unit_label": product.unit if hasattr(product, "unit") and product.unit else "1 sản phẩm",
+                "location_label": category.name if category else "Nông trại Việt",
+                "unit_price": str(item.unit_price),
+                "quantity": item.quantity,
+                "subtotal": str(line_subtotal),
+                "stock_quantity": stock_quantity,
+                "is_active": bool(product.is_active),
+            }
+        )
+
+    shipping_fee = Decimal("30000")
+    discount_amount = Decimal("0")
+    total_amount = subtotal + shipping_fee - discount_amount
+
+    return {
+        "items": items_data,
+        "total_items": len(items_data),
+        "subtotal": str(subtotal),
+        "shipping_fee": str(shipping_fee),
+        "discount_amount": str(discount_amount),
+        "total_amount": str(total_amount),
+        "updated_at": cart.updated_at.isoformat() if cart.updated_at else None,
+    }
+
+
+def _order_status_label(status: str) -> str:
+    mapping = {
+        "PENDING": "Chờ xác nhận",
+        "CONFIRMED": "Đã xác nhận",
+        "PROCESSING": "Đang xử lý",
+        "SHIPPING": "Đang giao",
+        "DELIVERED": "Đã giao",
+        "CANCELLED": "Đã hủy",
+    }
+    return mapping.get(str(status or "").upper(), str(status or "Đang cập nhật"))
 
 
 
@@ -1267,6 +1386,157 @@ async def apply_promotion(
 # SHOPPING API - Giỏ hàng và Thanh toán (ENRICHED)
 # ==============================================================================
 
+@router.get("/cart", summary="Lấy giỏ hàng mobile")
+async def get_mobile_cart(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    cart = _get_or_create_mobile_cart(current_user.id, db)
+    return {
+        "success": True,
+        "data": _build_mobile_cart_response(cart, db),
+    }
+
+
+@router.post("/cart/items", summary="Thêm sản phẩm vào giỏ hàng mobile")
+async def add_mobile_cart_item(
+    item_data: CartItemRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    product = db.query(Product).filter(
+        Product.id == item_data.product_id,
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc chưa được duyệt")
+
+    _, unit_price = validate_line_for_sale(db, product, item_data.quantity, item_data.variant_id)
+
+    cart = _get_or_create_mobile_cart(current_user.id, db)
+
+    # Kiểu A: một giỏ chỉ chứa sản phẩm của một seller.
+    current_seller_ids = {
+        sid
+        for (sid,) in db.query(Product.seller_id)
+        .join(CartItem, CartItem.product_id == Product.id)
+        .filter(CartItem.cart_id == cart.id)
+        .distinct()
+        .all()
+    }
+    if len(current_seller_ids) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Giỏ hàng đang chứa nhiều seller (dữ liệu cũ). Vui lòng xóa giỏ hàng để tiếp tục theo chuẩn mobile.",
+        )
+    if current_seller_ids and product.seller_id not in current_seller_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Giỏ hàng chỉ hỗ trợ 1 seller. Vui lòng checkout/xóa giỏ hiện tại trước khi thêm sản phẩm seller khác.",
+        )
+
+    existing_item = _mobile_cart_line_filter(db, cart.id, item_data.product_id, item_data.variant_id).first()
+
+    if existing_item:
+        new_quantity = existing_item.quantity + item_data.quantity
+        validate_line_for_sale(db, product, new_quantity, item_data.variant_id)
+        existing_item.quantity = new_quantity
+        existing_item.unit_price = unit_price
+        if item_data.variant_id is not None:
+            existing_item.variant_id = item_data.variant_id
+    else:
+        db.add(
+            CartItem(
+                cart_id=cart.id,
+                product_id=item_data.product_id,
+                variant_id=item_data.variant_id,
+                quantity=item_data.quantity,
+                unit_price=unit_price,
+            )
+        )
+
+    db.commit()
+    db.refresh(cart)
+
+    return {
+        "success": True,
+        "message": "Đã thêm vào giỏ hàng",
+        "data": _build_mobile_cart_response(cart, db),
+    }
+
+
+@router.put("/cart/items/{item_id}", summary="Cập nhật số lượng item giỏ hàng mobile")
+async def update_mobile_cart_item(
+    item_id: int,
+    item_data: UpdateCartItemRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    cart = _get_or_create_mobile_cart(current_user.id, db)
+    item = db.query(CartItem).filter(CartItem.id == item_id, CartItem.cart_id == cart.id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item không tồn tại trong giỏ hàng")
+
+    product = db.query(Product).filter(
+        Product.id == item.product_id,
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không còn khả dụng")
+
+    _, unit_price = validate_line_for_sale(db, product, item_data.quantity, item.variant_id)
+    item.quantity = item_data.quantity
+    item.unit_price = unit_price
+
+    db.commit()
+    db.refresh(cart)
+
+    return {
+        "success": True,
+        "message": "Đã cập nhật giỏ hàng",
+        "data": _build_mobile_cart_response(cart, db),
+    }
+
+
+@router.delete("/cart/items/{item_id}", summary="Xóa item giỏ hàng mobile")
+async def remove_mobile_cart_item(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    cart = _get_or_create_mobile_cart(current_user.id, db)
+    item = db.query(CartItem).filter(CartItem.id == item_id, CartItem.cart_id == cart.id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item không tồn tại trong giỏ hàng")
+
+    db.delete(item)
+    db.commit()
+    db.refresh(cart)
+
+    return {
+        "success": True,
+        "message": "Đã xóa sản phẩm khỏi giỏ hàng",
+        "data": _build_mobile_cart_response(cart, db),
+    }
+
+
+@router.delete("/cart", summary="Xóa toàn bộ giỏ hàng mobile")
+async def clear_mobile_cart(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
+    if cart:
+        db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
+        db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã xóa toàn bộ giỏ hàng",
+    }
+
 @router.post("/checkout")
 async def create_order(
     checkout_data: CheckoutRequest,
@@ -1722,6 +1992,63 @@ async def get_order_timeline(
 
 
 # ==============================================================================
+# NOTIFICATIONS API – User notifications (order-centric)
+# ==============================================================================
+
+@router.get("/notifications", summary="Lấy danh sách thông báo cho user")
+async def get_my_notifications(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    query = (
+        db.query(OrderStatusLog, Order)
+        .join(Order, Order.id == OrderStatusLog.order_id)
+        .filter(
+            Order.customer_id == current_user.id,
+            Order.is_active == True,
+        )
+    )
+
+    total = query.count()
+    skip = (page - 1) * limit
+    rows = query.order_by(OrderStatusLog.timestamp.desc()).offset(skip).limit(limit).all()
+
+    notifications = []
+    for status_log, order in rows:
+        status = status_log.new_status or (order.status.value if hasattr(order.status, "value") else str(order.status))
+        status_label = _order_status_label(status)
+        note = (status_log.note or "").strip()
+
+        notifications.append(
+            {
+                "id": status_log.id,
+                "category": "ORDER",
+                "title": f"Đơn {order.order_number}",
+                "message": note or f"Đơn hàng đã chuyển trạng thái: {status_label}",
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "status": str(status).upper(),
+                "status_label": status_label,
+                "created_at": status_log.timestamp.isoformat() if status_log.timestamp else None,
+                "unread": False,
+            }
+        )
+
+    return {
+        "success": True,
+        "data": notifications,
+        "meta": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit,
+        },
+    }
+
+
+# ==============================================================================
 # CONFIRM RECEIVED — Consumer xác nhận nhận hàng
 # ==============================================================================
 
@@ -1856,6 +2183,84 @@ async def cancel_my_order(
 # ==============================================================================
 # ADDRESSES API – Sổ địa chỉ
 # ==============================================================================
+
+@router.get("/regions/provinces", summary="Danh sách tỉnh/thành cho mobile")
+async def get_mobile_provinces(
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    query = db.query(Province)
+    if search:
+        query = query.filter(
+            Province.name.ilike(f"%{search}%") |
+            Province.code.ilike(f"%{search}%")
+        )
+
+    rows = query.order_by(Province.name.asc()).all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "code": p.code,
+                "name": p.name,
+            }
+            for p in rows
+        ],
+    }
+
+
+@router.get("/regions/districts", summary="Danh sách quận/huyện theo tỉnh cho mobile")
+async def get_mobile_districts(
+    province_code: str = Query(..., min_length=1),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    query = db.query(District).filter(District.province_code == province_code)
+    if search:
+        query = query.filter(
+            District.name.ilike(f"%{search}%") |
+            District.code.ilike(f"%{search}%")
+        )
+
+    rows = query.order_by(District.name.asc()).all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "code": d.code,
+                "name": d.name,
+                "province_code": d.province_code,
+            }
+            for d in rows
+        ],
+    }
+
+
+@router.get("/regions/wards", summary="Danh sách phường/xã theo quận cho mobile")
+async def get_mobile_wards(
+    district_code: str = Query(..., min_length=1),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    query = db.query(Ward).filter(Ward.district_code == district_code)
+    if search:
+        query = query.filter(
+            Ward.name.ilike(f"%{search}%") |
+            Ward.code.ilike(f"%{search}%")
+        )
+
+    rows = query.order_by(Ward.name.asc()).all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "code": w.code,
+                "name": w.name,
+                "district_code": w.district_code,
+            }
+            for w in rows
+        ],
+    }
 
 @router.get("/addresses", summary="Lấy sổ địa chỉ")
 async def get_my_addresses(
