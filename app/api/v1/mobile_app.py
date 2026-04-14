@@ -21,6 +21,7 @@ from app.core.database import get_db
 from app.models.content import Content, ContentStatus, ContentAuditLog, ContentAuditAction
 from app.models.product import Product, ProductStatus
 from app.models.traceability import ProductOrigin, ProductCertificate, OriginStatus, CertificateStatus
+from app.models.region import Region
 from app.models.product_variant import ProductVariant
 from app.models.product_media import ProductMedia
 from app.models.user import User
@@ -1007,14 +1008,20 @@ async def get_product_detail(
     if origin:
         origin_payload = {
             "village_name": origin.village_name,
+            "facility_name": origin.facility_name,
             "region_id": origin.region_id,
+            "region_name": None,
             "seller_name": origin.seller_name,
             "batch_number": origin.batch_number,
             "production_date": origin.production_date.isoformat() if origin.production_date else None,
             "expiry_date": origin.expiry_date.isoformat() if origin.expiry_date else None,
             "ingredients": origin.ingredients,
             "process_summary": origin.process_summary,
+            "warnings": origin.warnings,
         }
+        if origin.region_id:
+            region = db.query(Region).filter(Region.id == origin.region_id).first()
+            origin_payload["region_name"] = region.name if region else None
 
     certificates_payload = [
         {

@@ -303,7 +303,29 @@ async def get_product_origin_for_review(
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
 
     origin = db.query(ProductOrigin).filter(ProductOrigin.product_id == product_id).first()
+    certs = db.query(ProductCertificate).filter(
+        ProductCertificate.product_id == product_id
+    ).order_by(ProductCertificate.created_at.desc()).all()
     producer = db.query(User).filter(User.id == product.seller_id).first()
+
+    certificates_payload = [
+        {
+            "id": c.id,
+            "certificate_name": c.certificate_name,
+            "certificate_number": c.certificate_number,
+            "issued_by": c.issued_by,
+            "issue_date": c.issue_date.isoformat() if c.issue_date else None,
+            "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
+            "document_url": c.document_url,
+            "verification_status": c.verification_status.value
+            if hasattr(c.verification_status, "value")
+            else str(c.verification_status),
+            "verified_by": c.verified_by,
+            "verified_at": c.verified_at.isoformat() if c.verified_at else None,
+            "rejection_reason": c.rejection_reason,
+        }
+        for c in certs
+    ]
 
     if not origin:
         return {
@@ -316,6 +338,7 @@ async def get_product_origin_for_review(
                     "seller_name": producer.name if producer else None,
                 },
                 "origin": None,
+                "certificates": certificates_payload,
             },
             "message": "Sản phẩm chưa có thông tin nguồn gốc",
         }
@@ -335,6 +358,7 @@ async def get_product_origin_for_review(
                 "seller_name": producer.name if producer else None,
             },
             "origin": payload,
+            "certificates": certificates_payload,
         },
     }
 
