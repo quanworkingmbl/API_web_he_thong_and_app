@@ -49,6 +49,7 @@ class VerifyCertificateRequest(BaseModel):
 class CreateOriginRequest(BaseModel):
     product_id: int
     village_name: Optional[str] = None
+    facility_name: Optional[str] = None
     region_id: Optional[int] = None
     seller_name: Optional[str] = None
     batch_number: Optional[str] = None
@@ -56,6 +57,9 @@ class CreateOriginRequest(BaseModel):
     expiry_date: Optional[date] = None
     ingredients: Optional[str] = None
     process_summary: Optional[str] = None
+    usage_instructions: Optional[str] = None
+    storage_instructions: Optional[str] = None
+    warnings: Optional[str] = None
 
 
 class VerifyOriginRequest(BaseModel):
@@ -91,6 +95,7 @@ def _serialize_origin(origin: ProductOrigin, include_status: bool = False) -> di
         "id": origin.id,
         "product_id": origin.product_id,
         "village_name": origin.village_name,
+        "facility_name": origin.facility_name,
         "region_id": origin.region_id,
         "seller_name": origin.seller_name,
         "batch_number": origin.batch_number,
@@ -98,6 +103,9 @@ def _serialize_origin(origin: ProductOrigin, include_status: bool = False) -> di
         "expiry_date": origin.expiry_date.isoformat() if origin.expiry_date else None,
         "ingredients": origin.ingredients,
         "process_summary": origin.process_summary,
+        "usage_instructions": origin.usage_instructions,
+        "storage_instructions": origin.storage_instructions,
+        "warnings": origin.warnings,
     }
     if include_status:
         payload.update(

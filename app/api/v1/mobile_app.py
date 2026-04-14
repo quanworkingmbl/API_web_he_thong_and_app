@@ -15,7 +15,7 @@ Bao gồm các API cho:
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.core.database import get_db
 from app.models.content import Content, ContentStatus, ContentAuditLog, ContentAuditAction
@@ -166,6 +166,9 @@ class AddressRequest(BaseModel):
 class ApplyPromotionRequest(BaseModel):
     coupon_code: str = Field(..., min_length=3, max_length=50)
     subtotal: Decimal = Field(..., ge=0)
+    seller_id: Optional[int] = None
+    product_ids: Optional[List[int]] = None
+    category_ids: Optional[List[int]] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -190,6 +193,181 @@ def _get_product_review_stats(db: Session, product_id: int) -> dict:
     return {
         "total_reviews": stats.total or 0,
         "avg_rating": round(float(stats.avg_rating), 1) if stats.avg_rating else 0.0,
+    }
+
+
+def _promotion_type(promo: Promotion) -> str:
+    return promo.promotion_type.value if hasattr(promo.promotion_type, "value") else str(promo.promotion_type)
+
+
+def _promotion_scope(promo: Promotion) -> str:
+    return str(getattr(promo, "applicable_to", "ALL") or "ALL").upper()
+
+
+def _parse_scope_ids(raw: Optional[str]) -> set:
+    if not raw:
+        return set()
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return set()
+    if not isinstance(parsed, list):
+        return set()
+
+    values = set()
+    for item in parsed:
+        try:
+            values.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
+def _calculate_discount(promo: Promotion, eligible_subtotal: Decimal) -> Decimal:
+    if eligible_subtotal <= 0:
+        return Decimal("0")
+
+    promo_type = _promotion_type(promo)
+    if promo_type == "PERCENTAGE":
+        discount = eligible_subtotal * promo.discount_value / Decimal("100")
+    else:
+        discount = promo.discount_value
+
+    if promo.max_discount_amount and discount > promo.max_discount_amount:
+        discount = promo.max_discount_amount
+
+    if discount < 0:
+        return Decimal("0")
+    if discount > eligible_subtotal:
+        return eligible_subtotal
+    return discount
+
+
+def _can_user_use_promotion(db: Session, promo: Promotion, user_id: int) -> tuple[bool, str]:
+    if promo.usage_limit and promo.used_count >= promo.usage_limit:
+        return False, "Mã khuyến mãi đã hết lượt sử dụng"
+
+    user_used_count = db.query(sql_func.count(PromotionUsage.id)).filter(
+        PromotionUsage.promotion_id == promo.id,
+        PromotionUsage.user_id == user_id,
+    ).scalar() or 0
+
+    if promo.usage_limit_per_user:
+        if user_used_count >= promo.usage_limit_per_user:
+            return False, "Bạn đã dùng hết lượt cho mã khuyến mãi này"
+    elif user_used_count > 0:
+        return False, "Bạn đã sử dụng mã này rồi"
+
+    return True, ""
+
+
+def _promotion_matches_cart_scope(promo: Promotion, cart_lines: List[Dict[str, Any]]) -> bool:
+    if not cart_lines:
+        return False
+
+    seller_ids = {line["product"].seller_id for line in cart_lines}
+    if len(seller_ids) != 1:
+        return False
+    cart_seller_id = next(iter(seller_ids))
+
+    if promo.seller_id and promo.seller_id != cart_seller_id:
+        return False
+
+    scope = _promotion_scope(promo)
+    if scope == "ALL":
+        return True
+    if scope == "SELLER":
+        return bool(promo.seller_id and promo.seller_id == cart_seller_id)
+
+    product_ids = {line["product"].id for line in cart_lines}
+    category_ids = {line["product"].category_id for line in cart_lines if line["product"].category_id is not None}
+
+    if scope == "PRODUCT":
+        scoped_product_ids = _parse_scope_ids(promo.applicable_product_ids)
+        return bool(scoped_product_ids.intersection(product_ids))
+
+    if scope == "CATEGORY":
+        scoped_category_ids = _parse_scope_ids(promo.applicable_category_ids)
+        return bool(scoped_category_ids.intersection(category_ids))
+
+    return False
+
+
+def _eligible_subtotal_for_cart_promotion(promo: Promotion, cart_lines: List[Dict[str, Any]]) -> Decimal:
+    scope = _promotion_scope(promo)
+    if scope in {"ALL", "SELLER"}:
+        return sum((line["total_price"] for line in cart_lines), Decimal("0"))
+
+    if scope == "PRODUCT":
+        scoped_product_ids = _parse_scope_ids(promo.applicable_product_ids)
+        return sum((line["total_price"] for line in cart_lines if line["product"].id in scoped_product_ids), Decimal("0"))
+
+    if scope == "CATEGORY":
+        scoped_category_ids = _parse_scope_ids(promo.applicable_category_ids)
+        return sum(
+            (
+                line["total_price"]
+                for line in cart_lines
+                if line["product"].category_id is not None and line["product"].category_id in scoped_category_ids
+            ),
+            Decimal("0"),
+        )
+
+    return Decimal("0")
+
+
+def _promotion_matches_product_scope(promo: Promotion, product: Product) -> bool:
+    if promo.seller_id and promo.seller_id != product.seller_id:
+        return False
+
+    scope = _promotion_scope(promo)
+    if scope == "ALL":
+        return True
+    if scope == "SELLER":
+        return bool(promo.seller_id and promo.seller_id == product.seller_id)
+    if scope == "PRODUCT":
+        return product.id in _parse_scope_ids(promo.applicable_product_ids)
+    if scope == "CATEGORY":
+        return product.category_id is not None and product.category_id in _parse_scope_ids(promo.applicable_category_ids)
+    return False
+
+
+def _build_product_pricing(product: Product, active_promotions: List[Promotion]) -> Dict[str, Any]:
+    base_price = Decimal(str(product.price or 0))
+    best_promo: Optional[Promotion] = None
+    best_discount = Decimal("0")
+
+    for promo in active_promotions:
+        if not _promotion_matches_product_scope(promo, product):
+            continue
+
+        if base_price < (promo.min_order_amount or Decimal("0")):
+            continue
+
+        discount = _calculate_discount(promo, base_price)
+        if discount > best_discount:
+            best_discount = discount
+            best_promo = promo
+
+    final_price = base_price - best_discount
+    if final_price < 0:
+        final_price = Decimal("0")
+
+    promo_payload = None
+    if best_promo and best_discount > 0:
+        promo_payload = {
+            "id": best_promo.id,
+            "code": best_promo.code,
+            "name": best_promo.name,
+            "promotion_type": _promotion_type(best_promo),
+            "discount_amount": str(best_discount),
+        }
+
+    return {
+        "price": str(final_price),
+        "original_price": str(base_price),
+        "discount_amount": str(best_discount),
+        "auto_promotion": promo_payload,
     }
 
 
@@ -583,15 +761,27 @@ async def get_mobile_home(
         Product.is_active == True,
     ).order_by(Product.created_at.desc()).limit(20).all()
 
+    now = datetime.utcnow()
+    active_promotions = db.query(Promotion).filter(
+        Promotion.is_public == True,
+        Promotion.status == PromotionStatus.ACTIVE,
+        Promotion.start_date <= now,
+        Promotion.end_date >= now,
+    ).all()
+
     def _build_product_card(p):
         producer = db.query(User).filter(User.id == p.seller_id).first()
         category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
         review_stats = _get_product_review_stats(db, p.id)
+        pricing = _build_product_pricing(p, active_promotions)
         return {
             "id": p.id,
             "name": p.name,
             "description": p.description[:150] + "..." if p.description and len(p.description) > 150 else p.description,
-            "price": str(p.price),
+            "price": pricing["price"],
+            "original_price": pricing["original_price"],
+            "discount_amount": pricing["discount_amount"],
+            "auto_promotion": pricing["auto_promotion"],
             "seller_id": p.seller_id,
             "seller_name": producer.name if producer else "Unknown",
             "category_id": p.category_id,
@@ -604,13 +794,7 @@ async def get_mobile_home(
         }
 
     # Promotions (active, public)
-    now = datetime.utcnow()
-    promos = db.query(Promotion).filter(
-        Promotion.is_public == True,
-        Promotion.status == PromotionStatus.ACTIVE,
-        Promotion.start_date <= now,
-        Promotion.end_date >= now,
-    ).order_by(Promotion.end_date.asc()).limit(5).all()
+    promos = sorted(active_promotions, key=lambda p: p.end_date)[:5]
 
     promo_list = [
         {
@@ -688,16 +872,28 @@ async def get_public_products(
     skip = (page - 1) * limit
     products = query.offset(skip).limit(limit).all()
 
+    now = datetime.utcnow()
+    active_promotions = db.query(Promotion).filter(
+        Promotion.is_public == True,
+        Promotion.status == PromotionStatus.ACTIVE,
+        Promotion.start_date <= now,
+        Promotion.end_date >= now,
+    ).all()
+
     product_list = []
     for p in products:
         producer = db.query(User).filter(User.id == p.seller_id).first()
         category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
         review_stats = _get_product_review_stats(db, p.id)
+        pricing = _build_product_pricing(p, active_promotions)
         product_list.append({
             "id": p.id,
             "name": p.name,
             "description": p.description[:150] + "..." if p.description and len(p.description) > 150 else p.description,
-            "price": str(p.price),
+            "price": pricing["price"],
+            "original_price": pricing["original_price"],
+            "discount_amount": pricing["discount_amount"],
+            "auto_promotion": pricing["auto_promotion"],
             "seller_id": p.seller_id,
             "seller_name": producer.name if producer else "Unknown",
             "category_id": p.category_id,
@@ -729,7 +925,8 @@ async def get_product_detail(
     """Xem chi tiết sản phẩm — ENRICHED: store, variants, stock, VAT, reviews, media"""
     product = db.query(Product).filter(
         Product.id == product_id,
-        Product.status == ProductStatus.APPROVED
+        Product.status == ProductStatus.APPROVED,
+        Product.is_active == True,
     ).first()
 
     if not product:
@@ -787,6 +984,15 @@ async def get_product_detail(
     # Reviews summary
     review_stats = _get_product_review_stats(db, product.id)
 
+    now = datetime.utcnow()
+    active_promotions = db.query(Promotion).filter(
+        Promotion.is_public == True,
+        Promotion.status == PromotionStatus.ACTIVE,
+        Promotion.start_date <= now,
+        Promotion.end_date >= now,
+    ).all()
+    pricing = _build_product_pricing(product, active_promotions)
+
     # Traceability
     origin = db.query(ProductOrigin).filter(
         ProductOrigin.product_id == product.id,
@@ -828,7 +1034,10 @@ async def get_product_detail(
             "id": product.id,
             "name": product.name,
             "description": product.description,
-            "price": str(product.price),
+            "price": pricing["price"],
+            "original_price": pricing["original_price"],
+            "discount_amount": pricing["discount_amount"],
+            "auto_promotion": pricing["auto_promotion"],
             "stock_quantity": product.stock_quantity,
             "vat_rate": str(product.vat_rate) if product.vat_rate else "10.00",
             "unit": product.unit if hasattr(product, 'unit') and product.unit else None,
@@ -928,13 +1137,25 @@ async def get_shop_page(
     skip = (page - 1) * limit
     products = product_q.order_by(Product.created_at.desc()).offset(skip).limit(limit).all()
 
+    now = datetime.utcnow()
+    active_promotions = db.query(Promotion).filter(
+        Promotion.is_public == True,
+        Promotion.status == PromotionStatus.ACTIVE,
+        Promotion.start_date <= now,
+        Promotion.end_date >= now,
+    ).all()
+
     product_list = []
     for p in products:
         r_stats = _get_product_review_stats(db, p.id)
+        pricing = _build_product_pricing(p, active_promotions)
         product_list.append({
             "id": p.id,
             "name": p.name,
-            "price": str(p.price),
+            "price": pricing["price"],
+            "original_price": pricing["original_price"],
+            "discount_amount": pricing["discount_amount"],
+            "auto_promotion": pricing["auto_promotion"],
             "images": p.images,
             "label": p.label,
             "stock_quantity": p.stock_quantity,
@@ -974,9 +1195,35 @@ async def apply_promotion(
     if not promo:
         return {"success": False, "data": {"valid": False, "message": "Mã khuyến mãi không tồn tại hoặc đã hết hạn"}}
 
-    # Check usage limit
-    if promo.usage_limit and promo.used_count >= promo.usage_limit:
-        return {"success": False, "data": {"valid": False, "message": "Mã khuyến mãi đã hết lượt sử dụng"}}
+    can_use, reason = _can_user_use_promotion(db, promo, current_user.id)
+    if not can_use:
+        return {"success": False, "data": {"valid": False, "message": reason}}
+
+    scope = _promotion_scope(promo)
+    if scope == "SELLER":
+        if promo_data.seller_id is None:
+            return {"success": False, "data": {"valid": False, "message": "Mã này cần thông tin seller để kiểm tra"}}
+        if not promo.seller_id or promo_data.seller_id != promo.seller_id:
+            return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho cửa hàng này"}}
+
+    if scope == "PRODUCT":
+        if not promo_data.product_ids:
+            return {"success": False, "data": {"valid": False, "message": "Mã này cần danh sách sản phẩm để kiểm tra"}}
+        scoped_product_ids = _parse_scope_ids(promo.applicable_product_ids)
+        request_product_ids = {int(pid) for pid in promo_data.product_ids}
+        if not scoped_product_ids.intersection(request_product_ids):
+            return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho sản phẩm đã chọn"}}
+
+    if scope == "CATEGORY":
+        if not promo_data.category_ids:
+            return {"success": False, "data": {"valid": False, "message": "Mã này cần danh mục sản phẩm để kiểm tra"}}
+        scoped_category_ids = _parse_scope_ids(promo.applicable_category_ids)
+        request_category_ids = {int(cid) for cid in promo_data.category_ids}
+        if not scoped_category_ids.intersection(request_category_ids):
+            return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho danh mục đã chọn"}}
+
+    if promo.seller_id and promo_data.seller_id and promo_data.seller_id != promo.seller_id:
+        return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho cửa hàng này"}}
 
     # Check min order
     if promo_data.subtotal < promo.min_order_amount:
@@ -988,24 +1235,9 @@ async def apply_promotion(
             }
         }
 
-    # Check if user already used this promo
-    already_used = db.query(PromotionUsage).filter(
-        PromotionUsage.promotion_id == promo.id,
-        PromotionUsage.user_id == current_user.id,
-    ).first()
-    if already_used:
-        return {"success": False, "data": {"valid": False, "message": "Bạn đã sử dụng mã này rồi"}}
-
     # Calculate discount
-    ptype = promo.promotion_type.value if hasattr(promo.promotion_type, 'value') else str(promo.promotion_type)
-    if ptype == "PERCENTAGE":
-        discount = promo_data.subtotal * promo.discount_value / Decimal("100")
-    else:
-        discount = promo.discount_value
-
-    # Cap discount
-    if promo.max_discount_amount and discount > promo.max_discount_amount:
-        discount = promo.max_discount_amount
+    ptype = _promotion_type(promo)
+    discount = _calculate_discount(promo, promo_data.subtotal)
 
     new_subtotal = promo_data.subtotal - discount
 
@@ -1016,6 +1248,7 @@ async def apply_promotion(
             "promotion_id": promo.id,
             "promotion_name": promo.name,
             "promotion_type": ptype,
+            "applicable_to": scope,
             "discount_amount": str(discount),
             "new_subtotal": str(new_subtotal),
             "message": f"Áp mã thành công: Giảm {discount:,.0f}đ",
@@ -1096,31 +1329,6 @@ async def create_order(
             }
         )
 
-    # ── Bước 1.5: Validate coupon nếu có ──
-    coupon_discount = Decimal("0")
-    applied_promo = None
-    if checkout_data.coupon_code:
-        now = datetime.utcnow()
-        promo = db.query(Promotion).filter(
-            Promotion.code == checkout_data.coupon_code.upper(),
-            Promotion.status == PromotionStatus.ACTIVE,
-            Promotion.start_date <= now,
-            Promotion.end_date >= now,
-        ).first()
-        if promo:
-            grand_subtotal = sum(
-                i["total_price"] for items in sellers_map.values() for i in items
-            )
-            if grand_subtotal >= promo.min_order_amount:
-                ptype = promo.promotion_type.value if hasattr(promo.promotion_type, 'value') else str(promo.promotion_type)
-                if ptype == "PERCENTAGE":
-                    coupon_discount = grand_subtotal * promo.discount_value / Decimal("100")
-                else:
-                    coupon_discount = promo.discount_value
-                if promo.max_discount_amount and coupon_discount > promo.max_discount_amount:
-                    coupon_discount = promo.max_discount_amount
-                applied_promo = promo
-
     seller_ids = list(sellers_map.keys())
     if len(seller_ids) != 1:
         raise HTTPException(
@@ -1135,9 +1343,76 @@ async def create_order(
             detail="seller_id không khớp với sản phẩm trong giỏ hàng",
         )
 
+    items_of_seller = sellers_map[detected_seller_id]
+
+    # ── Bước 1.5: Validate coupon hoặc auto-apply mã tốt nhất ──
+    coupon_discount = Decimal("0")
+    applied_promo = None
+
+    if checkout_data.coupon_code:
+        now = datetime.utcnow()
+        promo = db.query(Promotion).filter(
+            Promotion.code == checkout_data.coupon_code.upper(),
+            Promotion.status == PromotionStatus.ACTIVE,
+            Promotion.start_date <= now,
+            Promotion.end_date >= now,
+        ).first()
+
+        if not promo:
+            raise HTTPException(status_code=400, detail="Mã khuyến mãi không tồn tại hoặc đã hết hạn")
+
+        can_use, reason = _can_user_use_promotion(db, promo, current_user.id)
+        if not can_use:
+            raise HTTPException(status_code=400, detail=reason)
+
+        if not _promotion_matches_cart_scope(promo, items_of_seller):
+            raise HTTPException(status_code=400, detail="Mã khuyến mãi không áp dụng cho giỏ hàng này")
+
+        eligible_subtotal = _eligible_subtotal_for_cart_promotion(promo, items_of_seller)
+        if eligible_subtotal < promo.min_order_amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Đơn hàng tối thiểu {promo.min_order_amount:,.0f}đ để áp mã này",
+            )
+
+        coupon_discount = _calculate_discount(promo, eligible_subtotal)
+        if coupon_discount <= 0:
+            raise HTTPException(status_code=400, detail="Mã khuyến mãi không mang lại giảm giá cho giỏ hàng")
+
+        applied_promo = promo
+    else:
+        now = datetime.utcnow()
+        active_promotions = db.query(Promotion).filter(
+            Promotion.is_public == True,
+            Promotion.status == PromotionStatus.ACTIVE,
+            Promotion.start_date <= now,
+            Promotion.end_date >= now,
+        ).all()
+
+        best_discount = Decimal("0")
+        best_promo = None
+        for promo in active_promotions:
+            can_use, _ = _can_user_use_promotion(db, promo, current_user.id)
+            if not can_use:
+                continue
+
+            if not _promotion_matches_cart_scope(promo, items_of_seller):
+                continue
+
+            eligible_subtotal = _eligible_subtotal_for_cart_promotion(promo, items_of_seller)
+            if eligible_subtotal < promo.min_order_amount:
+                continue
+
+            discount = _calculate_discount(promo, eligible_subtotal)
+            if discount > best_discount:
+                best_discount = discount
+                best_promo = promo
+
+        coupon_discount = best_discount
+        applied_promo = best_promo
+
     # ── Bước 2: Tạo 1 đơn hàng duy nhất cho 1 seller (Kiểu A) ───────────────
     platform_fee_percentage = Decimal("5.0")
-    items_of_seller = sellers_map[detected_seller_id]
     subtotal = sum(i["total_price"] for i in items_of_seller)
     shipping_fee = Decimal("30000")
     discount_amount = coupon_discount
@@ -1172,7 +1447,7 @@ async def create_order(
         payment_method=checkout_data.payment_method,
         payment_status=payment_status,
         customer_note=checkout_data.customer_note,
-        coupon_code=checkout_data.coupon_code,
+        coupon_code=checkout_data.coupon_code or (applied_promo.code if applied_promo else None),
     )
     db.add(new_order)
     db.flush()
@@ -1226,6 +1501,16 @@ async def create_order(
             "seller_id": detected_seller_id,
             "total_amount": str(total_amount),
             "discount_amount": str(discount_amount),
+            "applied_promotion": (
+                {
+                    "id": applied_promo.id,
+                    "code": applied_promo.code,
+                    "name": applied_promo.name,
+                    "auto_applied": checkout_data.coupon_code is None,
+                }
+                if applied_promo
+                else None
+            ),
             "status": "PENDING",
             "payment_method": checkout_data.payment_method,
         },

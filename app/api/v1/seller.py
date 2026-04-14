@@ -32,6 +32,7 @@ from sqlalchemy import func as sql_func
 from typing import Optional, List
 from datetime import datetime, timedelta, date
 from decimal import Decimal, ROUND_HALF_UP
+import secrets
 from app.core.database import get_db
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.product import Product, ProductStatus
@@ -82,6 +83,22 @@ def _validate_origin_payload(origin_data: dict, db: Session):
         region = db.query(Region).filter(Region.id == region_id).first()
         if not region:
             raise HTTPException(status_code=400, detail="Vùng miền không tồn tại")
+
+
+def _generate_unique_seller_sku(db: Session, seller_id: int) -> str:
+    """Sinh SKU tự động cho seller, đảm bảo unique ở bảng products."""
+    seller_prefix = f"S{seller_id:04d}"
+
+    for _ in range(10):
+        timestamp = datetime.utcnow().strftime("%y%m%d%H%M%S")
+        rand_suffix = f"{secrets.randbelow(1000):03d}"
+        candidate = f"{seller_prefix}-{timestamp}-{rand_suffix}"
+
+        exists = db.query(Product.id).filter(Product.sku == candidate).first()
+        if not exists:
+            return candidate
+
+    raise HTTPException(status_code=500, detail="Không thể tạo SKU tự động. Vui lòng thử lại")
 
 
 # ==============================================================================
@@ -600,6 +617,7 @@ async def create_seller_product(
 
     origin_data = product_data.origin.dict()
     _validate_origin_payload(origin_data, db)
+    auto_sku = _generate_unique_seller_sku(db, current_user.id)
 
     new_product = Product(
         name=product_data.name,
@@ -614,6 +632,7 @@ async def create_seller_product(
         weight=product_data.weight,
         packaging_type=product_data.packaging_type,
         images=product_data.images,
+        sku=auto_sku,
         stock_quantity=product_data.stock_quantity,
         vat_rate=10,   # mặc định 10% VAT – Seller không thể thay đổi
         is_active=True,
@@ -648,6 +667,7 @@ async def create_seller_product(
         "message": "Sản phẩm đã được tạo. Chờ Admin duyệt sản phẩm và nguồn gốc.",
         "data": {
             "id": new_product.id,
+            "sku": new_product.sku,
             "name": new_product.name,
             "price": _to_vnd_int(new_product.price),
             "vat_rate": float(new_product.vat_rate) if new_product.vat_rate else 10.0,
@@ -774,6 +794,7 @@ async def update_seller_product(
         + (" Nguồn gốc đang chờ duyệt lại." if origin_changed else ""),
         "data": {
             "id": product.id,
+            "sku": product.sku,
             "name": product.name,
             "price": _to_vnd_int(product.price),
             "stock_quantity": product.stock_quantity,
