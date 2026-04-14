@@ -36,6 +36,7 @@ class UpdateCartItemRequest(BaseModel):
 class CartItemResponse(BaseModel):
     id: int
     product_id: int
+    seller_id: int
     variant_id: Optional[int] = None
     product_name: str
     product_image: Optional[str]
@@ -105,6 +106,7 @@ def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
             CartItemResponse(
                 id=item.id,
                 product_id=item.product_id,
+                seller_id=product.seller_id,
                 variant_id=item.variant_id,
                 product_name=product.name,
                 product_image=product.images,
@@ -160,6 +162,26 @@ async def add_cart_item(
     _, unit_price = validate_line_for_sale(db, product, item_data.quantity, item_data.variant_id)
 
     cart = _get_or_create_cart(current_user.id, db)
+
+    # Kiểu A: một giỏ chỉ chứa sản phẩm của một seller.
+    current_seller_ids = {
+        sid
+        for (sid,) in db.query(Product.seller_id)
+        .join(CartItem, CartItem.product_id == Product.id)
+        .filter(CartItem.cart_id == cart.id)
+        .distinct()
+        .all()
+    }
+    if len(current_seller_ids) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Giỏ hàng đang chứa nhiều seller (dữ liệu cũ). Vui lòng xóa giỏ hàng để tiếp tục theo Kiểu A.",
+        )
+    if current_seller_ids and product.seller_id not in current_seller_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Giỏ hàng chỉ hỗ trợ 1 seller. Vui lòng checkout/xóa giỏ hiện tại trước khi thêm sản phẩm seller khác.",
+        )
 
     existing_item = _cart_line_filter(
         db, cart.id, item_data.product_id, item_data.variant_id

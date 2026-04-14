@@ -6,6 +6,7 @@ from app.core.database import Base
 
 
 class BusinessType(str, enum.Enum):
+    INDIVIDUAL = "INDIVIDUAL"       # Cá nhân kinh doanh
     HOUSEHOLD = "HOUSEHOLD"         # Hộ kinh doanh gia đình
     COOPERATIVE = "COOPERATIVE"     # Hợp tác xã
     COMPANY = "COMPANY"             # Doanh nghiệp / Công ty
