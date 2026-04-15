@@ -402,6 +402,24 @@ def _build_address_response(addr: Address, db: Session) -> dict:
     }
 
 
+def _validate_address_codes(db: Session, province_code: str, district_code: str, ward_code: str) -> None:
+    province = db.query(Province).filter(Province.code == province_code).first()
+    if not province:
+        raise HTTPException(status_code=400, detail="province_code không hợp lệ")
+
+    district = db.query(District).filter(District.code == district_code).first()
+    if not district:
+        raise HTTPException(status_code=400, detail="district_code không hợp lệ")
+    if district.province_code != province.code:
+        raise HTTPException(status_code=400, detail="district_code không thuộc province_code đã chọn")
+
+    ward = db.query(Ward).filter(Ward.code == ward_code).first()
+    if not ward:
+        raise HTTPException(status_code=400, detail="ward_code không hợp lệ")
+    if ward.district_code != district.code:
+        raise HTTPException(status_code=400, detail="ward_code không thuộc district_code đã chọn")
+
+
 def _extract_primary_image(raw_images: Any) -> Optional[str]:
     if raw_images is None:
         return None
@@ -2285,6 +2303,11 @@ async def create_address(
     db: Session = Depends(get_db)
 ):
     """Thêm địa chỉ mới vào sổ."""
+    province_code = addr_data.province_code.strip()
+    district_code = addr_data.district_code.strip()
+    ward_code = addr_data.ward_code.strip()
+    _validate_address_codes(db, province_code, district_code, ward_code)
+
     # Nếu set default → reset các addr cũ
     if addr_data.is_default:
         db.query(Address).filter(
@@ -2295,9 +2318,9 @@ async def create_address(
         user_id=current_user.id,
         recipient_name=addr_data.recipient_name,
         phone=addr_data.phone,
-        province_code=addr_data.province_code,
-        district_code=addr_data.district_code,
-        ward_code=addr_data.ward_code,
+        province_code=province_code,
+        district_code=district_code,
+        ward_code=ward_code,
         address_line=addr_data.address_line,
         is_default=addr_data.is_default,
     )
@@ -2326,6 +2349,11 @@ async def update_address(
     if not addr:
         raise HTTPException(status_code=404, detail="Địa chỉ không tồn tại")
 
+    province_code = addr_data.province_code.strip()
+    district_code = addr_data.district_code.strip()
+    ward_code = addr_data.ward_code.strip()
+    _validate_address_codes(db, province_code, district_code, ward_code)
+
     if addr_data.is_default:
         db.query(Address).filter(
             Address.user_id == current_user.id, Address.is_default == True
@@ -2333,9 +2361,9 @@ async def update_address(
 
     addr.recipient_name = addr_data.recipient_name
     addr.phone = addr_data.phone
-    addr.province_code = addr_data.province_code
-    addr.district_code = addr_data.district_code
-    addr.ward_code = addr_data.ward_code
+    addr.province_code = province_code
+    addr.district_code = district_code
+    addr.ward_code = ward_code
     addr.address_line = addr_data.address_line
     addr.is_default = addr_data.is_default
 
