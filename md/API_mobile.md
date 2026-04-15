@@ -22,6 +22,8 @@
 | 10 | [Thanh toán](#10-thanh-toán) | `/api/payments` | 🌐 Dùng chung |
 | 11 | [Hồ sơ cá nhân](#11-hồ-sơ-cá-nhân) | `/api/mobile/profile` | 📱 Riêng mobile |
 | 12 | [Upload Media](#12-upload-media) | `/api/medias/uploads` | 🌐 Dùng chung |
+| 13 | [Thông báo Mobile](#13-thông-báo-mobile) | `/api/mobile/notifications` | 📱 Riêng mobile |
+| 14 | [Vùng & Sổ địa chỉ Mobile](#14-vùng--sổ-địa-chỉ-mobile) | `/api/mobile/regions`, `/api/mobile/addresses` | 📱 Riêng mobile |
 
 ---
 
@@ -182,18 +184,20 @@
 
 | Method | Endpoint | Auth | Mô tả |
 |--------|----------|------|--------|
+| `GET` | `/api/mobile/home` | ❌ | Trang chủ tổng hợp (categories, featured, promotions) |
 | `GET` | `/api/mobile/products` | ❌ | Danh sách SP công khai (đã duyệt) |
 | `GET` | `/api/mobile/products/{product_id}` | ❌ | Chi tiết SP (kèm variants, nguồn gốc) |
-| `GET` | `/api/mobile/categories` | ❌ | Danh mục đang hoạt động |
+| `GET` | `/api/mobile/shops/{seller_id}` | ❌ | Trang cửa hàng và sản phẩm của seller |
 
 ### GET `/api/mobile/products` – Lọc sản phẩm
 | Query Param | Type | Mô tả |
 |-------------|------|--------|
+| `seller_id` | int | Lọc theo cửa hàng |
 | `category_id` | int | Lọc theo danh mục |
-| `region_id` | int | Lọc theo vùng miền |
 | `label` | string | NORMAL \| OCOP \| ORGANIC \| GEOGRAPHICAL_INDICATION |
 | `search` | string | Tìm theo tên sản phẩm |
 | `min_price` / `max_price` | decimal | Khoảng giá |
+| `sort_by` | string | `price_asc` \| `price_desc` \| `newest` \| `rating` |
 | `page` / `limit` | int | Phân trang |
 
 ### POST `/api/seller/products` – Tạo sản phẩm
@@ -222,13 +226,13 @@
 | Method | Endpoint | Auth | Mô tả |
 |--------|----------|------|--------|
 | `GET` | `/api/mobile/cart` | ✅ | Xem giỏ hàng hiện tại |
-| `POST` | `/api/mobile/cart/add` | ✅ | Thêm sản phẩm vào giỏ |
-| `PUT` | `/api/mobile/cart/update/{item_id}` | ✅ | Cập nhật số lượng |
-| `DELETE` | `/api/mobile/cart/remove/{item_id}` | ✅ | Xóa sản phẩm khỏi giỏ |
-| `DELETE` | `/api/cart` | ✅ | Xóa toàn bộ giỏ hàng |
+| `POST` | `/api/mobile/cart/items` | ✅ | Thêm sản phẩm vào giỏ |
+| `PUT` | `/api/mobile/cart/items/{item_id}` | ✅ | Cập nhật số lượng |
+| `DELETE` | `/api/mobile/cart/items/{item_id}` | ✅ | Xóa sản phẩm khỏi giỏ |
+| `DELETE` | `/api/mobile/cart` | ✅ | Xóa toàn bộ giỏ hàng |
 | `POST` | `/api/mobile/checkout` | ✅ | Đặt hàng từ giỏ hàng |
 
-### POST `/api/mobile/cart/add` – Thêm vào giỏ
+### POST `/api/mobile/cart/items` – Thêm vào giỏ
 ```json
 {
   "product_id": 1,
@@ -242,26 +246,52 @@
 {
   "success": true,
   "data": {
-    "id": 1,
-    "user_id": 5,
     "items": [
       {
         "id": 1,
         "product_id": 1,
+        "variant_id": null,
         "seller_id": 3,
+        "seller_name": "Nông trại A",
         "product_name": "Gạo ST25",
         "product_image": "https://...",
-        "unit_price": 85000,
+        "unit_label": "1kg",
+        "location_label": "Gạo đặc sản",
+        "unit_price": "85000",
         "quantity": 2,
-        "subtotal": 170000,
-        "stock_quantity": 498
+        "subtotal": "170000",
+        "stock_quantity": 498,
+        "is_active": true
       }
     ],
     "total_items": 1,
-    "total_amount": 170000
+    "subtotal": "170000",
+    "shipping_fee": "30000",
+    "discount_amount": "0",
+    "total_amount": "200000",
+    "updated_at": "2026-04-15T03:41:19.019877"
   }
 }
 ```
+
+### Trường trả về của `data.items[]` trong giỏ hàng
+
+| Field | Type | Mô tả hiển thị |
+|-------|------|----------------|
+| `id` | int | ID item giỏ hàng |
+| `product_id` | int | ID sản phẩm |
+| `variant_id` | int/null | ID biến thể (nếu có) |
+| `seller_id` | int | ID người bán |
+| `seller_name` | string | Tên cửa hàng hiển thị |
+| `product_name` | string | Tên sản phẩm |
+| `product_image` | string/null | Ảnh đại diện |
+| `unit_label` | string | Đơn vị hiển thị |
+| `location_label` | string | Nhãn khu vực/danh mục hiển thị |
+| `unit_price` | string(number) | Đơn giá |
+| `quantity` | int | Số lượng |
+| `subtotal` | string(number) | Thành tiền dòng |
+| `stock_quantity` | int | Tồn kho khả dụng |
+| `is_active` | bool | Trạng thái còn bán |
 
 ### POST `/api/mobile/checkout` – Đặt hàng
 ```json
@@ -271,6 +301,9 @@
   "customer_phone": "0909123456",
   "customer_email": "a@gmail.com",
   "shipping_address": "123 Nguyễn Huệ, Q1, TP.HCM",
+  "shipping_province": "79",
+  "shipping_district": "760",
+  "shipping_ward": "26734",
   "seller_id": 3,
   "payment_method": "COD",          // COD | BANK_TRANSFER | MOMO | VNPAY | ZALOPAY | PLATFORM_CREDITS
   "customer_note": "Giao giờ hành chính",
@@ -290,11 +323,30 @@
     "seller_id": 3,
     "total_amount": "170000",
     "discount_amount": "10000",
+    "applied_promotion": {
+      "id": 12,
+      "code": "SUMMER2026",
+      "name": "Giảm giá mùa hè",
+      "auto_applied": false
+    },
     "status": "PENDING",
     "payment_method": "COD"
   }
 }
 ```
+
+### Trường trả về trong `data` khi checkout thành công
+
+| Field | Type | Mô tả hiển thị |
+|-------|------|----------------|
+| `order_id` | int | ID đơn hàng |
+| `order_number` | string | Mã đơn |
+| `seller_id` | int | ID người bán |
+| `total_amount` | string(number) | Tổng tiền sau phí/giảm |
+| `discount_amount` | string(number) | Giá trị giảm giá áp dụng |
+| `applied_promotion` | object/null | Mã giảm giá thực tế áp dụng |
+| `status` | string | Trạng thái đơn ban đầu (`PENDING`) |
+| `payment_method` | string | Phương thức thanh toán |
 
 > **Luồng checkout**:
 > 1. **Kiểu A**: giỏ hàng chỉ được chứa sản phẩm của **1 seller**
@@ -315,6 +367,8 @@
 |--------|----------|------|--------|
 | `GET` | `/api/mobile/orders/my` | ✅ | Danh sách đơn hàng của tôi |
 | `GET` | `/api/mobile/orders/my/{order_id}` | ✅ | Chi tiết đơn hàng |
+| `GET` | `/api/mobile/orders/my/{order_id}/timeline` | ✅ | Timeline trạng thái đơn hàng |
+| `POST` | `/api/mobile/orders/my/{order_id}/confirm-received` | ✅ | Xác nhận đã nhận hàng |
 | `PUT` | `/api/mobile/orders/my/{order_id}/cancel` | ✅ | Hủy đơn hàng |
 
 ### GET `/api/mobile/orders/my`
@@ -322,6 +376,55 @@
 |-------------|------|--------|
 | `status` | string | PENDING \| CONFIRMED \| PROCESSING \| SHIPPING \| DELIVERED \| CANCELLED |
 | `page` / `limit` | int | Phân trang |
+
+### Trường trả về chính trong `GET /api/mobile/orders/my` (`data[]`)
+
+| Field | Type | Mô tả hiển thị |
+|-------|------|----------------|
+| `id` | int | ID đơn |
+| `order_number` | string | Mã đơn |
+| `seller_name` | string/null | Tên shop |
+| `total_amount` | string(number) | Tổng tiền |
+| `status` | string | Trạng thái đơn |
+| `payment_method` | string | Phương thức thanh toán |
+| `payment_status` | string | Trạng thái thanh toán |
+| `item_count` | int | Tổng số dòng sản phẩm |
+| `first_item_image` | string/null | Ảnh dòng đầu tiên |
+| `items` | array | Danh sách item tóm tắt của đơn |
+| `created_at` | datetime string | Thời điểm tạo |
+
+### Trường trả về chính trong `GET /api/mobile/orders/my/{order_id}` (`data`)
+
+| Field | Type | Mô tả hiển thị |
+|-------|------|----------------|
+| `id`, `order_number`, `seller_id`, `seller_name` | mixed | Định danh đơn/nhà bán |
+| `subtotal`, `shipping_fee`, `discount_amount`, `total_amount` | string(number) | Khối thanh toán |
+| `status`, `payment_method`, `payment_status` | string | Trạng thái đơn/thanh toán |
+| `shipping_address`, `customer_note`, `coupon_code` | string/null | Thông tin giao hàng |
+| `can_cancel`, `can_review` | bool | Cờ khả năng thao tác UI |
+| `created_at`, `confirmed_at`, `shipped_at`, `delivered_at` | datetime string/null | Mốc thời gian |
+| `items` | array | Danh sách item chi tiết |
+| `timeline` | array | Lịch sử chuyển trạng thái |
+| `shipment` | object/null | Tracking và đơn vị vận chuyển |
+
+### POST `/api/mobile/orders/my/{order_id}/confirm-received`
+
+```json
+// Request (optional)
+{
+  "note": "Đã nhận đủ hàng"
+}
+
+// Response
+{
+  "success": true,
+  "message": "Đã xác nhận nhận hàng. Cảm ơn bạn!",
+  "order_id": 1,
+  "new_status": "DELIVERED",
+  "payment_status": "PAID",
+  "can_review": true
+}
+```
 
 ### PUT `/api/mobile/orders/my/{order_id}/cancel` – Hủy đơn
 ```json
@@ -439,12 +542,13 @@
 
 ## 9. Khuyến mãi
 
-> **Prefix**: `/api/promotions` | 🌐 **Dùng chung**  
-> **File**: `app/api/v1/promotions.py`
+> **Prefix**: `/api/promotions`, `/api/mobile/promotions` | 🌐/📱  
+> **File**: `app/api/v1/promotions.py`, `app/api/v1/mobile_app.py`
 
 | Method | Endpoint | Auth | Mô tả |
 |--------|----------|------|--------|
 | `GET` | `/api/promotions/public` | ❌ | Xem mã khuyến mãi công khai đang hoạt động |
+| `POST` | `/api/mobile/promotions/apply` | ✅ | Validate mã và tính số tiền được giảm ngay tại checkout |
 
 ### GET `/api/promotions/public`
 | Query Param | Type | Mô tả |
@@ -467,6 +571,34 @@
       "end_date": "2026-06-30T23:59:59"
     }
   ]
+}
+```
+
+### POST `/api/mobile/promotions/apply`
+
+```json
+// Request
+{
+  "coupon_code": "SUMMER2026",
+  "subtotal": 250000,
+  "seller_id": 3,
+  "product_ids": [1, 4],
+  "category_ids": [2]
+}
+
+// Response success
+{
+  "success": true,
+  "data": {
+    "valid": true,
+    "promotion_id": 12,
+    "promotion_name": "Giảm giá mùa hè",
+    "promotion_type": "PERCENTAGE",
+    "applicable_to": "SELLER",
+    "discount_amount": "20000",
+    "new_subtotal": "230000",
+    "message": "Áp mã thành công: Giảm 20,000đ"
+  }
 }
 ```
 
@@ -527,6 +659,7 @@
 ### GET `/api/mobile/profile`
 ```json
 {
+  "success": true,
   "data": {
     "id": 1,
     "email": "seller@example.com",
@@ -534,7 +667,28 @@
     "type": "seller",
     "gender": "male",
     "activated": 1,
-    "created_at": "2026-01-01T00:00:00"
+    "created_at": "2026-01-01T00:00:00",
+    "addresses": [
+      {
+        "id": 10,
+        "recipient_name": "Nguyễn Văn A",
+        "phone": "0909123456",
+        "province_code": "79",
+        "province_name": "TP Hồ Chí Minh",
+        "district_code": "760",
+        "district_name": "Quận 1",
+        "ward_code": "26734",
+        "ward_name": "Phường Bến Nghé",
+        "address_line": "123 Nguyễn Huệ",
+        "full_address": "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh",
+        "is_default": true
+      }
+    ],
+    "order_stats": {
+      "total": 15,
+      "pending": 2,
+      "delivered": 10
+    }
   }
 }
 ```
@@ -546,6 +700,16 @@
   "gender": "female"
 }
 ```
+
+### Trường trả về profile (`data`)
+
+| Field | Type | Mô tả hiển thị |
+|-------|------|----------------|
+| `id`, `email`, `name`, `type`, `gender`, `activated`, `created_at` | mixed | Thông tin tài khoản |
+| `addresses` | array | Danh sách địa chỉ đã lưu (đầy đủ tên tỉnh/quận/phường) |
+| `order_stats.total` | int | Tổng số đơn |
+| `order_stats.pending` | int | Số đơn đang chờ xử lý |
+| `order_stats.delivered` | int | Số đơn đã giao |
 
 ---
 
@@ -576,6 +740,78 @@
 ```
 
 > **Luồng upload**: Gọi `POST /api/medias/uploads` → lấy `url` → điền vào `images`/`videos` khi tạo bài đăng hoặc sản phẩm.
+
+---
+
+## 13. Thông báo Mobile
+
+> **Prefix**: `/api/mobile/notifications` | 📱 **Riêng mobile**  
+> **File**: `app/api/v1/mobile_app.py`
+
+| Method | Endpoint | Auth | Mô tả |
+|--------|----------|------|--------|
+| `GET` | `/api/mobile/notifications` | ✅ | Lấy danh sách thông báo theo lịch sử trạng thái đơn hàng |
+
+### GET `/api/mobile/notifications`
+
+| Query Param | Type | Mô tả |
+|-------------|------|--------|
+| `page` | int | Trang hiện tại (>= 1) |
+| `limit` | int | Số bản ghi/trang (1-50) |
+
+### Trường trả về trong `data[]`
+
+| Field | Type | Mô tả hiển thị |
+|-------|------|----------------|
+| `id` | int | ID log thông báo |
+| `category` | string | Nhóm thông báo (`ORDER`) |
+| `title` | string | Tiêu đề thông báo |
+| `message` | string | Nội dung thông báo |
+| `order_id` | int | ID đơn liên quan |
+| `order_number` | string | Mã đơn liên quan |
+| `status` | string | Trạng thái đơn (`PENDING`, `SHIPPING`, ...) |
+| `status_label` | string | Nhãn tiếng Việt của trạng thái |
+| `created_at` | datetime string | Thời điểm phát sinh |
+| `unread` | bool | Cờ chưa đọc (hiện backend trả `false`) |
+
+---
+
+## 14. Vùng & Sổ địa chỉ Mobile
+
+> **Prefix**: `/api/mobile/regions`, `/api/mobile/addresses` | 📱 **Riêng mobile**  
+> **File**: `app/api/v1/mobile_app.py`
+
+| Method | Endpoint | Auth | Mô tả |
+|--------|----------|------|--------|
+| `GET` | `/api/mobile/regions/provinces` | ❌ | Danh sách tỉnh/thành |
+| `GET` | `/api/mobile/regions/districts` | ❌ | Danh sách quận/huyện theo tỉnh |
+| `GET` | `/api/mobile/regions/wards` | ❌ | Danh sách phường/xã theo quận |
+| `GET` | `/api/mobile/addresses` | ✅ | Lấy sổ địa chỉ của user |
+| `POST` | `/api/mobile/addresses` | ✅ | Tạo địa chỉ mới |
+| `PUT` | `/api/mobile/addresses/{address_id}` | ✅ | Cập nhật địa chỉ |
+| `DELETE` | `/api/mobile/addresses/{address_id}` | ✅ | Xóa địa chỉ |
+
+### Trường trả về của region lookup
+
+| Endpoint | Trường trong mỗi phần tử `data[]` |
+|----------|------------------------------------|
+| `/api/mobile/regions/provinces` | `code`, `name` |
+| `/api/mobile/regions/districts` | `code`, `name`, `province_code` |
+| `/api/mobile/regions/wards` | `code`, `name`, `district_code` |
+
+### Trường trả về của `addresses`
+
+| Field | Type | Mô tả hiển thị |
+|-------|------|----------------|
+| `id` | int | ID địa chỉ |
+| `recipient_name` | string | Người nhận |
+| `phone` | string | SĐT nhận hàng |
+| `province_code`, `province_name` | string | Mã và tên tỉnh/thành |
+| `district_code`, `district_name` | string | Mã và tên quận/huyện |
+| `ward_code`, `ward_name` | string | Mã và tên phường/xã |
+| `address_line` | string | Địa chỉ chi tiết |
+| `full_address` | string | Địa chỉ ghép đầy đủ để hiển thị |
+| `is_default` | bool | Cờ địa chỉ mặc định |
 
 ---
 
