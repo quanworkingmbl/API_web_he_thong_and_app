@@ -6,7 +6,8 @@ from app.core.database import Base
 
 
 class BusinessType(str, enum.Enum):
-    INDIVIDUAL = "INDIVIDUAL"       # Cá nhân kinh doanh
+    # INDIVIDUAL đã bị loại khỏi API nhưng giữ lại để backward-compatible với DB
+    INDIVIDUAL = "INDIVIDUAL"       # Không còn cho phép đăng ký mới
     HOUSEHOLD = "HOUSEHOLD"         # Hộ kinh doanh gia đình
     COOPERATIVE = "COOPERATIVE"     # Hợp tác xã
     COMPANY = "COMPANY"             # Doanh nghiệp / Công ty
@@ -43,7 +44,9 @@ class SellerProfile(Base):
     id_card_number = Column(String(20), nullable=True)          # CCCD / CMND
     id_card_front_url = Column(Text, nullable=True)             # Ảnh mặt trước CCCD
     id_card_back_url = Column(Text, nullable=True)              # Ảnh mặt sau CCCD
-    business_license_url = Column(Text, nullable=True)          # Giấy phép kinh doanh
+    business_license_url = Column(Text, nullable=True)           # Hình ảnh giấy phép kinh doanh
+    business_registration_cert_url = Column(Text, nullable=True)  # Giấy CN Đăng ký Kinh doanh (bản sao CN)
+    food_safety_cert_url = Column(Text, nullable=True)            # Giấy CN An toàn thực phẩm (ATTP)
 
     # Tax and business registration
     tax_id = Column(String(50), nullable=True, index=True)      # Mã số thuế (MST)

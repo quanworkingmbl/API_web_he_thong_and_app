@@ -332,6 +332,86 @@ async def get_seller_orders(
     }
 
 
+
+
+@router.get("/orders/{order_id}", summary="Chi tiết đơn hàng")
+async def get_seller_order_detail(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Chi tiết đơn hàng với items, lịch sử trạng thái và thông tin thanh toán."""
+    from app.models.order import OrderStatusLog
+
+    _require_seller(current_user)
+
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.seller_id == current_user.id
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+    logs = (
+        db.query(OrderStatusLog)
+        .filter(OrderStatusLog.order_id == order.id)
+        .order_by(OrderStatusLog.created_at.asc())
+        .all()
+    )
+
+    timeline = [
+        {
+            "status": log.new_status,
+            "timestamp": log.created_at.isoformat() if log.created_at else None,
+            "actor_role": log.role or "system",
+            "note": log.note,
+        }
+        for log in logs
+    ]
+
+    return {
+        "success": True,
+        "data": {
+            "id": order.id,
+            "order_number": order.order_number,
+            "customer_name": order.customer_name,
+            "customer_phone": order.customer_phone,
+            "customer_email": order.customer_email,
+            "shipping_address": order.shipping_address,
+            "customer_note": order.customer_note,
+            "status": order.status.value if hasattr(order.status, "value") else str(order.status),
+            "payment_method": order.payment_method.value if hasattr(order.payment_method, "value") else str(order.payment_method),
+            "payment_status": order.payment_status,
+            "subtotal": _to_vnd_int(order.subtotal),
+            "shipping_fee": _to_vnd_int(order.shipping_fee),
+            "discount_amount": _to_vnd_int(order.discount_amount),
+            "total_amount": _to_vnd_int(order.total_amount),
+            "seller_amount": _to_vnd_int(order.seller_amount),
+            "platform_fee_amount": _to_vnd_int(order.platform_fee_amount),
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+            "confirmed_at": order.confirmed_at.isoformat() if order.confirmed_at else None,
+            "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
+            "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
+            "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else None,
+            "cancel_reason": order.cancel_reason,
+            "items": [
+                {
+                    "id": item.id,
+                    "product_id": item.product_id,
+                    "product_name": item.product_name,
+                    "product_image": item.product_image,
+                    "unit_price": _to_vnd_int(item.unit_price),
+                    "quantity": item.quantity,
+                    "total_price": _to_vnd_int(item.total_price),
+                }
+                for item in items
+            ],
+            "timeline": timeline,
+        }
+    }
+
+
 @router.put("/orders/{order_id}/confirm", summary="Xác nhận đơn hàng")
 async def confirm_order(
     order_id: int,
@@ -381,6 +461,54 @@ async def confirm_order(
         "message": "Đã xác nhận đơn hàng",
         "order_id": order_id,
         "status": "CONFIRMED"
+    }
+
+
+@router.put("/orders/{order_id}/process", summary="Chuyển đơn sang Đang xử lý")
+async def process_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Seller bắt đầu xử lý / đóng gói đơn hàng → chuyển sang PROCESSING.
+    Chỉ được khi đơn đang ở trạng thái CONFIRMED.
+    """
+    _require_seller(current_user)
+
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.seller_id == current_user.id
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    if order.status != OrderStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể xử lý đơn hàng đang ở trạng thái {order.status.value}"
+        )
+
+    order.status = OrderStatus.PROCESSING
+
+    log_status_change(
+        db=db,
+        order_id=order_id,
+        old_status=OrderStatus.CONFIRMED.value,
+        new_status=OrderStatus.PROCESSING.value,
+        actor_id=current_user.id,
+        role="seller",
+        note="Seller bắt đầu đóng gói / xử lý đơn",
+        auto_flush=True,
+    )
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã chuyển đơn sang trạng thái Đang xử lý",
+        "order_id": order_id,
+        "status": "PROCESSING"
     }
 
 
