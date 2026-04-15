@@ -55,7 +55,9 @@
 |--------|----------|------|--------|
 | `POST` | `/api/auth/login` | ❌ | Đăng nhập → nhận access_token + refresh_token |
 | `POST` | `/api/auth/refresh` | ❌ | Làm mới access_token khi hết hạn |
-| `GET` | `/api/auth/me` | ✅ | Lấy thông tin user đang đăng nhập |
+| `GET` | `/api/auth/me` | ✅ | Lấy thông tin user đang đăng nhập (kèm profile tóm tắt: SĐT + địa chỉ mặc định) |
+| `GET` | `/api/auth/profile` | ✅ | Profile dùng chung cho Web/App (đầy đủ phone + address + tỉnh/quận/phường) |
+| `PUT` | `/api/auth/profile` | ✅ | Cập nhật profile dùng chung |
 | `PUT` | `/api/auth/change-password` | ✅ | Đổi mật khẩu |
 
 ### POST `/api/auth/login`
@@ -82,6 +84,54 @@
 
 > `access_token` hết hạn sau **30 phút** → gọi `/auth/refresh` để lấy mới.  
 > Lưu cả 2 token vào secure storage của app.
+
+### GET `/api/auth/profile`
+```json
+{
+  "success": true,
+  "message": "Lấy thông tin profile thành công",
+  "data": {
+    "id": 12,
+    "email": "bao1@gmail.com",
+    "name": "Vuong Quoc Bao",
+    "gender": "male",
+    "type": "consumer",
+    "phone": "0123456789",
+    "address": "123 Trần Hưng Đạo",
+    "province_name": "Hồ Chí Minh",
+    "district_name": "Quận 5",
+    "ward_name": "Phường 04",
+    "full_address": "123 Trần Hưng Đạo, Phường 04, Quận 5, Hồ Chí Minh",
+    "primary_address": {
+      "id": 101,
+      "recipient_name": "Vương Quốc Bảo",
+      "phone": "0123456789",
+      "province_code": "79",
+      "province_name": "Hồ Chí Minh",
+      "district_code": "775",
+      "district_name": "Quận 5",
+      "ward_code": "27196",
+      "ward_name": "Phường 04",
+      "address_line": "123 Trần Hưng Đạo",
+      "full_address": "123 Trần Hưng Đạo, Phường 04, Quận 5, Hồ Chí Minh",
+      "is_default": true
+    }
+  }
+}
+```
+
+### PUT `/api/auth/profile`
+```json
+{
+  "name": "Vương Quốc Bảo",
+  "gender": "male",
+  "phone": "0123456789",
+  "address_line": "123 Trần Hưng Đạo",
+  "province_code": "79",
+  "district_code": "775",
+  "ward_code": "27196"
+}
+```
 
 ### POST `/api/auth/refresh`
 ```json
@@ -668,6 +718,26 @@
     "gender": "male",
     "activated": 1,
     "created_at": "2026-01-01T00:00:00",
+    "phone": "0909123456",
+    "address": "123 Nguyễn Huệ",
+    "province_name": "TP Hồ Chí Minh",
+    "district_name": "Quận 1",
+    "ward_name": "Phường Bến Nghé",
+    "full_address": "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh",
+    "primary_address": {
+      "id": 10,
+      "recipient_name": "Nguyễn Văn A",
+      "phone": "0909123456",
+      "province_code": "79",
+      "province_name": "TP Hồ Chí Minh",
+      "district_code": "760",
+      "district_name": "Quận 1",
+      "ward_code": "26734",
+      "ward_name": "Phường Bến Nghé",
+      "address_line": "123 Nguyễn Huệ",
+      "full_address": "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh",
+      "is_default": true
+    },
     "addresses": [
       {
         "id": 10,
@@ -706,6 +776,8 @@
 | Field | Type | Mô tả hiển thị |
 |-------|------|----------------|
 | `id`, `email`, `name`, `type`, `gender`, `activated`, `created_at` | mixed | Thông tin tài khoản |
+| `phone`, `address`, `province_name`, `district_name`, `ward_name`, `full_address` | mixed | Thông tin liên hệ + địa chỉ mặc định để hiển thị nhanh |
+| `primary_address` | object/null | Địa chỉ mặc định chi tiết (nếu có) |
 | `addresses` | array | Danh sách địa chỉ đã lưu (đầy đủ tên tỉnh/quận/phường) |
 | `order_stats.total` | int | Tổng số đơn |
 | `order_stats.pending` | int | Số đơn đang chờ xử lý |
@@ -822,6 +894,8 @@
 | `POST` | `/api/auth/login` | ❌ | 🌐 | Đăng nhập |
 | `POST` | `/api/auth/refresh` | ❌ | 🌐 | Làm mới token |
 | `GET` | `/api/auth/me` | ✅ | 🌐 | Thông tin user |
+| `GET` | `/api/auth/profile` | ✅ | 🌐 | Profile dùng chung |
+| `PUT` | `/api/auth/profile` | ✅ | 🌐 | Cập nhật profile dùng chung |
 | `PUT` | `/api/auth/change-password` | ✅ | 🌐 | Đổi mật khẩu |
 | `GET` | `/api/seller/posts` | ✅ | 🌐 | Danh sách bài đăng |
 | `POST` | `/api/seller/posts` | ✅ | 🌐 | Tạo bài đăng |

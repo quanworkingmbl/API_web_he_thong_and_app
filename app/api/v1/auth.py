@@ -18,6 +18,7 @@ from app.core.security import (
 )
 from app.core.config import settings
 from app.models.user import User, UserRole, UserStatus
+from app.models.address import Address, Province, District, Ward
 from app.models.refresh_token import RefreshToken
 from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
@@ -126,6 +127,115 @@ def _extract_refresh_token(refresh_data: Optional[RefreshTokenRequest], request:
         return header_token
 
     return None
+
+
+def _get_user_roles(db: Session, user_id: int) -> list:
+    user_roles = db.query(UserRole).filter(UserRole.user_id == user_id).all()
+    roles_data = []
+
+    for user_role in user_roles:
+        role = db.query(Role).filter(Role.id == user_role.role_id).first()
+        if role:
+            roles_data.append({
+                "id": role.id,
+                "name": role.role_name,
+                "role_name": role.role_name,
+                "description": role.description,
+            })
+
+    return roles_data
+
+
+def _get_primary_address(db: Session, user_id: int) -> Optional[Address]:
+    return (
+        db.query(Address)
+        .filter(Address.user_id == user_id)
+        .order_by(Address.is_default.desc(), Address.created_at.desc())
+        .first()
+    )
+
+
+def _build_address_response(addr: Address, db: Session) -> dict:
+    province = db.query(Province).filter(Province.code == addr.province_code).first()
+    district = db.query(District).filter(District.code == addr.district_code).first()
+    ward = db.query(Ward).filter(Ward.code == addr.ward_code).first()
+
+    province_name = province.name if province else addr.province_code
+    district_name = district.name if district else addr.district_code
+    ward_name = ward.name if ward else addr.ward_code
+
+    return {
+        "id": addr.id,
+        "recipient_name": addr.recipient_name,
+        "phone": addr.phone,
+        "province_code": addr.province_code,
+        "province_name": province_name,
+        "district_code": addr.district_code,
+        "district_name": district_name,
+        "ward_code": addr.ward_code,
+        "ward_name": ward_name,
+        "address_line": addr.address_line,
+        "full_address": f"{addr.address_line}, {ward_name}, {district_name}, {province_name}",
+        "is_default": addr.is_default,
+    }
+
+
+def _validate_address_codes(db: Session, province_code: str, district_code: str, ward_code: str) -> None:
+    province = db.query(Province).filter(Province.code == province_code).first()
+    if not province:
+        raise HTTPException(status_code=400, detail="province_code không hợp lệ")
+
+    district = db.query(District).filter(District.code == district_code).first()
+    if not district:
+        raise HTTPException(status_code=400, detail="district_code không hợp lệ")
+    if district.province_code != province.code:
+        raise HTTPException(status_code=400, detail="district_code không thuộc province_code đã chọn")
+
+    ward = db.query(Ward).filter(Ward.code == ward_code).first()
+    if not ward:
+        raise HTTPException(status_code=400, detail="ward_code không hợp lệ")
+    if ward.district_code != district.code:
+        raise HTTPException(status_code=400, detail="ward_code không thuộc district_code đã chọn")
+
+
+def _build_user_info_payload(user: User, db: Session, roles_data: list) -> dict:
+    primary_address = _get_primary_address(db, user.id)
+    primary_address_data = _build_address_response(primary_address, db) if primary_address else None
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "gender": user.gender,
+        "activated": user.activated,
+        "status": user.status.value,
+        "status_reason": user.status_reason,
+        "status_expire_at": user.status_expire_at.isoformat() if user.status_expire_at else None,
+        "created_by": user.created_by,
+        "updated_by": user.updated_by,
+        "created_at": user.created_at.isoformat() if user.created_at else "",
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        "deleted_by": user.deleted_by,
+        "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
+        "type": user.type,
+        "roles": roles_data,
+        "source_providers": [],
+        "phone": primary_address_data.get("phone") if primary_address_data else None,
+        "recipient_name": primary_address_data.get("recipient_name") if primary_address_data else user.name,
+        "address": primary_address_data.get("address_line") if primary_address_data else None,
+        "address_line": primary_address_data.get("address_line") if primary_address_data else None,
+        "province": primary_address_data.get("province_name") if primary_address_data else None,
+        "province_name": primary_address_data.get("province_name") if primary_address_data else None,
+        "province_code": primary_address_data.get("province_code") if primary_address_data else None,
+        "district": primary_address_data.get("district_name") if primary_address_data else None,
+        "district_name": primary_address_data.get("district_name") if primary_address_data else None,
+        "district_code": primary_address_data.get("district_code") if primary_address_data else None,
+        "ward": primary_address_data.get("ward_name") if primary_address_data else None,
+        "ward_name": primary_address_data.get("ward_name") if primary_address_data else None,
+        "ward_code": primary_address_data.get("ward_code") if primary_address_data else None,
+        "full_address": primary_address_data.get("full_address") if primary_address_data else None,
+        "primary_address": primary_address_data,
+    }
 
 
 def _create_token_pair(
@@ -614,41 +724,12 @@ async def get_current_user_info(
     """
     user = current_user
     
-    # Get user roles
-    user_roles = db.query(UserRole).filter(UserRole.user_id == user.id).all()
-    roles_data = []
-    
-    for user_role in user_roles:
-        role = db.query(Role).filter(Role.id == user_role.role_id).first()
-        if role:
-            roles_data.append({
-                "id": role.id,
-                "role_name": role.role_name,
-                "description": role.description
-            })
+    roles_data = _get_user_roles(db, user.id)
     
     return StandardResponse(
         success=True,
         message="User information retrieved successfully",
-        data={
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "gender": user.gender,
-            "activated": user.activated,
-            "status": user.status.value,
-            "status_reason": user.status_reason,
-            "status_expire_at": user.status_expire_at.isoformat() if user.status_expire_at else None,
-            "created_by": user.created_by,
-            "updated_by": user.updated_by,
-            "created_at": user.created_at.isoformat() if user.created_at else "",
-            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-            "deleted_by": user.deleted_by,
-            "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
-            "type": user.type,
-            "roles": roles_data,
-            "source_providers": []
-        }
+        data=_build_user_info_payload(user, db, roles_data)
     )
 
 @router.post("/logout", response_model=StandardResponse)
@@ -873,8 +954,29 @@ async def refresh_token(
 
 
 class UpdateProfileRequest(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=2, max_length=255)
     gender: Optional[str] = None
+    phone: Optional[str] = Field(None, min_length=10, max_length=20)
+    recipient_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    address: Optional[str] = Field(None, min_length=2, max_length=500)
+    address_line: Optional[str] = Field(None, min_length=2, max_length=500)
+    province_code: Optional[str] = Field(None, max_length=20)
+    district_code: Optional[str] = Field(None, max_length=20)
+    ward_code: Optional[str] = Field(None, max_length=20)
+
+
+@router.get("/profile", response_model=StandardResponse)
+async def get_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Lấy thông tin profile dùng chung cho các client."""
+    roles_data = _get_user_roles(db, current_user.id)
+    return StandardResponse(
+        success=True,
+        message="Lấy thông tin profile thành công",
+        data=_build_user_info_payload(current_user, db, roles_data),
+    )
 
 
 @router.put("/profile", response_model=StandardResponse)
@@ -890,22 +992,132 @@ async def update_profile(
     if not update_data:
         raise HTTPException(status_code=400, detail="Không có dữ liệu để cập nhật")
 
+    user_fields = {"name", "gender"}
+    address_fields = {
+        "phone",
+        "recipient_name",
+        "address",
+        "address_line",
+        "province_code",
+        "district_code",
+        "ward_code",
+    }
+
     for key, value in update_data.items():
+        if key not in user_fields:
+            continue
         setattr(current_user, key, value)
+
+    has_address_updates = any(key in address_fields for key in update_data.keys())
+    if has_address_updates:
+        primary_address = _get_primary_address(db, current_user.id)
+
+        input_address_line = update_data.get("address_line")
+        if input_address_line is None:
+            input_address_line = update_data.get("address")
+
+        input_phone = update_data.get("phone")
+        input_recipient_name = update_data.get("recipient_name")
+
+        input_province_code = update_data.get("province_code")
+        input_district_code = update_data.get("district_code")
+        input_ward_code = update_data.get("ward_code")
+
+        if input_province_code is not None:
+            input_province_code = input_province_code.strip()
+        if input_district_code is not None:
+            input_district_code = input_district_code.strip()
+        if input_ward_code is not None:
+            input_ward_code = input_ward_code.strip()
+
+        if input_address_line is not None:
+            input_address_line = input_address_line.strip()
+        if input_phone is not None:
+            input_phone = input_phone.strip()
+        if input_recipient_name is not None:
+            input_recipient_name = input_recipient_name.strip()
+
+        if input_phone == "":
+            raise HTTPException(status_code=400, detail="phone không được để trống")
+        if input_address_line == "":
+            raise HTTPException(status_code=400, detail="address_line không được để trống")
+        if input_recipient_name == "":
+            raise HTTPException(status_code=400, detail="recipient_name không được để trống")
+
+        if primary_address is None:
+            required_missing = []
+            if not input_phone:
+                required_missing.append("phone")
+            if not input_address_line:
+                required_missing.append("address_line")
+            if not input_province_code:
+                required_missing.append("province_code")
+            if not input_district_code:
+                required_missing.append("district_code")
+            if not input_ward_code:
+                required_missing.append("ward_code")
+
+            if required_missing:
+                missing_text = ", ".join(required_missing)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Thiếu dữ liệu địa chỉ để tạo profile: {missing_text}",
+                )
+
+            _validate_address_codes(
+                db,
+                province_code=input_province_code,
+                district_code=input_district_code,
+                ward_code=input_ward_code,
+            )
+
+            primary_address = Address(
+                user_id=current_user.id,
+                recipient_name=input_recipient_name or current_user.name,
+                phone=input_phone,
+                province_code=input_province_code,
+                district_code=input_district_code,
+                ward_code=input_ward_code,
+                address_line=input_address_line,
+                is_default=True,
+            )
+            db.add(primary_address)
+        else:
+            if input_phone is not None:
+                primary_address.phone = input_phone
+            if input_recipient_name is not None:
+                primary_address.recipient_name = input_recipient_name
+            if input_address_line is not None:
+                primary_address.address_line = input_address_line
+
+            resolved_province_code = input_province_code or primary_address.province_code
+            resolved_district_code = input_district_code or primary_address.district_code
+            resolved_ward_code = input_ward_code or primary_address.ward_code
+
+            if (
+                input_province_code is not None
+                or input_district_code is not None
+                or input_ward_code is not None
+            ):
+                _validate_address_codes(
+                    db,
+                    province_code=resolved_province_code,
+                    district_code=resolved_district_code,
+                    ward_code=resolved_ward_code,
+                )
+                primary_address.province_code = resolved_province_code
+                primary_address.district_code = resolved_district_code
+                primary_address.ward_code = resolved_ward_code
 
     current_user.updated_at = _utcnow()
     db.commit()
     db.refresh(current_user)
 
+    roles_data = _get_user_roles(db, current_user.id)
+
     return StandardResponse(
         success=True,
         message="Cập nhật thông tin cá nhân thành công",
-        data={
-            "id": current_user.id,
-            "email": current_user.email,
-            "name": current_user.name,
-            "gender": current_user.gender,
-            "type": current_user.type,
-        }
+        data=_build_user_info_payload(current_user, db, roles_data)
     )
 

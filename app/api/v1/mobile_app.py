@@ -2410,6 +2410,8 @@ async def get_my_profile(
     addresses = db.query(Address).filter(
         Address.user_id == current_user.id
     ).order_by(Address.is_default.desc()).all()
+    primary_address = addresses[0] if addresses else None
+    primary_address_data = _build_address_response(primary_address, db) if primary_address else None
 
     # Order stats
     total_orders = db.query(Order).filter(Order.customer_id == current_user.id).count()
@@ -2430,6 +2432,21 @@ async def get_my_profile(
             "gender": current_user.gender,
             "activated": current_user.activated,
             "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            "phone": primary_address_data.get("phone") if primary_address_data else None,
+            "recipient_name": primary_address_data.get("recipient_name") if primary_address_data else current_user.name,
+            "address": primary_address_data.get("address_line") if primary_address_data else None,
+            "address_line": primary_address_data.get("address_line") if primary_address_data else None,
+            "province": primary_address_data.get("province_name") if primary_address_data else None,
+            "province_name": primary_address_data.get("province_name") if primary_address_data else None,
+            "province_code": primary_address_data.get("province_code") if primary_address_data else None,
+            "district": primary_address_data.get("district_name") if primary_address_data else None,
+            "district_name": primary_address_data.get("district_name") if primary_address_data else None,
+            "district_code": primary_address_data.get("district_code") if primary_address_data else None,
+            "ward": primary_address_data.get("ward_name") if primary_address_data else None,
+            "ward_name": primary_address_data.get("ward_name") if primary_address_data else None,
+            "ward_code": primary_address_data.get("ward_code") if primary_address_data else None,
+            "full_address": primary_address_data.get("full_address") if primary_address_data else None,
+            "primary_address": primary_address_data,
             "addresses": [_build_address_response(a, db) for a in addresses],
             "order_stats": {
                 "total": total_orders,
