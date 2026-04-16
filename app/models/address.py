@@ -64,9 +64,9 @@ class Address(Base):
     phone = Column(String(20), nullable=False)
 
     # Địa chỉ chuẩn hóa
-    province_code = Column(String(20), ForeignKey("provinces.code"), nullable=False, index=True)
-    district_code = Column(String(20), ForeignKey("districts.code"), nullable=False, index=True)
-    ward_code = Column(String(20), ForeignKey("wards.code"), nullable=False, index=True)
+    province_code = Column(String(20), ForeignKey("provinces.code"), nullable=True, index=True)
+    district_code = Column(String(20), ForeignKey("districts.code"), nullable=True, index=True)
+    ward_code = Column(String(20), ForeignKey("wards.code"), nullable=True, index=True)
     address_line = Column(Text, nullable=False)  # Số nhà, tên đường
 
     # Địa chỉ mặc định

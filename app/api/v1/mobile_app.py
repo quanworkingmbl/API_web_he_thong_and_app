@@ -163,9 +163,9 @@ class CheckoutRequest(BaseModel):
 class AddressRequest(BaseModel):
     recipient_name: str = Field(..., min_length=2, max_length=255)
     phone: str = Field(..., min_length=10, max_length=20)
-    province_code: str = Field(..., max_length=20)
-    district_code: str = Field(..., max_length=20)
-    ward_code: str = Field(..., max_length=20)
+    province_code: Optional[str] = Field(None, max_length=20)
+    district_code: Optional[str] = Field(None, max_length=20)
+    ward_code: Optional[str] = Field(None, max_length=20)
     address_line: str = Field(..., min_length=5)
     is_default: bool = False
 
@@ -381,12 +381,29 @@ def _build_product_pricing(product: Product, active_promotions: List[Promotion])
 
 def _build_address_response(addr: Address, db: Session) -> dict:
     """Build address dict với tên tỉnh/quận/phường."""
-    province = db.query(Province).filter(Province.code == addr.province_code).first()
-    district = db.query(District).filter(District.code == addr.district_code).first()
-    ward = db.query(Ward).filter(Ward.code == addr.ward_code).first()
+    province = (
+        db.query(Province).filter(Province.code == addr.province_code).first()
+        if addr.province_code
+        else None
+    )
+    district = (
+        db.query(District).filter(District.code == addr.district_code).first()
+        if addr.district_code
+        else None
+    )
+    ward = (
+        db.query(Ward).filter(Ward.code == addr.ward_code).first()
+        if addr.ward_code
+        else None
+    )
+
     province_name = province.name if province else addr.province_code
     district_name = district.name if district else addr.district_code
     ward_name = ward.name if ward else addr.ward_code
+    full_address = ", ".join(
+        part for part in [addr.address_line, ward_name, district_name, province_name] if part
+    )
+
     return {
         "id": addr.id,
         "recipient_name": addr.recipient_name,
@@ -398,9 +415,45 @@ def _build_address_response(addr: Address, db: Session) -> dict:
         "ward_code": addr.ward_code,
         "ward_name": ward_name,
         "address_line": addr.address_line,
-        "full_address": f"{addr.address_line}, {ward_name}, {district_name}, {province_name}",
+        "full_address": full_address,
         "is_default": addr.is_default,
     }
+
+
+def _normalize_region_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = value.strip()
+    return text if text else None
+
+
+def _resolve_region_codes(
+    db: Session,
+    province_code: Optional[str],
+    district_code: Optional[str],
+    ward_code: Optional[str],
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    normalized_province = _normalize_region_code(province_code)
+    normalized_district = _normalize_region_code(district_code)
+    normalized_ward = _normalize_region_code(ward_code)
+
+    provided_count = sum(
+        1 for code in [normalized_province, normalized_district, normalized_ward] if code is not None
+    )
+    if provided_count == 0:
+        return None, None, None
+
+    if provided_count != 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Nếu chọn khu vực, vui lòng chọn đầy đủ Tỉnh/Thành phố, Quận/Huyện và Phường/Xã",
+        )
+
+    assert normalized_province is not None
+    assert normalized_district is not None
+    assert normalized_ward is not None
+    _validate_address_codes(db, normalized_province, normalized_district, normalized_ward)
+    return normalized_province, normalized_district, normalized_ward
 
 
 def _validate_address_codes(db: Session, province_code: str, district_code: str, ward_code: str) -> None:
@@ -2307,10 +2360,12 @@ async def create_address(
     db: Session = Depends(get_db)
 ):
     """Thêm địa chỉ mới vào sổ."""
-    province_code = addr_data.province_code.strip()
-    district_code = addr_data.district_code.strip()
-    ward_code = addr_data.ward_code.strip()
-    _validate_address_codes(db, province_code, district_code, ward_code)
+    province_code, district_code, ward_code = _resolve_region_codes(
+        db,
+        addr_data.province_code,
+        addr_data.district_code,
+        addr_data.ward_code,
+    )
 
     # Nếu set default → reset các addr cũ
     if addr_data.is_default:
@@ -2353,10 +2408,12 @@ async def update_address(
     if not addr:
         raise HTTPException(status_code=404, detail="Địa chỉ không tồn tại")
 
-    province_code = addr_data.province_code.strip()
-    district_code = addr_data.district_code.strip()
-    ward_code = addr_data.ward_code.strip()
-    _validate_address_codes(db, province_code, district_code, ward_code)
+    province_code, district_code, ward_code = _resolve_region_codes(
+        db,
+        addr_data.province_code,
+        addr_data.district_code,
+        addr_data.ward_code,
+    )
 
     if addr_data.is_default:
         db.query(Address).filter(
