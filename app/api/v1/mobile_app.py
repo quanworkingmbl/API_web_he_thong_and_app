@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, 
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from app.core.database import get_db
 from app.models.content import Content, ContentStatus, ContentAuditLog, ContentAuditAction
 from app.models.product import Product, ProductStatus
@@ -181,6 +181,7 @@ class ApplyPromotionRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=255)
     gender: Optional[str] = None
+    date_of_birth: Optional[date] = None
 
 
 class ConfirmReceivedRequest(BaseModel):
@@ -2433,6 +2434,7 @@ async def get_my_profile(
             "name": current_user.name,
             "type": current_user.type,
             "gender": current_user.gender,
+            "date_of_birth": current_user.date_of_birth.isoformat() if current_user.date_of_birth else None,
             "activated": current_user.activated,
             "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
             "phone": primary_address_data.get("phone") if primary_address_data else None,
@@ -2471,6 +2473,8 @@ async def update_my_profile(
         current_user.name = profile_data.name
     if profile_data.gender is not None:
         current_user.gender = profile_data.gender
+    if profile_data.date_of_birth is not None:
+        current_user.date_of_birth = profile_data.date_of_birth
 
     db.commit()
     db.refresh(current_user)
@@ -2481,7 +2485,8 @@ async def update_my_profile(
         "data": {
             "id": current_user.id,
             "name": current_user.name,
-            "gender": current_user.gender
+            "gender": current_user.gender,
+            "date_of_birth": current_user.date_of_birth.isoformat() if current_user.date_of_birth else None,
         }
     }
 

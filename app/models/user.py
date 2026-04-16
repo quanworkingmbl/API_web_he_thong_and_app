@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -16,6 +16,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     name = Column(String(255), nullable=False)
+    date_of_birth = Column(Date, nullable=True)
     gender = Column(String(50), nullable=True)
     activated = Column(Integer, default=1)  # 1 = active, 0 = inactive
     type = Column(String(50), nullable=True)  # consumer, producer, admin, etc.
