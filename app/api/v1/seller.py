@@ -123,6 +123,7 @@ class CreateSellerOriginRequest(BaseModel):
     expiry_date: Optional[date] = None
     ingredients: str = Field(..., min_length=2)
     process_summary: str = Field(..., min_length=10)
+    images: Optional[str] = None                # JSON array URL ảnh minh chứng nguồn gốc
     usage_instructions: Optional[str] = None     # Hướng dẫn sử dụng
     storage_instructions: Optional[str] = None   # Hướng dẫn bảo quản
     warnings: Optional[str] = None               # Cảnh báo an toàn
@@ -138,6 +139,7 @@ class UpdateSellerOriginRequest(BaseModel):
     expiry_date: Optional[date] = None
     ingredients: Optional[str] = Field(None, min_length=2)
     process_summary: Optional[str] = Field(None, min_length=10)
+    images: Optional[str] = None
     usage_instructions: Optional[str] = None
     storage_instructions: Optional[str] = None
     warnings: Optional[str] = None
@@ -158,6 +160,7 @@ class CreateSellerProductRequest(BaseModel):
     weight: Optional[int] = Field(None, ge=0)              # Gram (chỉ dùng cho nông sản)
     packaging_type: Optional[str] = Field(None, max_length=50)  # thùng, lon, hộp...
     images: Optional[str] = None   # JSON array of image URLs
+    videos: Optional[str] = None   # URL hoặc JSON array URL video sản phẩm
     stock_quantity: int = Field(default=0, ge=0)
     origin: CreateSellerOriginRequest
 
@@ -175,6 +178,7 @@ class UpdateSellerProductRequest(BaseModel):
     weight: Optional[int] = Field(None, ge=0)
     packaging_type: Optional[str] = Field(None, max_length=50)
     images: Optional[str] = None
+    videos: Optional[str] = None
     stock_quantity: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
     origin: Optional[UpdateSellerOriginRequest] = None
@@ -713,6 +717,7 @@ async def get_seller_products(
             "category_name": categories_map.get(p.category_id) if p.category_id else None,
             "origin_status": origin_status,
             "images": p.images,
+            "videos": p.videos,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         })
@@ -760,6 +765,7 @@ async def create_seller_product(
         weight=product_data.weight,
         packaging_type=product_data.packaging_type,
         images=product_data.images,
+        videos=product_data.videos,
         sku=auto_sku,
         stock_quantity=product_data.stock_quantity,
         vat_rate=10,   # mặc định 10% VAT – Seller không thể thay đổi
@@ -779,6 +785,7 @@ async def create_seller_product(
         expiry_date=origin_data.get("expiry_date"),
         ingredients=origin_data.get("ingredients"),
         process_summary=origin_data.get("process_summary"),
+        images=origin_data.get("images"),
         usage_instructions=origin_data.get("usage_instructions"),
         storage_instructions=origin_data.get("storage_instructions"),
         warnings=origin_data.get("warnings"),
@@ -807,6 +814,7 @@ async def create_seller_product(
             "status": "PENDING",
             "origin_status": origin.verification_status.value if hasattr(origin.verification_status, "value") else str(origin.verification_status),
             "images": new_product.images,
+            "videos": new_product.videos,
             "created_at": new_product.created_at.isoformat() if new_product.created_at else None,
         },
     }
@@ -843,7 +851,7 @@ async def update_seller_product(
     origin_record = db.query(ProductOrigin).filter(ProductOrigin.product_id == product.id).first()
 
     # Các field nội dung khi thay đổi cần duyệt lại
-    content_fields = {"name", "description", "price", "images", "label"}
+    content_fields = {"name", "description", "price", "images", "videos", "label"}
     needs_reapproval = bool(content_fields & update_data.keys())
 
     for key, value in update_data.items():
@@ -856,6 +864,7 @@ async def update_seller_product(
         if origin_record:
             existing_values = {
                 "village_name": origin_record.village_name,
+                "facility_name": origin_record.facility_name,
                 "region_id": origin_record.region_id,
                 "seller_name": origin_record.seller_name,
                 "batch_number": origin_record.batch_number,
@@ -863,6 +872,10 @@ async def update_seller_product(
                 "expiry_date": origin_record.expiry_date,
                 "ingredients": origin_record.ingredients,
                 "process_summary": origin_record.process_summary,
+                "images": origin_record.images,
+                "usage_instructions": origin_record.usage_instructions,
+                "storage_instructions": origin_record.storage_instructions,
+                "warnings": origin_record.warnings,
             }
 
         merged_origin = {**existing_values, **origin_data}
@@ -891,6 +904,7 @@ async def update_seller_product(
             origin_record = ProductOrigin(
                 product_id=product.id,
                 village_name=merged_origin.get("village_name"),
+                facility_name=merged_origin.get("facility_name"),
                 region_id=merged_origin.get("region_id"),
                 seller_name=merged_origin.get("seller_name"),
                 batch_number=merged_origin.get("batch_number"),
@@ -898,6 +912,10 @@ async def update_seller_product(
                 expiry_date=merged_origin.get("expiry_date"),
                 ingredients=merged_origin.get("ingredients"),
                 process_summary=merged_origin.get("process_summary"),
+                images=merged_origin.get("images"),
+                usage_instructions=merged_origin.get("usage_instructions"),
+                storage_instructions=merged_origin.get("storage_instructions"),
+                warnings=merged_origin.get("warnings"),
             )
             db.add(origin_record)
 
@@ -935,6 +953,7 @@ async def update_seller_product(
                 else (str(origin_record.verification_status) if origin_record else None)
             ),
             "images": product.images,
+            "videos": product.videos,
             "updated_at": product.updated_at.isoformat() if product.updated_at else None,
         },
     }

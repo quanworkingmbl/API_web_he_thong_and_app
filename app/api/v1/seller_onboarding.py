@@ -94,15 +94,21 @@ async def register_seller_profile(
     db: Session = Depends(get_db)
 ):
     """
-    Người bán nộp hồ sơ kinh doanh để được xác minh.
-    Nếu đã có hồ sơ, sẽ cập nhật lại (reset về PENDING).
+    Người dùng nộp hồ sơ kinh doanh để được xác minh trở thành người bán.
+    - Tài khoản consumer: type được nâng lên 'seller' khi nộp hồ sơ.
+    - Nếu đã có hồ sơ, sẽ cập nhật lại (reset về PENDING).
+    - Admin không được phép dùng endpoint này.
     Loại hình kinh doanh: HOUSEHOLD | COOPERATIVE | COMPANY.
     """
-    if current_user.type not in {"producer", "seller"}:
+    if current_user.type == "admin":
         raise HTTPException(
-            status_code=400,
-            detail="Chỉ tài khoản loại 'producer' hoặc 'seller' mới cần nộp hồ sơ"
+            status_code=403,
+            detail="Admin không thể đăng ký hồ sơ người bán"
         )
+
+    # Nâng quyền consumer → seller khi nộp hồ sơ
+    if current_user.type == "consumer":
+        current_user.type = "seller"
 
     existing = db.query(SellerProfile).filter(
         SellerProfile.user_id == current_user.id
@@ -123,7 +129,7 @@ async def register_seller_profile(
         db.add(profile)
         msg = "Hồ sơ đã được nộp thành công, chờ admin xét duyệt"
 
-    # Sau mỗi lần nộp/cập nhật hồ sơ, tài khoản seller về PENDING
+    # Sau mỗi lần nộp/cập nhật hồ sơ, tài khoản về trạng thái chờ duyệt
     current_user.activated = 0
     db.commit()
     db.refresh(profile)
@@ -145,9 +151,9 @@ async def get_verification_status(
     current_user: User = Depends(get_current_user_allow_inactive),
     db: Session = Depends(get_db)
 ):
-    """Seller xem trạng thái hồ sơ của mình."""
-    if current_user.type not in {"producer", "seller"}:
-        raise HTTPException(status_code=403, detail="Chỉ tài khoản seller/producer mới có thể xem trạng thái KYC")
+    """Xem trạng thái hồ sơ kinh doanh của mình. Admin không được phép."""
+    if current_user.type == "admin":
+        raise HTTPException(status_code=403, detail="Admin không thể xem hồ sơ này")
 
     profile = db.query(SellerProfile).filter(
         SellerProfile.user_id == current_user.id

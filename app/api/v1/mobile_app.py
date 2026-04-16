@@ -1154,6 +1154,9 @@ async def get_product_detail(
             "expiry_date": origin.expiry_date.isoformat() if origin.expiry_date else None,
             "ingredients": origin.ingredients,
             "process_summary": origin.process_summary,
+            "images": origin.images,
+            "usage_instructions": origin.usage_instructions,
+            "storage_instructions": origin.storage_instructions,
             "warnings": origin.warnings,
         }
         if origin.region_id:

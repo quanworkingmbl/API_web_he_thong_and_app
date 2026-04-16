@@ -69,6 +69,7 @@ class ProductOrigin(Base):
     # ── Thành phần & quy trình ──────────────────────────────────────────────
     ingredients = Column(Text, nullable=True)                   # Nguyên liệu / thành phần
     process_summary = Column(Text, nullable=True)               # Mô tả quy trình sản xuất
+    images = Column(Text, nullable=True)                        # JSON array URL ảnh minh chứng nguồn gốc
 
     # ── Hướng dẫn sử dụng & bảo quản (bắt buộc theo Luật ATTP) ────────────
     usage_instructions = Column(Text, nullable=True)            # Hướng dẫn sử dụng

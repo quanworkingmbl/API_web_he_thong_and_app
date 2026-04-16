@@ -65,6 +65,7 @@ class Product(Base):
 
     # Legacy image field (sẽ migrate sang product_media)
     images = Column(Text, nullable=True)  # JSON array of image URLs (deprecated)
+    videos = Column(Text, nullable=True)  # URL hoặc JSON array URL video sản phẩm
 
     # Inventory management
     stock_quantity = Column(Integer, default=0, nullable=False)

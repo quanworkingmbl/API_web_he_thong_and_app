@@ -44,6 +44,7 @@ class ProductResponse(BaseModel):
     product_type: Optional[str] = None    # AGRICULTURAL | HANDICRAFT
     packaging_type: Optional[str] = None  # thung, lon, hop, bo...
     images: Optional[str]
+    videos: Optional[str] = None
     sku: Optional[str] = None
     unit: Optional[str] = None
     weight: Optional[int] = None
@@ -69,10 +70,11 @@ class CreateProductRequest(BaseModel):
     price: Decimal = Field(..., gt=0)
     seller_id: int
     category_id: Optional[int] = None
-    label: Optional[str] = None
+    label: Optional[str] = Field(None, pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT)$")
     product_type: Optional[str] = Field(None, pattern="^(AGRICULTURAL|HANDICRAFT)$")
     packaging_type: Optional[str] = Field(None, max_length=50)
     images: Optional[str] = None
+    videos: Optional[str] = None
     sku: Optional[str] = Field(None, max_length=100)
     unit: Optional[str] = Field(None, max_length=20)
     weight: Optional[int] = Field(None, ge=0)
@@ -96,10 +98,11 @@ class UpdateProductRequest(BaseModel):
     description: Optional[str] = None
     price: Optional[Decimal] = Field(None, gt=0)
     category_id: Optional[int] = None
-    label: Optional[str] = None
+    label: Optional[str] = Field(None, pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT)$")
     product_type: Optional[str] = Field(None, pattern="^(AGRICULTURAL|HANDICRAFT)$")
     packaging_type: Optional[str] = Field(None, max_length=50)
     images: Optional[str] = None
+    videos: Optional[str] = None
     is_active: Optional[bool] = None
     sku: Optional[str] = Field(None, max_length=100)
     unit: Optional[str] = Field(None, max_length=20)
@@ -174,7 +177,7 @@ def _build_product_response(p, db):
         label=p.label.value if hasattr(p.label, "value") else p.label,
         product_type=p.product_type if p.product_type else None,
         packaging_type=p.packaging_type,
-        images=p.images, sku=p.sku, unit=p.unit, weight=p.weight,
+        images=p.images, videos=p.videos, sku=p.sku, unit=p.unit, weight=p.weight,
         stock_quantity=p.stock_quantity, vat_rate=p.vat_rate,
         approved_at=p.approved_at.isoformat() if p.approved_at else None,
         created_at=p.created_at.isoformat() if p.created_at else "",
@@ -299,6 +302,7 @@ async def create_product(
         product_type=product_data.product_type,
         packaging_type=product_data.packaging_type,
         images=product_data.images, sku=product_data.sku,
+        videos=product_data.videos,
         unit=product_data.unit, weight=product_data.weight,
         stock_quantity=product_data.stock_quantity or 0,
         vat_rate=product_data.vat_rate if is_admin else VAT_DEFAULT,
@@ -438,7 +442,7 @@ async def approve_product(
 @router.put("/{product_id}/label")
 async def update_product_label(
     product_id: int,
-    label: str = Query(..., pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT|OCOP)$"),
+    label: str = Query(..., pattern="^(CLEAN_AGRICULTURE|TRADITIONAL_CRAFT)$"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
