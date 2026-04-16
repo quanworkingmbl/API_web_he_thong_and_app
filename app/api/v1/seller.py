@@ -3,6 +3,7 @@ Seller API – Dành riêng cho người bán (producer/seller)
 
 Endpoints:
 - GET  /seller/dashboard              – Thống kê tổng quan (đơn, doanh thu, sản phẩm)
+- GET  /seller/transactions           – Lịch sử chuyển khoản người mua vào sàn
 - GET  /seller/orders                 – Danh sách đơn hàng của seller
 - PUT  /seller/orders/{id}/confirm    – Xác nhận đơn → CONFIRMED
 - PUT  /seller/orders/{id}/reject     – Từ chối đơn   → CANCELLED
@@ -34,7 +35,7 @@ from datetime import datetime, timedelta, date
 from decimal import Decimal, ROUND_HALF_UP
 import secrets
 from app.core.database import get_db
-from app.models.order import Order, OrderItem, OrderStatus
+from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
 from app.models.product import Product, ProductStatus
 from app.models.traceability import ProductOrigin, OriginStatus
 from app.models.content import Content, ContentStatus
@@ -70,6 +71,35 @@ def _to_vnd_int(value: Optional[Decimal]) -> Optional[int]:
         return None
     decimal_value = value if isinstance(value, Decimal) else Decimal(str(value))
     return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _extract_first_media_url(raw_value: Optional[str]) -> Optional[str]:
+    """Lấy URL ảnh đầu tiên từ chuỗi URL đơn hoặc JSON array URL."""
+    if raw_value is None:
+        return None
+
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    if text.startswith("["):
+        import json
+
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return text
+
+        if isinstance(parsed, list):
+            for item in parsed:
+                if item is None:
+                    continue
+                candidate = str(item).strip()
+                if candidate:
+                    return candidate
+            return None
+
+    return text
 
 
 def _validate_origin_payload(origin_data: dict, db: Session):
@@ -241,6 +271,10 @@ async def get_seller_dashboard(
         Product.seller_id == seller_id,
         Product.status == ProductStatus.APPROVED
     ).count()
+    pending_products = db.query(Product).filter(
+        Product.seller_id == seller_id,
+        Product.status == ProductStatus.PENDING
+    ).count()
     low_stock_products = db.query(Product).filter(
         Product.seller_id == seller_id,
         Product.stock_quantity < 5
@@ -267,9 +301,80 @@ async def get_seller_dashboard(
             "products": {
                 "total": total_products,
                 "approved": approved_products,
+                "pending": pending_products,
                 "low_stock": low_stock_products
-            }
+            },
+            # Backward-compatible flat fields cho các màn hình CMS cũ.
+            "total_products": total_products,
+            "approved_products": approved_products,
+            "pending_products": pending_products,
+            "total_orders": total_orders,
+            "total_revenue": _to_vnd_int(total_revenue),
         }
+    }
+
+
+@router.get("/transactions", summary="Lịch sử chuyển khoản của người mua vào sàn")
+async def get_seller_transactions(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    payment_status: Optional[str] = Query(None, description="Filter theo trạng thái thanh toán"),
+    search: Optional[str] = Query(None, description="Tìm theo mã đơn / tên khách / SĐT"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Lấy lịch sử giao dịch chuyển khoản người mua vào nền tảng cho các đơn của seller."""
+    _require_seller(current_user)
+
+    query = db.query(Order).filter(
+        Order.seller_id == current_user.id,
+        Order.payment_method.in_([PaymentMethod.BANK_TRANSFER, PaymentMethod.PLATFORM_CREDITS]),
+    )
+
+    if payment_status:
+        query = query.filter(Order.payment_status == payment_status)
+
+    if search:
+        keyword = f"%{search}%"
+        query = query.filter(
+            (Order.order_number.ilike(keyword))
+            | (Order.customer_name.ilike(keyword))
+            | (Order.customer_phone.ilike(keyword))
+        )
+
+    total = query.count()
+    skip = (page - 1) * limit
+    orders = query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
+
+    data = []
+    for o in orders:
+        payment_method_value = o.payment_method.value if hasattr(o.payment_method, "value") else str(o.payment_method)
+        data.append(
+            {
+                "id": o.id,
+                "order_id": o.id,
+                "order_number": o.order_number,
+                "sender_name": o.customer_name,
+                "sender_phone": o.customer_phone,
+                "payment_method": payment_method_value,
+                "payment_status": o.payment_status,
+                "order_status": o.status.value if hasattr(o.status, "value") else str(o.status),
+                "transfer_amount": _to_vnd_int(o.total_amount),
+                "seller_amount": _to_vnd_int(o.seller_amount),
+                "platform_fee_amount": _to_vnd_int(o.platform_fee_amount),
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            }
+        )
+
+    return {
+        "success": True,
+        "data": data,
+        "meta": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit,
+        },
     }
 
 
@@ -360,14 +465,14 @@ async def get_seller_order_detail(
     logs = (
         db.query(OrderStatusLog)
         .filter(OrderStatusLog.order_id == order.id)
-        .order_by(OrderStatusLog.created_at.asc())
+        .order_by(OrderStatusLog.timestamp.asc())
         .all()
     )
 
     timeline = [
         {
             "status": log.new_status,
-            "timestamp": log.created_at.isoformat() if log.created_at else None,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
             "actor_role": log.role or "system",
             "note": log.note,
         }
@@ -404,7 +509,7 @@ async def get_seller_order_detail(
                     "id": item.id,
                     "product_id": item.product_id,
                     "product_name": item.product_name,
-                    "product_image": item.product_image,
+                    "product_image": _extract_first_media_url(item.product_image),
                     "unit_price": _to_vnd_int(item.unit_price),
                     "quantity": item.quantity,
                     "total_price": _to_vnd_int(item.total_price),
@@ -667,6 +772,31 @@ async def get_seller_products(
         for o in db.query(OriginModel).filter(OriginModel.product_id.in_(product_ids)).all()
     } if product_ids else {}
 
+    sold_quantity_map = {}
+    if product_ids:
+        sold_rows = (
+            db.query(
+                OrderItem.product_id,
+                sql_func.coalesce(sql_func.sum(OrderItem.quantity), 0).label("sold_quantity"),
+            )
+            .join(Order, Order.id == OrderItem.order_id)
+            .filter(
+                OrderItem.product_id.in_(product_ids),
+                Order.seller_id == current_user.id,
+                Order.status.in_(
+                    [
+                        OrderStatus.CONFIRMED,
+                        OrderStatus.PROCESSING,
+                        OrderStatus.SHIPPING,
+                        OrderStatus.DELIVERED,
+                    ]
+                ),
+            )
+            .group_by(OrderItem.product_id)
+            .all()
+        )
+        sold_quantity_map = {row.product_id: int(row.sold_quantity or 0) for row in sold_rows}
+
     # Lấy lý do reject mới nhất nếu có
     latest_rejections: dict = {}
     if product_ids:
@@ -716,6 +846,7 @@ async def get_seller_products(
             "category_id": p.category_id,
             "category_name": categories_map.get(p.category_id) if p.category_id else None,
             "origin_status": origin_status,
+            "sold_quantity": sold_quantity_map.get(p.id, 0),
             "images": p.images,
             "videos": p.videos,
             "created_at": p.created_at.isoformat() if p.created_at else None,
