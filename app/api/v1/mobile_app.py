@@ -204,6 +204,33 @@ def _get_product_review_stats(db: Session, product_id: int) -> dict:
     }
 
 
+def _extract_first_media_url(raw_value: Optional[str]) -> Optional[str]:
+    """Lấy URL đầu tiên từ chuỗi URL đơn hoặc JSON array URL."""
+    if raw_value is None:
+        return None
+
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return text
+
+        if isinstance(parsed, list):
+            for item in parsed:
+                if item is None:
+                    continue
+                candidate = str(item).strip()
+                if candidate:
+                    return candidate
+            return None
+
+    return text
+
+
 def _promotion_type(promo: Promotion) -> str:
     return promo.promotion_type.value if hasattr(promo.promotion_type, "value") else str(promo.promotion_type)
 
@@ -1620,7 +1647,7 @@ async def create_order(
 ):
     """
     Tạo đơn hàng từ giỏ hàng.
-    Hỗ trợ: coupon_code, PLATFORM_CREDITS payment method.
+    Hỗ trợ: coupon_code, BANK_TRANSFER (giả lập auto-paid), PLATFORM_CREDITS payment method.
     """
     if not checkout_data.items or len(checkout_data.items) == 0:
         raise HTTPException(status_code=400, detail="Cart is empty")
@@ -1774,8 +1801,9 @@ async def create_order(
 
     order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
 
-    # Payment status: nếu PLATFORM_CREDITS → auto PAID
-    payment_status = "PAID" if checkout_data.payment_method == "PLATFORM_CREDITS" else "UNPAID"
+    # Payment status: giả lập chuyển khoản + credits được auto PAID.
+    auto_paid_methods = {"PLATFORM_CREDITS", "BANK_TRANSFER"}
+    payment_status = "PAID" if checkout_data.payment_method in auto_paid_methods else "UNPAID"
 
     new_order = Order(
         order_number=order_number,
@@ -1895,7 +1923,7 @@ async def get_my_orders(
     for o in orders:
         items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
         seller = db.query(User).filter(User.id == o.seller_id).first()
-        first_image = items[0].product_image if items else None
+        first_image = _extract_first_media_url(items[0].product_image) if items else None
         order_list.append({
             "id": o.id,
             "order_number": o.order_number,
@@ -1909,7 +1937,7 @@ async def get_my_orders(
             "items": [
                 {
                     "product_name": item.product_name,
-                    "product_image": item.product_image,
+                    "product_image": _extract_first_media_url(item.product_image),
                     "unit_price": str(item.unit_price),
                     "quantity": item.quantity,
                     "total_price": str(item.total_price),
@@ -2002,7 +2030,7 @@ async def get_my_order_detail(
                     "id": item.id,
                     "product_id": item.product_id,
                     "product_name": item.product_name,
-                    "product_image": item.product_image,
+                    "product_image": _extract_first_media_url(item.product_image),
                     "unit_price": str(item.unit_price),
                     "quantity": item.quantity,
                     "total_price": str(item.total_price)
