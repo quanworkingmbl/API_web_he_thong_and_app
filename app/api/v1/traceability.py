@@ -57,6 +57,7 @@ class CreateOriginRequest(BaseModel):
     expiry_date: Optional[date] = None
     ingredients: Optional[str] = None
     process_summary: Optional[str] = None
+    images: Optional[str] = None
     usage_instructions: Optional[str] = None
     storage_instructions: Optional[str] = None
     warnings: Optional[str] = None
@@ -103,6 +104,7 @@ def _serialize_origin(origin: ProductOrigin, include_status: bool = False) -> di
         "expiry_date": origin.expiry_date.isoformat() if origin.expiry_date else None,
         "ingredients": origin.ingredients,
         "process_summary": origin.process_summary,
+        "images": origin.images,
         "usage_instructions": origin.usage_instructions,
         "storage_instructions": origin.storage_instructions,
         "warnings": origin.warnings,
