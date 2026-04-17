@@ -10,11 +10,13 @@ Endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sql_func
 from typing import Optional
 from datetime import datetime
 from app.core.database import get_db
 from app.models.seller_profile import SellerProfile, VerificationStatus
-from app.models.user import User
+from app.models.user import User, UserRole
+from app.models.role import Role
 from app.api.v1.auth import get_current_user, get_current_user_allow_inactive
 from pydantic import BaseModel, Field
 
@@ -63,6 +65,34 @@ class VerifySellerRequest(BaseModel):
     rejection_reason: Optional[str] = None
 
 
+class AdminUpdateSellerProfileRequest(BaseModel):
+    business_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    business_type: Optional[str] = Field(
+        default=None,
+        pattern="^(INDIVIDUAL|HOUSEHOLD|COOPERATIVE|COMPANY)$"
+    )
+    description: Optional[str] = None
+    address: Optional[str] = None
+
+    phone: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, max_length=255)
+
+    id_card_number: Optional[str] = Field(None, max_length=20)
+    id_card_front_url: Optional[str] = None
+    id_card_back_url: Optional[str] = None
+
+    business_license_url: Optional[str] = None
+    business_registration_cert_url: Optional[str] = None
+    food_safety_cert_url: Optional[str] = None
+
+    tax_code: Optional[str] = Field(None, max_length=50)
+    business_registration_number: Optional[str] = Field(None, max_length=50)
+
+    bank_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_account_name: Optional[str] = None
+
+
 # ==============================================================================
 # HELPERS
 # ==============================================================================
@@ -75,12 +105,83 @@ _FIELD_MAP: dict = {
 }
 
 
-def _apply_request_to_profile(profile: SellerProfile, data: SellerRegisterRequest) -> None:
+def _apply_request_to_profile(profile: SellerProfile, data: BaseModel) -> None:
     """Map các field từ request sang đúng column của SellerProfile model."""
     for key, value in data.model_dump(exclude_unset=True).items():
         model_key = _FIELD_MAP.get(key, key)
         if hasattr(profile, model_key):
             setattr(profile, model_key, value)
+
+
+def _enum_value(value):
+    if value is None:
+        return None
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def _profile_to_response_data(profile: SellerProfile, user: Optional[User] = None) -> dict:
+    return {
+        "id": profile.id,
+        "user_id": profile.user_id,
+        "user_name": user.name if user else None,
+        "user_email": user.email if user else None,
+        "business_name": profile.business_name,
+        "business_type": _enum_value(profile.business_type),
+        "description": profile.description,
+        "address": profile.address,
+        "shop_phone": profile.shop_phone,
+        "shop_email": profile.shop_email,
+        "phone": profile.shop_phone,
+        "email": profile.shop_email,
+        "id_card_number": profile.id_card_number,
+        "id_card_front_url": profile.id_card_front_url,
+        "id_card_back_url": profile.id_card_back_url,
+        "business_license_url": profile.business_license_url,
+        "business_registration_cert_url": profile.business_registration_cert_url,
+        "food_safety_cert_url": profile.food_safety_cert_url,
+        "tax_id": profile.tax_id,
+        "tax_code": profile.tax_id,
+        "business_registration_number": profile.business_registration_number,
+        "bank_name": profile.bank_name,
+        "bank_account_number": profile.bank_account_number,
+        "bank_account_name": profile.bank_account_name,
+        "verification_status": _enum_value(profile.verification_status),
+        "rejection_reason": profile.rejection_reason,
+        "verified_by": profile.verified_by,
+        "verified_at": profile.verified_at.isoformat() if profile.verified_at else None,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+        "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
+    }
+
+
+def _sync_verified_seller_role(db: Session, user_id: int) -> None:
+    """Ensure verified seller has seller role and no legacy customer-like role."""
+    candidate_roles = db.query(Role).filter(
+        sql_func.lower(Role.role_name).in_(["seller", "producer"])
+    ).all()
+    if not candidate_roles:
+        return
+
+    seller_role = next(
+        (role for role in candidate_roles if (role.role_name or "").strip().lower() == "seller"),
+        candidate_roles[0],
+    )
+
+    customer_links = db.query(UserRole).join(
+        Role, UserRole.role_id == Role.id
+    ).filter(
+        UserRole.user_id == user_id,
+        sql_func.lower(Role.role_name).in_(["customer", "consumer", "buyer"])
+    ).all()
+    for link in customer_links:
+        db.delete(link)
+
+    seller_link = db.query(UserRole.id).filter(
+        UserRole.user_id == user_id,
+        UserRole.role_id == seller_role.id,
+    ).first()
+    if seller_link is None:
+        db.add(UserRole(user_id=user_id, role_id=seller_role.id))
 
 
 # ==============================================================================
@@ -228,6 +329,7 @@ async def verify_seller(
             seller_type = (seller_user.type or "").strip().lower()
             if seller_type not in {"seller", "producer"}:
                 seller_user.type = "seller"
+            _sync_verified_seller_role(db, user_id)
     elif data.status == "REJECTED":
         profile.rejection_reason = data.rejection_reason
         if seller_user:
@@ -243,6 +345,56 @@ async def verify_seller(
             "status": data.status,
             "rejection_reason": data.rejection_reason if data.status == "REJECTED" else None
         }
+    }
+
+
+@router.get("/applications/{user_id}", summary="Admin xem chi tiết hồ sơ seller")
+async def get_seller_application_detail(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.type != "admin":
+        raise HTTPException(status_code=403, detail="Chỉ admin mới có quyền")
+
+    profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == user_id
+    ).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Hồ sơ seller không tồn tại")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    return {
+        "success": True,
+        "data": _profile_to_response_data(profile, user),
+    }
+
+
+@router.put("/applications/{user_id}", summary="Admin cập nhật hồ sơ seller")
+async def update_seller_application_detail(
+    user_id: int,
+    data: AdminUpdateSellerProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.type != "admin":
+        raise HTTPException(status_code=403, detail="Chỉ admin mới có quyền")
+
+    profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == user_id
+    ).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Hồ sơ seller không tồn tại")
+
+    _apply_request_to_profile(profile, data)
+    db.commit()
+    db.refresh(profile)
+
+    user = db.query(User).filter(User.id == user_id).first()
+    return {
+        "success": True,
+        "message": "Đã cập nhật hồ sơ seller",
+        "data": _profile_to_response_data(profile, user),
     }
 
 
@@ -273,20 +425,7 @@ async def get_seller_applications(
     data_list = []
     for p in items:
         user = db.query(User).filter(User.id == p.user_id).first()
-        data_list.append({
-            "id": p.id,
-            "user_id": p.user_id,
-            "user_name": user.name if user else None,
-            "user_email": user.email if user else None,
-            "business_name": p.business_name,
-            "business_type": p.business_type.value if hasattr(p.business_type, "value") else str(p.business_type),
-            "id_card_number": p.id_card_number,
-            "shop_phone": p.shop_phone,
-            "shop_email": p.shop_email,
-            "tax_id": p.tax_id,
-            "verification_status": p.verification_status.value if hasattr(p.verification_status, "value") else str(p.verification_status),
-            "created_at": p.created_at.isoformat() if p.created_at else None
-        })
+        data_list.append(_profile_to_response_data(p, user))
 
     return {
         "success": True,
