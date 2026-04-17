@@ -106,8 +106,10 @@ async def register_seller_profile(
             detail="Admin không thể đăng ký hồ sơ người bán"
         )
 
-    # Nâng quyền consumer → seller khi nộp hồ sơ
-    if current_user.type == "consumer":
+    # Nâng quyền user mua hàng -> seller khi nộp hồ sơ.
+    # Hỗ trợ dữ liệu cũ dùng type='customer'.
+    current_type = (current_user.type or "").strip().lower()
+    if current_type in {"", "consumer", "customer", "buyer"}:
         current_user.type = "seller"
 
     existing = db.query(SellerProfile).filter(
@@ -223,6 +225,9 @@ async def verify_seller(
         profile.rejection_reason = None
         if seller_user:
             seller_user.activated = 1
+            seller_type = (seller_user.type or "").strip().lower()
+            if seller_type not in {"seller", "producer"}:
+                seller_user.type = "seller"
     elif data.status == "REJECTED":
         profile.rejection_reason = data.rejection_reason
         if seller_user:

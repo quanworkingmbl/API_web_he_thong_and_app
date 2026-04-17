@@ -34,6 +34,7 @@ from app.models.promotion import Promotion, PromotionStatus
 from app.models.promotion_usage import PromotionUsage
 from app.models.complaint import Review
 from app.models.shipment import Shipment
+from app.models.seller_profile import SellerProfile, VerificationStatus
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.permissions import check_seller_kyc_verified
 from app.services.order_state import (
@@ -2495,6 +2496,15 @@ async def get_my_profile(
     db: Session = Depends(get_db)
 ):
     """Lấy thông tin profile — ENRICHED: addresses, order_stats"""
+    # Auto-heal dữ liệu cũ: user đã VERIFIED KYC nhưng type vẫn là customer/consumer.
+    current_type = (current_user.type or "").strip().lower()
+    if current_type not in {"seller", "producer"}:
+        seller_profile = db.query(SellerProfile).filter(SellerProfile.user_id == current_user.id).first()
+        if seller_profile and seller_profile.verification_status == VerificationStatus.VERIFIED:
+            current_user.type = "seller"
+            db.commit()
+            db.refresh(current_user)
+
     # Addresses
     addresses = db.query(Address).filter(
         Address.user_id == current_user.id
