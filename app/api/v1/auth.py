@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.models.user import User, UserRole, UserStatus
 from app.models.address import Address, Province, District, Ward
 from app.models.refresh_token import RefreshToken
+from app.models.seller_profile import SellerProfile
 from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
 import httpx
@@ -538,7 +539,7 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
 
     # Seller/producer accounts are allowed to continue onboarding flows
     # even while activated=0 (PENDING/REJECTED KYC).
-    allow_inactive_for_onboarding = user.type in ("producer", "seller")
+    allow_inactive_for_onboarding = _can_access_inactive_onboarding(user, db)
     if user.activated != 1 and not allow_inactive_for_onboarding:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -565,6 +566,24 @@ def get_current_user_allow_inactive(
     check_user_status(user)
 
     return user
+
+
+def _can_access_inactive_onboarding(user: User, db: Session) -> bool:
+    """Allow inactive access only for true seller onboarding accounts."""
+    normalized_type = (user.type or "").strip().lower()
+
+    if normalized_type in ("producer", "seller"):
+        return True
+
+    # Legacy data may still store buyer role as customer/consumer.
+    # Only allow inactive access if this user actually has a seller profile.
+    if normalized_type in ("consumer", "customer", "buyer", ""):
+        has_seller_profile = db.query(SellerProfile.id).filter(
+            SellerProfile.user_id == user.id
+        ).first()
+        return has_seller_profile is not None
+
+    return False
 
 def get_current_user_optional(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
@@ -683,7 +702,7 @@ async def login(login_data: LoginRequest, request: Request, db: Session = Depend
             detail="Incorrect email or password"
         )
     
-    allow_inactive_for_onboarding = user.type in ("producer", "seller")
+    allow_inactive_for_onboarding = _can_access_inactive_onboarding(user, db)
     if user.activated != 1 and not allow_inactive_for_onboarding:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -836,7 +855,7 @@ async def refresh_token(
             detail="User not found or has been deleted",
         )
 
-    allow_inactive_for_onboarding = user.type in ("producer", "seller")
+    allow_inactive_for_onboarding = _can_access_inactive_onboarding(user, db)
     if user.activated != 1 and not allow_inactive_for_onboarding:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
