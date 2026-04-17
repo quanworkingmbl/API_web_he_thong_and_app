@@ -535,8 +535,11 @@ def _get_user_from_token(token: str, db: Session) -> User:
 def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depends(get_db)):
     """Get current authenticated user from Bearer token in header"""
     user = _get_user_from_token(token, db)
-    
-    if user.activated != 1:
+
+    # Seller/producer accounts are allowed to continue onboarding flows
+    # even while activated=0 (PENDING/REJECTED KYC).
+    allow_inactive_for_onboarding = user.type in ("producer", "seller")
+    if user.activated != 1 and not allow_inactive_for_onboarding:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is not activated",
