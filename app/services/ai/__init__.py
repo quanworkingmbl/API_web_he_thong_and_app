@@ -1,3 +1,3 @@
 # AI Services Package
 # Provides AI-powered features: moderation, content generation, search embedding
-# Using AWS Bedrock (Claude Haiku, Claude Sonnet, Titan Embedding v2)
+# Using Google Vertex AI (Gemini 1.5 Flash + text-embedding-005)

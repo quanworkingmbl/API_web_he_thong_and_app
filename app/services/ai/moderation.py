@@ -1,6 +1,6 @@
 """
 AI Moderation Service
-Pipeline: Rule Engine → Haiku → (Escalate Sonnet nếu cần)
+Pipeline: Rule Engine -> Gemini Flash -> (Escalate premium model nếu cần)
 Dùng cho cả Product và Content moderation.
 """
 
@@ -13,7 +13,7 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.ai.bedrock_client import bedrock_client, BedrockClientError
+from app.services.ai.vertex_client import vertex_ai_client, VertexAIClientError
 from app.services.ai.rule_engine import RuleEngine
 from app.services.ai.cost_tracker import log_ai_cost, is_budget_exceeded
 from app.services.ai.prompts import (
@@ -26,11 +26,12 @@ from app.services.ai.prompts import (
 logger = logging.getLogger(__name__)
 
 
-def _is_bedrock_access_denied(error: Exception) -> bool:
+def _is_vertex_permission_denied(error: Exception) -> bool:
     message = str(error)
     return (
-        "AccessDeniedException" in message
-        or "not authorized to perform: bedrock:InvokeModel" in message
+        "PermissionDenied" in message
+        or "permission denied" in message.lower()
+        or getattr(error, "status_code", None) == 403
     )
 
 
@@ -40,7 +41,7 @@ class ModerationResult:
     confidence: float = 0.0
     reasons: List[str] = None
     flags: List[str] = None
-    source: str = ""                # "rule_engine" | "haiku" | "sonnet"
+    source: str = ""                # "rule_engine" | "flash" | "creative_model"
     model_used: str = ""
     escalated: bool = False
     processing_time_ms: int = 0
@@ -63,8 +64,8 @@ class ModerationService:
     """
     Kiểm duyệt product/content theo pipeline:
     1. Rule Engine (regex + blacklist) → REJECT ngay nếu vi phạm rõ
-    2. Haiku (temperature=0, max_tokens=120) → APPROVE/REVIEW/REJECT
-    3. Escalate Sonnet nếu: REVIEW + sản phẩm ưu tiên doanh thu
+    2. Gemini Flash (temperature=0, max_tokens=120) → APPROVE/REVIEW/REJECT
+    3. Escalate premium model nếu: REVIEW + sản phẩm ưu tiên doanh thu
     """
 
     @classmethod
@@ -104,22 +105,22 @@ class ModerationService:
             cls._save_log(db, result, product_id=product_id, rule_engine_result="REJECT")
             return result
 
-        # Step 2: Gọi Haiku
+        # Step 2: Gọi Gemini Flash
         try:
-            haiku_result = await cls._call_moderation_llm(
+            flash_result = await cls._call_moderation_llm(
                 name=name,
                 description=description,
                 category=category,
                 price=price,
                 label=label,
                 region=region,
-                model_id=settings.BEDROCK_MODERATION_MODEL_ID,
+                model_id=settings.VERTEX_MODERATION_MODEL_ID,
                 timeout=settings.AI_MODERATION_TIMEOUT,
             )
-        except BedrockClientError as e:
+        except VertexAIClientError as e:
             logger.error("Moderation LLM failed: %s", e)
-            if _is_bedrock_access_denied(e):
-                # Bubble up IAM/model permission errors so API can return 503 clearly.
+            if _is_vertex_permission_denied(e):
+                # Bubble up permission errors so API can return 503 clearly.
                 raise
             # Fallback: REVIEW (an toàn)
             result = ModerationResult(
@@ -135,50 +136,50 @@ class ModerationService:
 
         # Kết hợp flags từ rule engine
         if rule_result.decision == "FLAG":
-            haiku_result.flags.extend(rule_result.reasons)
+            flash_result.flags.extend(rule_result.reasons)
 
-        # Step 3: Escalate to Sonnet nếu cần
-        if haiku_result.decision == "REVIEW" and is_high_value:
+        # Step 3: Escalate to creative model nếu cần
+        if flash_result.decision == "REVIEW" and is_high_value:
             if not is_budget_exceeded(db):
                 try:
-                    sonnet_result = await cls._call_moderation_llm(
+                    creative_result = await cls._call_moderation_llm(
                         name=name,
                         description=description,
                         category=category,
                         price=price,
                         label=label,
                         region=region,
-                        model_id=settings.BEDROCK_CREATIVE_MODEL_ID,
-                        timeout=settings.AI_MODERATION_TIMEOUT + 4,  # Sonnet cần thêm thời gian
+                        model_id=settings.VERTEX_CREATIVE_MODEL_ID,
+                        timeout=settings.AI_MODERATION_TIMEOUT + 4,
                     )
-                    sonnet_result.escalated = True
-                    sonnet_result.source = "sonnet"
-                    sonnet_result.processing_time_ms = int((time.monotonic() - start_time) * 1000)
+                    creative_result.escalated = True
+                    creative_result.source = "creative_model"
+                    creative_result.processing_time_ms = int((time.monotonic() - start_time) * 1000)
 
-                    # Log cost cho Sonnet
+                    # Log cost cho creative model
                     log_ai_cost(
-                        db, settings.BEDROCK_CREATIVE_MODEL_ID, "moderation",
-                        sonnet_result.input_tokens, sonnet_result.output_tokens,
-                        sonnet_result.estimated_cost_usd,
+                        db, settings.VERTEX_CREATIVE_MODEL_ID, "moderation",
+                        creative_result.input_tokens, creative_result.output_tokens,
+                        creative_result.estimated_cost_usd,
                     )
 
-                    cls._save_log(db, sonnet_result, product_id=product_id, rule_engine_result=rule_result.decision)
-                    return sonnet_result
+                    cls._save_log(db, creative_result, product_id=product_id, rule_engine_result=rule_result.decision)
+                    return creative_result
 
-                except BedrockClientError:
-                    logger.warning("Sonnet escalation failed, keeping Haiku result")
+                except VertexAIClientError:
+                    logger.warning("Creative escalation failed, keeping flash result")
 
-        haiku_result.processing_time_ms = int((time.monotonic() - start_time) * 1000)
+        flash_result.processing_time_ms = int((time.monotonic() - start_time) * 1000)
 
-        # Log cost cho Haiku
+        # Log cost cho flash model
         log_ai_cost(
-            db, settings.BEDROCK_MODERATION_MODEL_ID, "moderation",
-            haiku_result.input_tokens, haiku_result.output_tokens,
-            haiku_result.estimated_cost_usd,
+            db, settings.VERTEX_MODERATION_MODEL_ID, "moderation",
+            flash_result.input_tokens, flash_result.output_tokens,
+            flash_result.estimated_cost_usd,
         )
 
-        cls._save_log(db, haiku_result, product_id=product_id, rule_engine_result=rule_result.decision)
-        return haiku_result
+        cls._save_log(db, flash_result, product_id=product_id, rule_engine_result=rule_result.decision)
+        return flash_result
 
     @classmethod
     async def moderate_content(
@@ -210,7 +211,7 @@ class ModerationService:
             cls._save_log(db, result, content_id=content_id, rule_engine_result="REJECT")
             return result
 
-        # Step 2: Gọi Haiku
+        # Step 2: Gọi Gemini Flash
         try:
             prompt = CONTENT_MODERATION_USER_TEMPLATE.format(
                 title=title[:500],
@@ -218,10 +219,10 @@ class ModerationService:
                 content=content_text[:2000],
             )
 
-            response = await bedrock_client.invoke_claude(
+            response = await vertex_ai_client.invoke_gemini(
                 prompt=prompt,
                 system_prompt=CONTENT_MODERATION_SYSTEM_PROMPT,
-                model_id=settings.BEDROCK_MODERATION_MODEL_ID,
+                model_id=settings.VERTEX_MODERATION_MODEL_ID,
                 max_tokens=120,
                 temperature=0,
                 timeout=settings.AI_MODERATION_TIMEOUT,
@@ -235,16 +236,16 @@ class ModerationService:
             result.processing_time_ms = int((time.monotonic() - start_time) * 1000)
 
             log_ai_cost(
-                db, settings.BEDROCK_MODERATION_MODEL_ID, "moderation",
+                db, settings.VERTEX_MODERATION_MODEL_ID, "moderation",
                 result.input_tokens, result.output_tokens, result.estimated_cost_usd,
             )
 
             cls._save_log(db, result, content_id=content_id, rule_engine_result=rule_result.decision)
             return result
 
-        except BedrockClientError as e:
-            if _is_bedrock_access_denied(e):
-                # Bubble up IAM/model permission errors so API can return 503 clearly.
+        except VertexAIClientError as e:
+            if _is_vertex_permission_denied(e):
+                # Bubble up permission errors so API can return 503 clearly.
                 raise
             result = ModerationResult(
                 decision="REVIEW",
@@ -273,7 +274,7 @@ class ModerationService:
         model_id: str,
         timeout: int,
     ) -> ModerationResult:
-        """Gọi Claude để kiểm duyệt sản phẩm."""
+        """Gọi Gemini để kiểm duyệt sản phẩm."""
         prompt = MODERATION_USER_TEMPLATE.format(
             name=name[:300],
             description=description[:2000],
@@ -283,7 +284,7 @@ class ModerationService:
             region=region or "Không rõ",
         )
 
-        response = await bedrock_client.invoke_claude(
+        response = await vertex_ai_client.invoke_gemini(
             prompt=prompt,
             system_prompt=MODERATION_SYSTEM_PROMPT,
             model_id=model_id,
@@ -296,12 +297,12 @@ class ModerationService:
 
     @classmethod
     def _parse_moderation_response(cls, response: dict) -> ModerationResult:
-        """Parse JSON response từ Claude. Fallback REVIEW nếu parse fail."""
+        """Parse JSON response từ model. Fallback REVIEW nếu parse fail."""
         content = response.get("content", "")
         raw = content
 
         try:
-            # Claude đôi khi wrap JSON trong markdown block
+            # Model đôi khi wrap JSON trong markdown block
             if "```" in content:
                 content = content.split("```")[1]
                 if content.startswith("json"):
@@ -318,7 +319,7 @@ class ModerationService:
                 confidence=float(parsed.get("confidence", 0.5)),
                 reasons=parsed.get("reasons", []),
                 flags=parsed.get("flags", []),
-                source="haiku" if "haiku" in response.get("model_id", "").lower() else "sonnet",
+                source="flash" if "flash" in response.get("model_id", "").lower() else "creative_model",
                 model_used=response.get("model_id", ""),
                 input_tokens=response.get("input_tokens", 0),
                 output_tokens=response.get("output_tokens", 0),

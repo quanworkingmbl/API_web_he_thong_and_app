@@ -1,6 +1,6 @@
 """
 AI Search Embedding Service
-- Tạo embedding cho sản phẩm dùng Titan v2
+- Tạo embedding cho sản phẩm dùng Vertex text embedding
 - Vector search (cosine similarity) + Lexical hybrid
 - Normalize text tiếng Việt
 """
@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.ai.bedrock_client import bedrock_client, BedrockClientError
+from app.services.ai.vertex_client import vertex_ai_client, VertexAIClientError
 from app.services.ai.cost_tracker import log_ai_cost
 from app.services.ai.cache import generate_cache_key, get_cached_response, set_cached_response
 
@@ -62,7 +62,7 @@ def normalize_text(input_text: str) -> str:
 # ==============================================================================
 
 class SearchEmbeddingService:
-    """Tìm kiếm ngữ nghĩa sản phẩm bằng Titan Embedding v2."""
+    """Tìm kiếm ngữ nghĩa sản phẩm bằng Vertex text embedding."""
 
     @classmethod
     async def create_embedding(cls, text: str, db: Optional[Session] = None) -> List[float]:
@@ -71,11 +71,11 @@ class SearchEmbeddingService:
         if not normalized:
             return []
 
-        # Limit input (Titan v2 max 8K tokens)
+        # Limit input length to keep request efficient
         normalized = normalized[:3000]
 
         try:
-            response = await bedrock_client.invoke_titan_embedding(
+            response = await vertex_ai_client.invoke_embedding(
                 text=normalized,
                 timeout=settings.AI_EMBEDDING_TIMEOUT,
             )
@@ -85,14 +85,14 @@ class SearchEmbeddingService:
             # Log cost
             if db:
                 log_ai_cost(
-                    db, settings.BEDROCK_EMBEDDING_MODEL_ID, "embedding",
+                    db, settings.VERTEX_EMBEDDING_MODEL_ID, "embedding",
                     response.get("input_tokens", 0), 0,
                     response.get("estimated_cost_usd", 0.0),
                 )
 
             return embedding
 
-        except BedrockClientError as e:
+        except VertexAIClientError as e:
             logger.error("Embedding creation failed: %s", e)
             raise
 
@@ -133,7 +133,7 @@ class SearchEmbeddingService:
             embedding = await cls.create_embedding(normalized, db)
             if not embedding:
                 return False
-        except BedrockClientError:
+        except VertexAIClientError:
             return False
 
         # Save to DB (upsert)
@@ -147,14 +147,14 @@ class SearchEmbeddingService:
             existing.embedding_text = normalized[:5000]
             existing.embedding_vector = embedding_json
             existing.vector_dimension = len(embedding)
-            existing.model_version = settings.BEDROCK_EMBEDDING_MODEL_ID
+            existing.model_version = settings.VERTEX_EMBEDDING_MODEL_ID
         else:
             entry = ProductEmbedding(
                 product_id=product_id,
                 embedding_text=normalized[:5000],
                 embedding_vector=embedding_json,
                 vector_dimension=len(embedding),
-                model_version=settings.BEDROCK_EMBEDDING_MODEL_ID,
+                model_version=settings.VERTEX_EMBEDDING_MODEL_ID,
             )
             db.add(entry)
 
@@ -215,7 +215,7 @@ class SearchEmbeddingService:
                         "source": "vector",
                     })
 
-        except BedrockClientError:
+        except VertexAIClientError:
             logger.warning("Vector search failed, falling back to lexical only")
 
         # --- Lexical Search (fallback/supplement) ---

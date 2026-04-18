@@ -15,9 +15,9 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.ai.bedrock_client import bedrock_client, BedrockClientError
+from app.services.ai.vertex_client import vertex_ai_client, VertexAIClientError
 from app.services.ai.cache import generate_cache_key, get_cached_response, set_cached_response
-from app.services.ai.cost_tracker import log_ai_cost, should_use_sonnet, is_budget_exceeded
+from app.services.ai.cost_tracker import log_ai_cost, should_use_premium_model, is_budget_exceeded
 from app.services.ai.prompts import (
     DESCRIPTION_SYSTEM_PROMPT,
     DESCRIPTION_USER_TEMPLATE,
@@ -30,11 +30,12 @@ from app.services.ai.prompts import (
 logger = logging.getLogger(__name__)
 
 
-def _is_bedrock_access_denied(error: Exception) -> bool:
+def _is_vertex_permission_denied(error: Exception) -> bool:
     message = str(error)
     return (
-        "AccessDeniedException" in message
-        or "not authorized to perform: bedrock:InvokeModel" in message
+        "PermissionDenied" in message
+        or "permission denied" in message.lower()
+        or getattr(error, "status_code", None) == 403
     )
 
 
@@ -118,19 +119,19 @@ class ContentGenerator:
             }
 
         # 4. Choose model
-        if use_sonnet and should_use_sonnet(db):
-            model_id = settings.BEDROCK_CREATIVE_MODEL_ID
+        if use_sonnet and should_use_premium_model(db):
+            model_id = settings.VERTEX_CREATIVE_MODEL_ID
         else:
-            model_id = settings.BEDROCK_MODERATION_MODEL_ID  # Haiku cho default
+            model_id = settings.VERTEX_MODERATION_MODEL_ID  # Flash cho default
 
         # 5. Check budget
         if is_budget_exceeded(db):
-            model_id = settings.BEDROCK_MODERATION_MODEL_ID  # Force Haiku
+            model_id = settings.VERTEX_MODERATION_MODEL_ID
 
         # 6. Generate
         start_time = time.monotonic()
         try:
-            response = await bedrock_client.invoke_claude(
+            response = await vertex_ai_client.invoke_gemini(
                 prompt=user_prompt,
                 system_prompt=DESCRIPTION_SYSTEM_PROMPT,
                 model_id=model_id,
@@ -138,15 +139,15 @@ class ContentGenerator:
                 temperature=0.4,
                 timeout=settings.AI_DESCRIPTION_TIMEOUT,
             )
-        except BedrockClientError as e:
-            fallback_model = settings.BEDROCK_MODERATION_MODEL_ID
-            if model_id != fallback_model and _is_bedrock_access_denied(e):
+        except VertexAIClientError as e:
+            fallback_model = settings.VERTEX_MODERATION_MODEL_ID
+            if model_id != fallback_model and _is_vertex_permission_denied(e):
                 logger.warning(
                     "Description generation denied for model=%s; fallback to model=%s",
                     model_id,
                     fallback_model,
                 )
-                response = await bedrock_client.invoke_claude(
+                response = await vertex_ai_client.invoke_gemini(
                     prompt=user_prompt,
                     system_prompt=DESCRIPTION_SYSTEM_PROMPT,
                     model_id=fallback_model,
@@ -229,19 +230,19 @@ class ContentGenerator:
                 "latency_ms": 0,
             }
 
-        # Choose model — Blog nên dùng Sonnet cho chất lượng
-        if use_sonnet and should_use_sonnet(db):
-            model_id = settings.BEDROCK_CREATIVE_MODEL_ID
+        # Choose model - premium model can be enabled for better quality
+        if use_sonnet and should_use_premium_model(db):
+            model_id = settings.VERTEX_CREATIVE_MODEL_ID
         else:
-            model_id = settings.BEDROCK_MODERATION_MODEL_ID
+            model_id = settings.VERTEX_MODERATION_MODEL_ID
 
         if is_budget_exceeded(db):
-            model_id = settings.BEDROCK_MODERATION_MODEL_ID
+            model_id = settings.VERTEX_MODERATION_MODEL_ID
 
         # Generate
         start_time = time.monotonic()
         try:
-            response = await bedrock_client.invoke_claude(
+            response = await vertex_ai_client.invoke_gemini(
                 prompt=user_prompt,
                 system_prompt=BLOG_SYSTEM_PROMPT,
                 model_id=model_id,
@@ -249,15 +250,15 @@ class ContentGenerator:
                 temperature=0.6,
                 timeout=settings.AI_BLOG_TIMEOUT,
             )
-        except BedrockClientError as e:
-            fallback_model = settings.BEDROCK_MODERATION_MODEL_ID
-            if model_id != fallback_model and _is_bedrock_access_denied(e):
+        except VertexAIClientError as e:
+            fallback_model = settings.VERTEX_MODERATION_MODEL_ID
+            if model_id != fallback_model and _is_vertex_permission_denied(e):
                 logger.warning(
                     "Blog generation denied for model=%s; fallback to model=%s",
                     model_id,
                     fallback_model,
                 )
-                response = await bedrock_client.invoke_claude(
+                response = await vertex_ai_client.invoke_gemini(
                     prompt=user_prompt,
                     system_prompt=BLOG_SYSTEM_PROMPT,
                     model_id=fallback_model,
@@ -308,7 +309,7 @@ class ContentGenerator:
     ) -> dict:
         """
         Sinh SEO metadata (title, description, keywords).
-        Luôn dùng Haiku (đơn giản, rẻ).
+        Luôn dùng model moderation (nhanh, rẻ).
         """
         user_prompt = SEO_META_USER_TEMPLATE.format(
             name=name[:200],
@@ -328,15 +329,15 @@ class ContentGenerator:
 
         start_time = time.monotonic()
         try:
-            response = await bedrock_client.invoke_claude(
+            response = await vertex_ai_client.invoke_gemini(
                 prompt=user_prompt,
                 system_prompt=SEO_META_SYSTEM_PROMPT,
-                model_id=settings.BEDROCK_MODERATION_MODEL_ID,  # Luôn Haiku
+                model_id=settings.VERTEX_MODERATION_MODEL_ID,
                 max_tokens=200,
                 temperature=0.2,
                 timeout=settings.AI_MODERATION_TIMEOUT,
             )
-        except BedrockClientError as e:
+        except VertexAIClientError as e:
             logger.error("SEO meta generation failed: %s", e)
             raise
 

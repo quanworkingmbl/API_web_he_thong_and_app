@@ -88,7 +88,7 @@ BANNED_CATEGORY_IDS: List[int] = []
 # ==============================================================================
 
 class RuleEngine:
-    """Pre-LLM rule engine để lọc nhanh trước khi gọi Bedrock."""
+    """Pre-LLM rule engine để lọc nhanh trước khi gọi AI model."""
 
     @classmethod
     def check_product(

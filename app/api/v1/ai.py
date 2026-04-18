@@ -15,18 +15,20 @@ from datetime import date, datetime, timedelta
 from pydantic import BaseModel, Field, ConfigDict
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.api.v1.auth import get_current_user
 from app.models.user import User
-from app.services.ai.bedrock_client import BedrockClientError
+from app.services.ai.vertex_client import VertexAIClientError
 
 router = APIRouter()
 
 
-def _is_bedrock_access_denied(error: Exception) -> bool:
+def _is_vertex_permission_denied(error: Exception) -> bool:
     message = str(error)
     return (
-        "AccessDeniedException" in message
-        or "not authorized to perform: bedrock:InvokeModel" in message
+        "PermissionDenied" in message
+        or "permission denied" in message.lower()
+        or getattr(error, "status_code", None) == 403
     )
 
 
@@ -60,7 +62,7 @@ class GenerateDescriptionRequest(AIBaseSchema):
     process: str = ""
     certificates: str = ""
     highlights: str = ""
-    use_sonnet: bool = Field(False, description="Dùng Sonnet thay vì Haiku (chất lượng cao, chi phí cao hơn)")
+    use_sonnet: bool = Field(False, description="Bật model sáng tạo (chất lượng cao hơn, chi phí cao hơn)")
 
 
 class GenerateBlogRequest(AIBaseSchema):
@@ -114,7 +116,7 @@ async def moderate_product(
 ):
     """
     Kiểm duyệt sản phẩm bằng AI.
-    Pipeline: Rule Engine → Haiku → (Sonnet escalation nếu cần)
+    Pipeline: Rule Engine -> Gemini Flash -> (creative model escalation nếu cần)
     Quyền: admin, content_manager
     """
     if current_user.type not in ("admin", "content_manager"):
@@ -146,11 +148,11 @@ async def moderate_product(
             label=product.label or "",
             is_high_value=is_high_value,
         )
-    except BedrockClientError as e:
-        if _is_bedrock_access_denied(e):
+    except VertexAIClientError as e:
+        if _is_vertex_permission_denied(e):
             raise HTTPException(
                 status_code=503,
-                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+                detail="AI service chưa được cấp quyền Vertex AI cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
             )
         raise HTTPException(status_code=502, detail=f"AI moderation service error: {str(e)}")
     except Exception as e:
@@ -199,11 +201,11 @@ async def moderate_content(
             content_text=content.content or "",
             content_type=content.content_type or "",
         )
-    except BedrockClientError as e:
-        if _is_bedrock_access_denied(e):
+    except VertexAIClientError as e:
+        if _is_vertex_permission_denied(e):
             raise HTTPException(
                 status_code=503,
-                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+                detail="AI service chưa được cấp quyền Vertex AI cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
             )
         raise HTTPException(status_code=502, detail=f"AI moderation service error: {str(e)}")
     except Exception as e:
@@ -280,11 +282,11 @@ async def generate_product_description(
             highlights=req.highlights or "",
             use_sonnet=req.use_sonnet,
         )
-    except BedrockClientError as e:
-        if _is_bedrock_access_denied(e):
+    except VertexAIClientError as e:
+        if _is_vertex_permission_denied(e):
             raise HTTPException(
                 status_code=503,
-                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+                detail="AI service chưa được cấp quyền Vertex AI cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
             )
         raise HTTPException(status_code=502, detail=f"AI generation service error: {str(e)}")
     except ValueError as e:
@@ -333,11 +335,11 @@ async def generate_description_freeform(
             highlights=request_data.highlights,
             use_sonnet=request_data.use_sonnet,
         )
-    except BedrockClientError as e:
-        if _is_bedrock_access_denied(e):
+    except VertexAIClientError as e:
+        if _is_vertex_permission_denied(e):
             raise HTTPException(
                 status_code=503,
-                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+                detail="AI service chưa được cấp quyền Vertex AI cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
             )
         raise HTTPException(status_code=502, detail=f"AI generation service error: {str(e)}")
     except ValueError as e:
@@ -380,11 +382,11 @@ async def generate_blog(
             notes=request_data.notes,
             use_sonnet=request_data.use_sonnet,
         )
-    except BedrockClientError as e:
-        if _is_bedrock_access_denied(e):
+    except VertexAIClientError as e:
+        if _is_vertex_permission_denied(e):
             raise HTTPException(
                 status_code=503,
-                detail="AI service chưa được cấp quyền Bedrock cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
+                detail="AI service chưa được cấp quyền Vertex AI cho model hiện tại. Vui lòng liên hệ admin hệ thống.",
             )
         raise HTTPException(status_code=502, detail=f"AI blog generation service error: {str(e)}")
     except ValueError as e:

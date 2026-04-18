@@ -48,10 +48,13 @@ class Settings(BaseSettings):
     GHN_SHOP_ID: str = ""
     GHN_URL: str = "https://dev-online-gateway.ghn.vn/shiip/public-api"
 
-    # --- AWS Bedrock AI ---
-    BEDROCK_MODERATION_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
-    BEDROCK_CREATIVE_MODEL_ID: str = "anthropic.claude-3-sonnet-20240229-v1:0"
-    BEDROCK_EMBEDDING_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
+    # --- Google Vertex AI (Gemini) ---
+    VERTEX_PROJECT_ID: str = ""
+    VERTEX_LOCATION: str = "us-central1"
+    VERTEX_MODERATION_MODEL_ID: str = "gemini-1.5-flash"
+    VERTEX_CREATIVE_MODEL_ID: str = "gemini-1.5-flash"
+    VERTEX_EMBEDDING_MODEL_ID: str = "text-embedding-005"
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
 
     # AI Operation Settings
     AI_MODERATION_TIMEOUT: int = 6          # seconds

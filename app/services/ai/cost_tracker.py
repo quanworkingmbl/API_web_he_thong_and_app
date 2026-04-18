@@ -89,10 +89,10 @@ def is_budget_exceeded(db: Session) -> bool:
     return exceeded
 
 
-def should_use_sonnet(db: Session, force: bool = False) -> bool:
+def should_use_premium_model(db: Session, force: bool = False) -> bool:
     """
-    Quyết định có dùng Sonnet (đắt) hay Haiku (rẻ).
-    Nếu budget vượt 80% → tự hạ xuống Haiku.
+    Decide whether to use the premium generation model.
+    If budget exceeds 80%, downgrade to the default model.
     """
     if force:
         return True
@@ -102,12 +102,17 @@ def should_use_sonnet(db: Session, force: bool = False) -> bool:
 
     if budget_ratio >= 0.8:
         logger.info(
-            "Budget at %.0f%% — downgrading to Haiku (cost=$%.4f)",
+            "Budget at %.0f%% - downgrading to default model (cost=$%.4f)",
             budget_ratio * 100, daily_cost,
         )
         return False
 
     return True
+
+
+def should_use_sonnet(db: Session, force: bool = False) -> bool:
+    """Backward-compatible alias for old call sites."""
+    return should_use_premium_model(db, force=force)
 
 
 def get_cost_report(db: Session, date_from: date, date_to: date) -> dict:
