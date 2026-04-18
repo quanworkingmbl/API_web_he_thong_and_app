@@ -29,7 +29,7 @@ wheels/
 # .env.*.local
 
 # Google Cloud service account keys
-# project-f3e21dd2-0270-45f3-91c-392a0d4991a3.json
+project-f3e21dd2-0270-45f3-91c-392a0d4991a3.json
 *service-account*.json
 # IDE
 .vscode/
