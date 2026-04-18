@@ -30,14 +30,14 @@ class AIModerationLog(Base):
     rule_engine_flags = Column(Text, nullable=True)             # JSON array
 
     # AI result
-    model_used = Column(String(100), nullable=False)            # haiku / sonnet
+    model_used = Column(String(100), nullable=False)            # flash / creative model
     ai_decision = Column(String(20), nullable=False)           # APPROVE / REVIEW / REJECT
     ai_confidence = Column(Float, nullable=True)               # 0.0 - 1.0
     ai_reasons = Column(Text, nullable=True)                   # JSON array
     ai_flags = Column(Text, nullable=True)                     # JSON array
 
     # Escalation
-    escalated = Column(Boolean, default=False)                 # Có escalate Sonnet không
+    escalated = Column(Boolean, default=False)                 # Có escalate model cao hơn không
     escalation_reason = Column(String(200), nullable=True)
 
     # Performance
@@ -101,7 +101,7 @@ class ProductEmbedding(Base):
     embedding_vector = Column(Text, nullable=True)              # JSON array of floats
     vector_dimension = Column(Integer, nullable=True)           # Số chiều vector
 
-    model_version = Column(String(100), nullable=True)          # titan-embed-text-v2
+    model_version = Column(String(100), nullable=True)          # text-embedding-005
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
