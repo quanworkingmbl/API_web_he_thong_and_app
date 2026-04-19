@@ -1,5 +1,6 @@
 """
-Vertex AI Client Wrapper
+Vertex AI Client Wrapper (google-genai SDK >= 1.66.0)
+- Uses google.genai.Client with vertexai=True instead of deprecated vertexai SDK
 - Retry logic with exponential backoff + jitter
 - Timeout per operation type
 - Cost estimation per request
@@ -8,7 +9,6 @@ Vertex AI Client Wrapper
 
 import asyncio
 import logging
-import os
 import random
 import time
 from pathlib import Path
@@ -19,25 +19,28 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 try:
-    import vertexai
+    from google import genai
+    from google.genai import types as genai_types
+    from google.oauth2 import service_account as google_sa
     from google.api_core import exceptions as google_exceptions
     from google.auth.exceptions import GoogleAuthError
-    from vertexai.generative_models import GenerationConfig, GenerativeModel
-    from vertexai.language_models import TextEmbeddingModel
 
     VERTEX_IMPORT_ERROR = None
-except Exception as import_error:  # pragma: no cover - handled at runtime
-    vertexai = None
+except Exception as import_error:  # pragma: no cover
+    genai = None
+    genai_types = None
+    google_sa = None
     google_exceptions = None
     GoogleAuthError = Exception
-    GenerationConfig = None
-    GenerativeModel = None
-    TextEmbeddingModel = None
     VERTEX_IMPORT_ERROR = import_error
 
 
 # Approximate public pricing (USD per 1K tokens). Update when pricing changes.
 MODEL_COSTS = {
+    "gemini-2.5-flash": {"input": 0.000075, "output": 0.00030},
+    "gemini-2.5-pro": {"input": 0.00125, "output": 0.00500},
+    "gemini-2.0-flash": {"input": 0.000075, "output": 0.00030},
+    "gemini-2.0-flash-001": {"input": 0.000075, "output": 0.00030},
     "gemini-1.5-flash": {"input": 0.000075, "output": 0.00030},
     "gemini-1.5-flash-001": {"input": 0.000075, "output": 0.00030},
     "gemini-1.5-flash-002": {"input": 0.000075, "output": 0.00030},
@@ -58,7 +61,7 @@ class VertexAIClientError(Exception):
 
 
 class VertexAIClient:
-    """Singleton-style Vertex AI client with retry, timeout, and cost tracking."""
+    """Singleton Vertex AI client using google-genai SDK with retry, timeout, and cost tracking."""
 
     _instance: Optional["VertexAIClient"] = None
 
@@ -74,9 +77,7 @@ class VertexAIClient:
         self._initialized = True
         self._available = False
         self._init_error = ""
-        self._generative_models: dict[str, Any] = {}
-        self._embedding_model: Optional[Any] = None
-        self._embedding_model_id: str = ""
+        self._client: Optional[Any] = None
 
         try:
             self._initialize_vertex()
@@ -101,12 +102,9 @@ class VertexAIClient:
         project_id = (settings.VERTEX_PROJECT_ID or "").strip()
         location = (settings.VERTEX_LOCATION or "us-central1").strip() or "us-central1"
 
-        # The current vertexai SDK does not accept "global" as a location.
-        # Keep service available by falling back to a stable default region.
         if location.lower() == "global":
             logger.warning(
-                "VERTEX_LOCATION=global is not supported by vertexai SDK; "
-                "falling back to us-central1"
+                "VERTEX_LOCATION=global is not supported; falling back to us-central1"
             )
             location = "us-central1"
 
@@ -117,6 +115,8 @@ class VertexAIClient:
                 status_code=503,
             )
 
+        # Load service account credentials if path provided
+        credentials = None
         credentials_path = (settings.GOOGLE_APPLICATION_CREDENTIALS or "").strip()
         if credentials_path:
             resolved = Path(credentials_path).expanduser()
@@ -130,23 +130,36 @@ class VertexAIClient:
                     status_code=503,
                 )
 
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(resolved)
-
-        try:
-            vertexai.init(project=project_id, location=location)
-        except Exception as exc:
-            message = str(exc)
-            if "Unsupported region" in message:
-                configured_location = settings.VERTEX_LOCATION or location
+            try:
+                credentials = google_sa.Credentials.from_service_account_file(
+                    str(resolved),
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                )
+            except Exception as exc:
                 raise VertexAIClientError(
-                    "Unsupported VERTEX_LOCATION='"
-                    f"{configured_location}'. Set a supported region such as "
-                    "'us-central1'. Original error: "
-                    f"{message}",
+                    f"Failed to load service account: {exc}",
                     retryable=False,
                     status_code=503,
                 ) from exc
-            raise
+
+        # Build google-genai client with Vertex AI backend
+        try:
+            client_kwargs: dict = {
+                "vertexai": True,
+                "project": project_id,
+                "location": location,
+            }
+            if credentials is not None:
+                client_kwargs["credentials"] = credentials
+
+            self._client = genai.Client(**client_kwargs)
+        except Exception as exc:
+            raise VertexAIClientError(
+                f"Failed to create Vertex AI client: {exc}",
+                retryable=False,
+                status_code=503,
+            ) from exc
+
         logger.info(
             "VertexAIClient initialized successfully (project=%s, location=%s)",
             project_id,
@@ -160,17 +173,6 @@ class VertexAIClient:
                 message = f"{message}: {self._init_error}"
             raise VertexAIClientError(message, retryable=False, status_code=503)
 
-    def _get_generative_model(self, model_id: str) -> Any:
-        if model_id not in self._generative_models:
-            self._generative_models[model_id] = GenerativeModel(model_id)
-        return self._generative_models[model_id]
-
-    def _get_embedding_model(self, model_id: str) -> Any:
-        if self._embedding_model is None or self._embedding_model_id != model_id:
-            self._embedding_model = TextEmbeddingModel.from_pretrained(model_id)
-            self._embedding_model_id = model_id
-        return self._embedding_model
-
     async def invoke_gemini(
         self,
         prompt: str,
@@ -181,31 +183,42 @@ class VertexAIClient:
         timeout: int = 10,
     ) -> dict:
         """
-        Invoke Gemini model via Vertex AI.
+        Invoke Gemini model via Vertex AI (google-genai SDK).
         Returns: content, input_tokens, output_tokens, model_id, latency_ms, estimated_cost_usd
         """
         self._ensure_available()
 
         model = model_id or settings.VERTEX_MODERATION_MODEL_ID
-        request_text = prompt.strip()
-        if system_prompt:
-            request_text = f"SYSTEM INSTRUCTION:\n{system_prompt}\n\nUSER REQUEST:\n{prompt}"
+        contents = prompt.strip()
 
         def _invoke() -> dict:
-            model_client = self._get_generative_model(model)
-            response = model_client.generate_content(
-                request_text,
-                generation_config=GenerationConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                ),
+            config_kwargs: dict = {
+                "temperature": temperature,
+                "max_output_tokens": max_tokens,
+            }
+            if system_prompt:
+                config_kwargs["system_instruction"] = system_prompt
+
+            config = genai_types.GenerateContentConfig(**config_kwargs)
+
+            response = self._client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
             )
-            content = self._extract_generated_text(response)
-            input_tokens, output_tokens = self._extract_generation_usage(
-                response=response,
-                request_text=request_text,
-                output_text=content,
-            )
+
+            content = self._extract_text(response)
+
+            # Extract token usage from response metadata
+            usage = getattr(response, "usage_metadata", None)
+            input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
+            output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+
+            if input_tokens <= 0:
+                input_tokens = self._estimate_tokens(contents + (system_prompt or ""))
+            if output_tokens == 0 and content:
+                output_tokens = self._estimate_tokens(content)
+
             return {
                 "content": content,
                 "input_tokens": input_tokens,
@@ -233,7 +246,7 @@ class VertexAIClient:
         model_id: Optional[str] = None,
     ) -> dict:
         """
-        Invoke Vertex text embedding model.
+        Invoke Vertex text embedding model via google-genai SDK.
         Returns: embedding, input_tokens, output_tokens, model_id, latency_ms, estimated_cost_usd
         """
         self._ensure_available()
@@ -242,8 +255,12 @@ class VertexAIClient:
         normalized_text = (text or "")[:8000]
 
         def _invoke() -> dict:
-            embedding_model = self._get_embedding_model(model)
-            embeddings = embedding_model.get_embeddings([normalized_text])
+            response = self._client.models.embed_content(
+                model=model,
+                contents=normalized_text,
+            )
+
+            embeddings = getattr(response, "embeddings", None) or []
             if not embeddings:
                 return {
                     "embedding": [],
@@ -252,12 +269,8 @@ class VertexAIClient:
                     "model_id": model,
                 }
 
-            item = embeddings[0]
-            vector = list(getattr(item, "values", []) or [])
-
-            input_tokens = self._extract_embedding_tokens(item)
-            if input_tokens <= 0:
-                input_tokens = self._estimate_tokens(normalized_text)
+            vector = list(getattr(embeddings[0], "values", []) or [])
+            input_tokens = self._estimate_tokens(normalized_text)
 
             return {
                 "embedding": vector,
@@ -279,7 +292,7 @@ class VertexAIClient:
         )
         return result
 
-    # Compatibility aliases for old Bedrock call sites.
+    # Compatibility aliases for old call sites
     async def invoke_claude(
         self,
         prompt: str,
@@ -388,74 +401,44 @@ class VertexAIClient:
         return VertexAIClientError(message, retryable=False, status_code=500)
 
     @staticmethod
-    def _extract_generated_text(response: Any) -> str:
+    def _extract_text(response: Any) -> str:
+        """Extract text from google-genai response object."""
+        # Primary: use .text property
         text = getattr(response, "text", None)
         if text:
             return text.strip()
 
+        # Fallback: iterate candidates → content → parts
         parts: list[str] = []
         candidates = getattr(response, "candidates", None) or []
         for candidate in candidates:
             content = getattr(candidate, "content", None)
             if content is None:
                 continue
-            candidate_parts = getattr(content, "parts", None) or []
-            for part in candidate_parts:
+            for part in getattr(content, "parts", None) or []:
                 part_text = getattr(part, "text", "")
                 if part_text:
                     parts.append(part_text)
 
         return "\n".join(parts).strip()
 
-    def _extract_generation_usage(
-        self,
-        response: Any,
-        request_text: str,
-        output_text: str,
-    ) -> tuple[int, int]:
-        usage = getattr(response, "usage_metadata", None)
-
-        input_tokens = 0
-        output_tokens = 0
-
-        if usage is not None:
-            input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
-            output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
-
-            # Some SDK versions expose usage as dict-like payload.
-            if input_tokens == 0 and isinstance(usage, dict):
-                input_tokens = int(usage.get("prompt_token_count", 0) or 0)
-                output_tokens = int(usage.get("candidates_token_count", 0) or 0)
-
-        if input_tokens <= 0:
-            input_tokens = self._estimate_tokens(request_text)
-        if output_tokens < 0:
-            output_tokens = 0
-        if output_tokens == 0 and output_text:
-            output_tokens = self._estimate_tokens(output_text)
-
-        return input_tokens, output_tokens
-
-    @staticmethod
-    def _extract_embedding_tokens(item: Any) -> int:
-        stats = getattr(item, "statistics", None)
-        if stats is None:
-            return 0
-
-        token_count = getattr(stats, "token_count", 0)
-        try:
-            return int(token_count or 0)
-        except (TypeError, ValueError):
-            return 0
-
     @staticmethod
     def _estimate_tokens(text: str) -> int:
-        # Rough approximation for fallback accounting.
+        """Rough token count approximation for fallback accounting."""
         return max(int(len(text or "") / 4), 1)
 
     @staticmethod
     def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
-        costs = MODEL_COSTS.get(model_id, {"input": 0.0002, "output": 0.0006})
+        # Exact match first, then prefix match for versioned models
+        costs = MODEL_COSTS.get(model_id)
+        if costs is None:
+            for key in MODEL_COSTS:
+                if model_id.startswith(key):
+                    costs = MODEL_COSTS[key]
+                    break
+        if costs is None:
+            costs = {"input": 0.0002, "output": 0.0006}
+
         input_cost = (input_tokens / 1000) * costs["input"]
         output_cost = (output_tokens / 1000) * costs["output"]
         return round(input_cost + output_cost, 8)
