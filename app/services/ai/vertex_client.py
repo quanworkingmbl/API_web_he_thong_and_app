@@ -39,7 +39,11 @@ except Exception as import_error:  # pragma: no cover - handled at runtime
 # Approximate public pricing (USD per 1K tokens). Update when pricing changes.
 MODEL_COSTS = {
     "gemini-1.5-flash": {"input": 0.000075, "output": 0.00030},
+    "gemini-1.5-flash-001": {"input": 0.000075, "output": 0.00030},
+    "gemini-1.5-flash-002": {"input": 0.000075, "output": 0.00030},
     "gemini-1.5-pro": {"input": 0.00125, "output": 0.00500},
+    "gemini-1.5-pro-001": {"input": 0.00125, "output": 0.00500},
+    "gemini-1.5-pro-002": {"input": 0.00125, "output": 0.00500},
     "text-embedding-005": {"input": 0.00002, "output": 0.0},
 }
 
