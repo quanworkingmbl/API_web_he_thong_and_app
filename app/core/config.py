@@ -50,11 +50,11 @@ class Settings(BaseSettings):
 
     # --- Google Vertex AI (Gemini) ---
     VERTEX_PROJECT_ID: str = ""
-    VERTEX_LOCATION: str = "us-central1"
+    VERTEX_LOCATION: str = "asia-southeast1"
     # VERTEX_MODERATION_MODEL_ID: str = "gemini-1.5-flash"
     # VERTEX_CREATIVE_MODEL_ID: str = "gemini-1.5-flash"
-    VERTEX_MODERATION_MODEL_ID: str = "gemini-1.5-flash-002"
-    VERTEX_CREATIVE_MODEL_ID: str = "gemini-1.5-flash-002"
+    VERTEX_MODERATION_MODEL_ID: str = "gemini-2.5-flash"
+    VERTEX_CREATIVE_MODEL_ID: str = "gemini-2.5-flash"
     VERTEX_EMBEDDING_MODEL_ID: str = "text-embedding-005"
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
 
