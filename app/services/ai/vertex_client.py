@@ -97,6 +97,15 @@ class VertexAIClient:
         project_id = (settings.VERTEX_PROJECT_ID or "").strip()
         location = (settings.VERTEX_LOCATION or "us-central1").strip() or "us-central1"
 
+        # The current vertexai SDK does not accept "global" as a location.
+        # Keep service available by falling back to a stable default region.
+        if location.lower() == "global":
+            logger.warning(
+                "VERTEX_LOCATION=global is not supported by vertexai SDK; "
+                "falling back to us-central1"
+            )
+            location = "us-central1"
+
         if not project_id:
             raise VertexAIClientError(
                 "VERTEX_PROJECT_ID is required to use Vertex AI",
@@ -119,7 +128,21 @@ class VertexAIClient:
 
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(resolved)
 
-        vertexai.init(project=project_id, location=location)
+        try:
+            vertexai.init(project=project_id, location=location)
+        except Exception as exc:
+            message = str(exc)
+            if "Unsupported region" in message:
+                configured_location = settings.VERTEX_LOCATION or location
+                raise VertexAIClientError(
+                    "Unsupported VERTEX_LOCATION='"
+                    f"{configured_location}'. Set a supported region such as "
+                    "'us-central1'. Original error: "
+                    f"{message}",
+                    retryable=False,
+                    status_code=503,
+                ) from exc
+            raise
         logger.info(
             "VertexAIClient initialized successfully (project=%s, location=%s)",
             project_id,
