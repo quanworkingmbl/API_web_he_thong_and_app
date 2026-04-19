@@ -223,9 +223,10 @@ class ModerationService:
                 prompt=prompt,
                 system_prompt=CONTENT_MODERATION_SYSTEM_PROMPT,
                 model_id=settings.VERTEX_MODERATION_MODEL_ID,
-                max_tokens=120,
+                max_tokens=150,
                 temperature=0,
                 timeout=settings.AI_MODERATION_TIMEOUT,
+                json_mode=True,
             )
 
             result = cls._parse_moderation_response(response)
@@ -288,9 +289,10 @@ class ModerationService:
             prompt=prompt,
             system_prompt=MODERATION_SYSTEM_PROMPT,
             model_id=model_id,
-            max_tokens=120,
+            max_tokens=150,
             temperature=0,
             timeout=timeout,
+            json_mode=True,
         )
 
         return cls._parse_moderation_response(response)
@@ -298,48 +300,81 @@ class ModerationService:
     @classmethod
     def _parse_moderation_response(cls, response: dict) -> ModerationResult:
         """Parse JSON response từ model. Fallback REVIEW nếu parse fail."""
+        import re
         content = response.get("content", "")
         raw = content
 
+        parsed = None
+        parse_error = None
+
+        # Attempt 1: Direct JSON parse (works when json_mode=True)
         try:
-            # Model đôi khi wrap JSON trong markdown block
-            if "```" in content:
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-
             parsed = json.loads(content.strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
 
-            decision = parsed.get("decision", "REVIEW").upper()
+        # Attempt 2: Extract from markdown code block ```json ... ```
+        if parsed is None:
+            try:
+                block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+                if block_match:
+                    parsed = json.loads(block_match.group(1))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Attempt 3: Find first {...} JSON object anywhere in text
+        if parsed is None:
+            try:
+                json_match = re.search(r"(\{[^{}]*\})", content, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group(1))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Attempt 4: Greedy search for outermost {...} block
+        if parsed is None:
+            try:
+                start = content.find("{")
+                end = content.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    parsed = json.loads(content[start:end + 1])
+            except (json.JSONDecodeError, ValueError) as e:
+                parse_error = e
+
+        if parsed is not None:
+            decision = str(parsed.get("decision", "REVIEW")).upper()
             if decision not in ("APPROVE", "REVIEW", "REJECT"):
                 decision = "REVIEW"
+
+            model_id_str = response.get("model_id", "")
+            source = "flash" if "flash" in model_id_str.lower() else "creative_model"
 
             return ModerationResult(
                 decision=decision,
                 confidence=float(parsed.get("confidence", 0.5)),
                 reasons=parsed.get("reasons", []),
                 flags=parsed.get("flags", []),
-                source="flash" if "flash" in response.get("model_id", "").lower() else "creative_model",
-                model_used=response.get("model_id", ""),
+                source=source,
+                model_used=model_id_str,
                 input_tokens=response.get("input_tokens", 0),
                 output_tokens=response.get("output_tokens", 0),
                 estimated_cost_usd=response.get("estimated_cost_usd", 0.0),
                 raw_response=raw,
             )
 
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            logger.warning("Moderation JSON parse failed: %s — raw: %s", e, raw[:200])
-            return ModerationResult(
-                decision="REVIEW",
-                confidence=0.0,
-                reasons=[f"AI response parse error: {str(e)}"],
-                source="parse_fail",
-                model_used=response.get("model_id", ""),
-                input_tokens=response.get("input_tokens", 0),
-                output_tokens=response.get("output_tokens", 0),
-                estimated_cost_usd=response.get("estimated_cost_usd", 0.0),
-                raw_response=raw,
-            )
+        # All attempts failed
+        logger.warning("Moderation JSON parse failed: %s — raw: %s", parse_error, raw[:300])
+        return ModerationResult(
+            decision="REVIEW",
+            confidence=0.0,
+            reasons=[f"AI response parse error: {str(parse_error)}"],
+            source="parse_fail",
+            model_used=response.get("model_id", ""),
+            input_tokens=response.get("input_tokens", 0),
+            output_tokens=response.get("output_tokens", 0),
+            estimated_cost_usd=response.get("estimated_cost_usd", 0.0),
+            raw_response=raw,
+        )
 
     @classmethod
     def _save_log(
