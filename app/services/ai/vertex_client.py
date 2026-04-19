@@ -202,6 +202,9 @@ class VertexAIClient:
                 config_kwargs["system_instruction"] = system_prompt
             if json_mode:
                 config_kwargs["response_mime_type"] = "application/json"
+                # Disable thinking mode for JSON output — thinking + JSON mime type
+                # causes empty responses in Gemini 2.5 Flash
+                config_kwargs["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=0)
 
             config = genai_types.GenerateContentConfig(**config_kwargs)
 
