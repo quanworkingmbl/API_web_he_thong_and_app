@@ -181,9 +181,11 @@ class VertexAIClient:
         max_tokens: int = 200,
         temperature: float = 0.0,
         timeout: int = 10,
+        json_mode: bool = False,
     ) -> dict:
         """
         Invoke Gemini model via Vertex AI (google-genai SDK).
+        json_mode=True forces response_mime_type='application/json' — use for structured outputs.
         Returns: content, input_tokens, output_tokens, model_id, latency_ms, estimated_cost_usd
         """
         self._ensure_available()
@@ -198,6 +200,8 @@ class VertexAIClient:
             }
             if system_prompt:
                 config_kwargs["system_instruction"] = system_prompt
+            if json_mode:
+                config_kwargs["response_mime_type"] = "application/json"
 
             config = genai_types.GenerateContentConfig(**config_kwargs)
 
@@ -238,6 +242,7 @@ class VertexAIClient:
             result.get("output_tokens", 0),
         )
         return result
+
 
     async def invoke_embedding(
         self,
