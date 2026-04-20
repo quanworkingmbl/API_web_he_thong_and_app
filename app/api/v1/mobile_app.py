@@ -2567,6 +2567,7 @@ async def get_my_profile(
             "date_of_birth": current_user.date_of_birth.isoformat() if current_user.date_of_birth else None,
             "activated": current_user.activated,
             "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            "avatar_url": current_user.avatar_url,
             "phone": primary_address_data.get("phone") if primary_address_data else None,
             "recipient_name": primary_address_data.get("recipient_name") if primary_address_data else current_user.name,
             "address": primary_address_data.get("address_line") if primary_address_data else None,
@@ -2617,6 +2618,49 @@ async def update_my_profile(
             "name": current_user.name,
             "gender": current_user.gender,
             "date_of_birth": current_user.date_of_birth.isoformat() if current_user.date_of_birth else None,
+            "avatar_url": current_user.avatar_url,
         }
     }
 
+
+@router.post("/profile/avatar")
+async def upload_profile_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload ảnh đại diện (avatar) cho user hiện tại.
+    - Accepts: multipart/form-data, field name = 'file'
+    - Max: 5 MB, chỉ ảnh (JPEG/PNG/GIF/WebP)
+    - Returns: { success, data: { avatar_url } }
+    """
+    mime = file.content_type or ""
+    if mime not in _ALLOWED_IMG:
+        raise HTTPException(
+            status_code=400,
+            detail="Loại file không hợp lệ. Chỉ chấp nhận: JPEG, PNG, GIF, WebP."
+        )
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Ảnh quá lớn. Giới hạn tối đa 5MB.")
+
+    try:
+        avatar_url = _upload_to_supabase(
+            content=content,
+            filename=file.filename or "avatar.jpg",
+            mime=mime,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upload Storage thất bại: {exc}")
+
+    current_user.avatar_url = avatar_url
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "success": True,
+        "message": "Avatar uploaded successfully",
+        "data": {"avatar_url": avatar_url}
+    }

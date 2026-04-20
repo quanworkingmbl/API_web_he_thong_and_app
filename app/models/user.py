@@ -33,6 +33,9 @@ class User(Base):
     # Firebase Cloud Messaging token (set từ app khi login/foreground)
     fcm_token = Column(String(512), nullable=True)
 
+    # Avatar URL — lưu URL ảnh đại diện upload lên Supabase Storage
+    avatar_url = Column(String(512), nullable=True)
+
     
     # Relationships
     roles = relationship("UserRole", back_populates="user")
