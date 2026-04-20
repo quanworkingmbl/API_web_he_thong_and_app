@@ -12,6 +12,11 @@ from app.core.permissions import check_product_label_access, check_seller_kyc_ve
 from pydantic import BaseModel, Field, validator
 from decimal import Decimal
 import json
+from app.services.notification import (
+    notify_product_pending_to_admin,
+    notify_product_approved_to_seller,
+    notify_product_rejected_to_seller,
+)
 
 router = APIRouter()
 
@@ -310,6 +315,29 @@ async def create_product(
     db.add(p)
     db.commit()
     db.refresh(p)
+
+    # [NOTIFICATION P1] Thông báo cho Admin/Content Manager: sản phẩm mới chờ duyệt
+    try:
+        from app.models.user import User
+        admin_ids = [
+            u.id for u in db.query(User).filter(
+                User.type.in_(["admin", "content_manager"])
+            ).all()
+        ]
+        if admin_ids:
+            seller_user = db.query(User).filter(User.id == actual_id).first()
+            seller_name = seller_user.name if seller_user else "Seller"
+            notify_product_pending_to_admin(
+                db=db,
+                admin_user_ids=admin_ids,
+                product_id=p.id,
+                product_name=p.name,
+                seller_name=seller_name,
+            )
+            db.commit()
+    except Exception:
+        pass  # Không để lỗi notification chặn flow chính
+
     return _build_product_response(p, db)
 
 
@@ -436,6 +464,28 @@ async def approve_product(
         checked_traceability=approval_data.checked_traceability,
     ))
     db.commit()
+
+    # [NOTIFICATION P2/P3] Thông báo cho Seller kết quả duyệt
+    try:
+        if approval_data.status == "APPROVED":
+            notify_product_approved_to_seller(
+                db=db,
+                seller_id=product.seller_id,
+                product_id=product_id,
+                product_name=product.name,
+            )
+        else:
+            notify_product_rejected_to_seller(
+                db=db,
+                seller_id=product.seller_id,
+                product_id=product_id,
+                product_name=product.name,
+                notes=approval_data.notes,
+            )
+        db.commit()
+    except Exception:
+        pass
+
     return {"success": True, "message": f"Product {approval_data.status.lower()} successfully"}
 
 

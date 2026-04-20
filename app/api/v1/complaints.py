@@ -27,6 +27,14 @@ from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from pydantic import BaseModel, Field
 import json
+from app.services.notification import (
+    notify_new_complaint_to_admin,
+    notify_new_complaint_to_seller,
+    notify_complaint_assigned_to_cs,
+    notify_complaint_comment_to_buyer,
+    notify_complaint_comment_to_admin,
+    notify_complaint_resolved_to_buyer,
+)
 
 router = APIRouter()
 
@@ -383,6 +391,44 @@ async def create_complaint(
     db.commit()
     db.refresh(new_complaint)
 
+    # [NOTIFICATION CP1] Thông báo Admin/CS và Seller
+    try:
+        admin_ids = [
+            u.id for u in db.query(User).filter(
+                User.type.in_(["admin", "cs"])
+            ).all()
+        ]
+        if admin_ids:
+            order_num = None
+            if complaint_data.order_id:
+                order_for_notif = db.query(Order).filter(Order.id == complaint_data.order_id).first()
+                order_num = order_for_notif.order_number if order_for_notif else None
+
+            notify_new_complaint_to_admin(
+                db=db,
+                admin_user_ids=admin_ids,
+                complaint_id=new_complaint.id,
+                order_number=order_num,
+                customer_name=current_user.name or "Khách hàng",
+                title=new_complaint.title,
+            )
+
+        # Thông báo cho Seller nếu có gắn order
+        if complaint_data.order_id:
+            ord_obj = db.query(Order).filter(Order.id == complaint_data.order_id).first()
+            if ord_obj:
+                notify_new_complaint_to_seller(
+                    db=db,
+                    seller_id=ord_obj.seller_id,
+                    complaint_id=new_complaint.id,
+                    order_number=ord_obj.order_number,
+                    customer_name=current_user.name or "Khách hàng",
+                )
+
+        db.commit()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": "Khiếu nại đã được gửi" + ("" if has_images else ". Nên bổ sung ảnh bằng chứng để xử lý nhanh hơn"),
@@ -467,6 +513,40 @@ async def add_comment(
     db.commit()
     db.refresh(new_comment)
 
+    # [NOTIFICATION CP3/CP4] Thông báo khi có phản hồi mới
+    try:
+        if role in VALID_ADMIN_ROLES:
+            # Admin/CS reply → thông báo cho buyer
+            if not comment_data.is_internal:
+                notify_complaint_comment_to_buyer(
+                    db=db,
+                    buyer_id=complaint.user_id,
+                    complaint_id=complaint_id,
+                    commenter_name=current_user.name or "Hỗ trợ viên",
+                )
+        else:
+            # Buyer/Seller reply → thông báo cho admin/CS
+            handler_ids = []
+            if complaint.handled_by:
+                handler_ids = [complaint.handled_by]
+            else:
+                handler_ids = [
+                    u.id for u in db.query(User).filter(
+                        User.type.in_(["admin", "cs"])
+                    ).limit(5).all()
+                ]
+            if handler_ids:
+                notify_complaint_comment_to_admin(
+                    db=db,
+                    admin_user_ids=handler_ids,
+                    complaint_id=complaint_id,
+                    commenter_name=current_user.name or role,
+                    role=role,
+                )
+        db.commit()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": "Đã gửi phản hồi",
@@ -549,6 +629,19 @@ async def update_complaint_status(
 
     db.commit()
 
+    # [NOTIFICATION CP5] Thông báo Buyer khi khiếu nại được giải quyết
+    try:
+        if new_status == ComplaintStatus.RESOLVED:
+            notify_complaint_resolved_to_buyer(
+                db=db,
+                buyer_id=complaint.user_id,
+                complaint_id=complaint_id,
+                resolution=status_data.resolution,
+            )
+            db.commit()
+    except Exception:
+        pass
+
     response = {
         "success": True,
         "message": f"Đã cập nhật trạng thái: {old_status.value} → {new_status.value}",
@@ -596,6 +689,23 @@ async def assign_complaint(
     )
 
     db.commit()
+
+    # [NOTIFICATION CP2] Thông báo CS được giao xử lý
+    try:
+        order_num = None
+        if complaint.order_id:
+            ord_obj = db.query(Order).filter(Order.id == complaint.order_id).first()
+            order_num = ord_obj.order_number if ord_obj else None
+        notify_complaint_assigned_to_cs(
+            db=db,
+            cs_user_id=assign_data.assigned_to,
+            complaint_id=complaint_id,
+            order_number=order_num,
+            assigned_by_name=current_user.name or "Admin",
+        )
+        db.commit()
+    except Exception:
+        pass
 
     return {
         "success": True,

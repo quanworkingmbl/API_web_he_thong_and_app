@@ -38,6 +38,7 @@ from app.models.review_image import ReviewImage
 from app.models.settlement_item import SettlementItem
 from app.models.permission import Permission, RolePermission
 from app.models.ai_log import AIModerationLog, AIGenerationCache, AICostLog, ProductEmbedding
+from app.models.notification import Notification
 
 __all__ = [
     "User",
@@ -136,6 +137,8 @@ __all__ = [
     "AIGenerationCache",
     "AICostLog",
     "ProductEmbedding",
+    # Notifications
+    "Notification",
 ]
 
 

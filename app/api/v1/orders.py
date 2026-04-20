@@ -15,6 +15,10 @@ from app.services.order_state import (
 from pydantic import BaseModel, Field
 from decimal import Decimal
 import uuid
+from app.services.notification import (
+    notify_order_cancelled_to_seller,
+    notify_order_cancelled_by_admin,
+)
 
 router = APIRouter()
 
@@ -288,6 +292,35 @@ async def update_order_status(
         note=status_data.note or status_data.cancel_reason,
         auto_flush=True,
     )
+
+    # [NOTIFICATION] Gửi thông báo khi hủy đơn
+    if new_status_enum == OrderStatus.CANCELLED:
+        cancel_reason = status_data.cancel_reason or status_data.note or None
+        if user_type == "consumer":
+            # [O8] Buyer hủy đơn → thông báo cho Seller
+            notify_order_cancelled_to_seller(
+                db=db,
+                seller_id=order.seller_id,
+                order_id=order_id,
+                order_number=order.order_number,
+                reason=cancel_reason,
+            )
+        elif user_type == "admin":
+            # [O9] Admin hủy đơn → thông báo cho cả Buyer và Seller
+            notify_order_cancelled_by_admin(
+                db=db,
+                target_user_id=order.customer_id,
+                order_id=order_id,
+                order_number=order.order_number,
+                reason=cancel_reason,
+            )
+            notify_order_cancelled_by_admin(
+                db=db,
+                target_user_id=order.seller_id,
+                order_id=order_id,
+                order_number=order.order_number,
+                reason=cancel_reason,
+            )
 
     db.commit()
 

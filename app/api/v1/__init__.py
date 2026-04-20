@@ -27,6 +27,7 @@ from app.api.v1 import (
     promotions,
     ai,
     settings,
+    notifications,
 )
 
 api_router = APIRouter()
@@ -83,3 +84,6 @@ api_router.include_router(ai.router, prefix="/ai", tags=["🤖 AI Services"])
 
 # System Settings
 api_router.include_router(settings.router, prefix="/admin/settings", tags=["⚙️ System Settings"])
+
+# Notifications
+api_router.include_router(notifications.router, prefix="/notifications", tags=["🔔 Notifications"])

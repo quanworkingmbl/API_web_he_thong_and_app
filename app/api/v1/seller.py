@@ -48,6 +48,14 @@ from app.api.v1.auth import get_current_user
 from app.core.permissions import check_seller_kyc_verified
 from app.services.order_state import log_status_change
 from app.services.inventory import increment_stock
+from app.services.notification import (
+    notify_order_confirmed_to_buyer,
+    notify_order_rejected_to_buyer,
+    notify_order_processing_to_buyer,
+    notify_order_shipping_to_buyer,
+    notify_order_delivered_to_seller,
+    notify_order_cancelled_to_seller,
+)
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -563,6 +571,14 @@ async def confirm_order(
         auto_flush=True,
     )
 
+    # [NOTIFICATION O3] Thông báo cho buyer: đơn đã xác nhận
+    notify_order_confirmed_to_buyer(
+        db=db,
+        buyer_id=order.customer_id,
+        order_id=order_id,
+        order_number=order.order_number,
+    )
+
     db.commit()
 
     return {
@@ -609,6 +625,14 @@ async def process_order(
         role="seller",
         note="Seller bắt đầu đóng gói / xử lý đơn",
         auto_flush=True,
+    )
+
+    # [NOTIFICATION O5] Thông báo cho buyer: đơn đang đóng gói
+    notify_order_processing_to_buyer(
+        db=db,
+        buyer_id=order.customer_id,
+        order_id=order_id,
+        order_number=order.order_number,
     )
 
     db.commit()
@@ -674,6 +698,15 @@ async def reject_order(
         auto_flush=True,
     )
 
+    # [NOTIFICATION O4] Thông báo cho buyer: đơn bị từ chối
+    notify_order_rejected_to_buyer(
+        db=db,
+        buyer_id=order.customer_id,
+        order_id=order_id,
+        order_number=order.order_number,
+        reason=reject_data.reason,
+    )
+
     db.commit()
 
     return {
@@ -721,6 +754,14 @@ async def mark_order_shipping(
         role="seller",
         note="Seller chuyển sang đang giao hàng",
         auto_flush=True,
+    )
+
+    # [NOTIFICATION O6] Thông báo cho buyer: đơn đang giao
+    notify_order_shipping_to_buyer(
+        db=db,
+        buyer_id=order.customer_id,
+        order_id=order_id,
+        order_number=order.order_number,
     )
 
     db.commit()

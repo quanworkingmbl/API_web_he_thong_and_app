@@ -45,6 +45,12 @@ from app.services.order_state import (
 )
 from app.services.inventory import validate_line_for_sale, decrement_stock, increment_stock
 from app.services.inventory import get_available_stock
+from app.services.notification import (
+    notify_new_order_to_seller,
+    notify_order_placed_to_buyer,
+    notify_order_delivered_to_seller,
+    notify_order_cancelled_to_seller,
+)
 from pydantic import BaseModel, Field
 from decimal import Decimal
 import uuid
@@ -1871,6 +1877,26 @@ async def create_order(
         auto_flush=True,
     )
 
+    # [NOTIFICATION O1] Thông báo cho Seller: có đơn hàng mới
+    customer_name_val = checkout_data.customer_name or current_user.name or "Khách hàng"
+    notify_new_order_to_seller(
+        db=db,
+        seller_id=detected_seller_id,
+        order_id=new_order.id,
+        order_number=order_number,
+        customer_name=customer_name_val,
+        total_amount=total_amount,
+    )
+
+    # [NOTIFICATION O2] Thông báo cho Buyer: đặt hàng thành công
+    notify_order_placed_to_buyer(
+        db=db,
+        buyer_id=current_user.id,
+        order_id=new_order.id,
+        order_number=order_number,
+        total_amount=total_amount,
+    )
+
     db.commit()
 
     return {
@@ -2202,6 +2228,15 @@ async def confirm_order_received(
         role="consumer",
         note=note,
         auto_flush=True,
+    )
+
+    # [NOTIFICATION O7] Thông báo cho Seller: khách đã nhận hàng
+    notify_order_delivered_to_seller(
+        db=db,
+        seller_id=order.seller_id,
+        order_id=order_id,
+        order_number=order.order_number,
+        seller_amount=order.seller_amount or 0,
     )
 
     db.commit()
