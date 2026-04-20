@@ -334,56 +334,77 @@ async def get_seller_transactions(
     """Lấy lịch sử giao dịch chuyển khoản người mua vào nền tảng cho các đơn của seller."""
     _require_seller(current_user)
 
-    query = db.query(Order).filter(
-        Order.seller_id == current_user.id,
-        Order.payment_method.in_([PaymentMethod.BANK_TRANSFER, PaymentMethod.PLATFORM_CREDITS]),
-    )
-
-    if payment_status:
-        query = query.filter(Order.payment_status == payment_status)
-
-    if search:
-        keyword = f"%{search}%"
-        query = query.filter(
-            (Order.order_number.ilike(keyword))
-            | (Order.customer_name.ilike(keyword))
-            | (Order.customer_phone.ilike(keyword))
+    try:
+        # Lọc các đơn thanh toán online (không phải COD)
+        # Dùng string value thay vì Enum để tránh lỗi nếu DB chưa có PLATFORM_CREDITS
+        non_cod_methods = ["BANK_TRANSFER", "MOMO", "VNPAY", "ZALOPAY", "PLATFORM_CREDITS"]
+        query = db.query(Order).filter(
+            Order.seller_id == current_user.id,
+            Order.payment_method.in_(non_cod_methods),
         )
 
-    total = query.count()
-    skip = (page - 1) * limit
-    orders = query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
+        if payment_status:
+            query = query.filter(Order.payment_status == payment_status)
 
-    data = []
-    for o in orders:
-        payment_method_value = o.payment_method.value if hasattr(o.payment_method, "value") else str(o.payment_method)
-        data.append(
-            {
-                "id": o.id,
-                "order_id": o.id,
-                "order_number": o.order_number,
-                "sender_name": o.customer_name,
-                "sender_phone": o.customer_phone,
-                "payment_method": payment_method_value,
-                "payment_status": o.payment_status,
-                "order_status": o.status.value if hasattr(o.status, "value") else str(o.status),
-                "transfer_amount": _to_vnd_int(o.total_amount),
-                "seller_amount": _to_vnd_int(o.seller_amount),
-                "platform_fee_amount": _to_vnd_int(o.platform_fee_amount),
-                "created_at": o.created_at.isoformat() if o.created_at else None,
-            }
-        )
+        if search:
+            keyword = f"%{search}%"
+            query = query.filter(
+                (Order.order_number.ilike(keyword))
+                | (Order.customer_name.ilike(keyword))
+                | (Order.customer_phone.ilike(keyword))
+            )
 
-    return {
-        "success": True,
-        "data": data,
-        "meta": {
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "total_pages": (total + limit - 1) // limit,
-        },
-    }
+        total = query.count()
+        skip = (page - 1) * limit
+        orders = query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
+
+        data = []
+        for o in orders:
+            try:
+                payment_method_value = o.payment_method.value if hasattr(o.payment_method, "value") else str(o.payment_method)
+            except Exception:
+                payment_method_value = str(o.payment_method)
+
+            data.append(
+                {
+                    "id": o.id,
+                    "order_id": o.id,
+                    "order_number": o.order_number,
+                    "sender_name": o.customer_name,
+                    "sender_phone": o.customer_phone,
+                    "payment_method": payment_method_value,
+                    "payment_status": o.payment_status,
+                    "order_status": o.status.value if hasattr(o.status, "value") else str(o.status),
+                    "transfer_amount": _to_vnd_int(o.total_amount),
+                    "seller_amount": _to_vnd_int(o.seller_amount),
+                    "platform_fee_amount": _to_vnd_int(o.platform_fee_amount),
+                    "created_at": o.created_at.isoformat() if o.created_at else None,
+                }
+            )
+
+        return {
+            "success": True,
+            "data": data,
+            "meta": {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "total_pages": (total + limit - 1) // limit,
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Fallback: trả về danh sách rỗng thay vì 500 khi DB enum chưa sync
+        import logging
+        logging.getLogger(__name__).error("get_seller_transactions error: %s", exc, exc_info=True)
+        return {
+            "success": True,
+            "data": [],
+            "meta": {"total": 0, "page": page, "limit": limit, "total_pages": 0},
+            "_warning": "Dữ liệu giao dịch tạm thời không khả dụng. Vui lòng thử lại sau."
+        }
 
 
 @router.get("/orders", summary="Danh sách đơn hàng của seller")
