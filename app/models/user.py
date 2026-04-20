@@ -29,6 +29,10 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     deleted_by = Column(String(255), nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Firebase Cloud Messaging token (set từ app khi login/foreground)
+    fcm_token = Column(String(512), nullable=True)
+
     
     # Relationships
     roles = relationship("UserRole", back_populates="user")

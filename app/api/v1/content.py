@@ -9,6 +9,11 @@ from app.core.permissions import check_seller_kyc_verified
 from pydantic import BaseModel, Field, validator
 from datetime import datetime
 import json
+from app.services.notification import (
+    notify_content_pending_to_admin,
+    notify_content_approved_to_author,
+    notify_content_rejected_to_author,
+)
 
 router = APIRouter()
 
@@ -345,7 +350,26 @@ async def create_content(
     
     db.commit()
     db.refresh(new_content)
-    
+
+    # [NOTIFICATION C1] Thông báo Admin/Content Manager: bài viết mới chờ duyệt
+    try:
+        admin_ids = [
+            u.id for u in db.query(User).filter(
+                User.type.in_(["admin", "content_manager"])
+            ).all()
+        ]
+        if admin_ids:
+            notify_content_pending_to_admin(
+                db=db,
+                admin_user_ids=admin_ids,
+                content_id=new_content.id,
+                content_title=new_content.title,
+                author_name=author.name if author else "Tác giả",
+            )
+            db.commit()
+    except Exception:
+        pass
+
     return ContentResponse(
         id=new_content.id,
         title=new_content.title,
@@ -574,7 +598,28 @@ async def approve_content(
     )
     
     db.commit()
-    
+
+    # [NOTIFICATION C2/C3] Thông báo cho tác giả kết quả duyệt
+    try:
+        if approval_data.status == "APPROVED":
+            notify_content_approved_to_author(
+                db=db,
+                author_id=content.author_id,
+                content_id=content_id,
+                content_title=content.title,
+            )
+        else:
+            notify_content_rejected_to_author(
+                db=db,
+                author_id=content.author_id,
+                content_id=content_id,
+                content_title=content.title,
+                notes=approval_data.notes,
+            )
+        db.commit()
+    except Exception:
+        pass
+
     return {"success": True, "message": f"Content {approval_data.status.lower()} successfully"}
 
 

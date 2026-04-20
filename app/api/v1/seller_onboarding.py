@@ -19,6 +19,11 @@ from app.models.user import User, UserRole
 from app.models.role import Role
 from app.api.v1.auth import get_current_user, get_current_user_allow_inactive
 from pydantic import BaseModel, Field
+from app.services.notification import (
+    notify_kyc_pending_to_admin,
+    notify_kyc_verified_to_seller,
+    notify_kyc_rejected_to_seller,
+)
 
 router = APIRouter()
 
@@ -237,6 +242,23 @@ async def register_seller_profile(
     db.commit()
     db.refresh(profile)
 
+    # [NOTIFICATION K1] Thông báo Admin: có hồ sơ seller mới chờ duyệt
+    try:
+        admin_ids = [
+            u.id for u in db.query(User).filter(User.type == "admin").all()
+        ]
+        if admin_ids:
+            notify_kyc_pending_to_admin(
+                db=db,
+                admin_user_ids=admin_ids,
+                seller_user_id=current_user.id,
+                seller_name=current_user.name or "Tài khoản",
+                business_name=profile.business_name or "Chưa có tên",
+            )
+            db.commit()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": msg,
@@ -336,6 +358,20 @@ async def verify_seller(
             seller_user.activated = 0
 
     db.commit()
+
+    # [NOTIFICATION K2/K3] Thông báo cho Seller kết quả duyệt hồ sơ
+    try:
+        if data.status == "VERIFIED":
+            notify_kyc_verified_to_seller(db=db, seller_id=user_id)
+        else:
+            notify_kyc_rejected_to_seller(
+                db=db,
+                seller_id=user_id,
+                rejection_reason=data.rejection_reason or "Không đáp ứng yêu cầu",
+            )
+        db.commit()
+    except Exception:
+        pass
 
     return {
         "success": True,
