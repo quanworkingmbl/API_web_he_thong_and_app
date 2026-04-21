@@ -20,6 +20,7 @@ from app.models.order import Order, OrderStatus
 from app.api.v1.auth import get_current_user
 from app.models.user import User
 from app.services.ghn import ghn_service
+from app.services.order_state import log_status_change, resolve_payment_status
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -149,8 +150,22 @@ async def create_shipment(
     db.refresh(shipment)
 
     # Cập nhật order status sang SHIPPING
+    old_ship_status = order.status.value if hasattr(order.status, "value") else str(order.status)
     order.status = OrderStatus.SHIPPING
     order.shipped_at = datetime.utcnow()
+
+    # [AUDIT] Ghi log tạo vận đơn + chuyển SHIPPING
+    log_status_change(
+        db=db,
+        order_id=order.id,
+        old_status=old_ship_status,
+        new_status=OrderStatus.SHIPPING.value,
+        actor_id=current_user.id,
+        role="seller",
+        note=f"Tạo vận đơn GHN, tracking: {shipment.tracking_code or 'chưa có'}",
+        auto_flush=True,
+    )
+
     db.commit()
 
     return {
@@ -277,15 +292,43 @@ async def ghn_webhook(
     # Cập nhật Order tương ứng
     order = db.query(Order).filter(Order.id == shipment.order_id).first()
     if order:
+        old_order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+        new_order_status_enum = None
+
         if new_status == ShipmentStatus.DELIVERED:
             order.status = OrderStatus.DELIVERED
             order.delivered_at = datetime.utcnow()
-            order.payment_status = "PAID"
             shipment.actual_delivery = datetime.utcnow()
+            new_order_status_enum = OrderStatus.DELIVERED
+
+            # [PAYMENT] Chỉ tự động set PAID khi COD
+            new_pay = resolve_payment_status(order, OrderStatus.DELIVERED)
+            if new_pay is not None:
+                order.payment_status = new_pay
+
         elif new_status == ShipmentStatus.RETURNED:
             order.status = OrderStatus.REFUNDED
+            new_order_status_enum = OrderStatus.REFUNDED
+
+            # Khi hoàn hàng → payment_status = REFUNDED
+            order.payment_status = "REFUNDED"
+
         elif new_status in {ShipmentStatus.IN_TRANSIT, ShipmentStatus.PICKED_UP}:
             order.status = OrderStatus.SHIPPING
+            new_order_status_enum = OrderStatus.SHIPPING
+
+        # [AUDIT] Chỉ log khi trạng thái đơn thay đổi
+        if new_order_status_enum is not None:
+            log_status_change(
+                db=db,
+                order_id=order.id,
+                old_status=old_order_status,
+                new_status=new_order_status_enum.value,
+                actor_id=None,        # system/webhook
+                role="system",
+                note=f"Cập nhật tự động từ GHN webhook. GHN status: {ghn_status}",
+                auto_flush=True,
+            )
 
     db.commit()
 

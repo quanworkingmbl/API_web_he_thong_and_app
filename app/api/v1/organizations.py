@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.organization import Organization
 from app.models.user import User, UserOrganization
 from app.api.v1.auth import get_current_user
+from app.core.permissions import check_organization_manage_access
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -132,6 +133,8 @@ async def create_organization(
     db: Session = Depends(get_db)
 ):
     """Create a new organization"""
+    check_organization_manage_access(current_user)
+
     # Check if name already exists
     existing = db.query(Organization).filter(Organization.name == org_data.name).first()
     if existing:
@@ -164,6 +167,8 @@ async def update_organization(
     db: Session = Depends(get_db)
 ):
     """Update an organization"""
+    check_organization_manage_access(current_user)
+
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -196,6 +201,8 @@ async def delete_organization(
     db: Session = Depends(get_db)
 ):
     """Delete an organization"""
+    check_organization_manage_access(current_user)
+
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -272,6 +279,8 @@ async def add_member_to_organization(
     db: Session = Depends(get_db)
 ):
     """Add a member to an organization"""
+    check_organization_manage_access(current_user)
+
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -308,6 +317,8 @@ async def remove_member_from_organization(
     db: Session = Depends(get_db)
 ):
     """Remove a member from an organization"""
+    check_organization_manage_access(current_user)
+
     membership = db.query(UserOrganization).filter(
         UserOrganization.organization_id == org_id,
         UserOrganization.user_id == user_id

@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional, List
 from app.core.database import get_db
-from app.models.user import User
+from app.models.user import User, UserStatus
 from app.api.v1.auth import get_current_user
-from pydantic import BaseModel, EmailStr
+from app.core.permissions import check_user_manage_access
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 
 router = APIRouter()
@@ -16,6 +17,9 @@ class UserResponse(BaseModel):
     name: str
     gender: Optional[str]
     activated: int
+    status: str
+    status_reason: Optional[str]
+    status_expire_at: Optional[datetime]
     created_by: Optional[str]
     updated_by: Optional[str]
     created_at: datetime
@@ -46,6 +50,12 @@ class UpdateUserRequest(BaseModel):
     type: Optional[str] = None
     activated: Optional[int] = None
 
+class UpdateUserStatusRequest(BaseModel):
+    status: str = Field(..., description="User status: ACTIVE, SUSPENDED, BANNED")
+    status_reason: Optional[str] = Field(None, description="Reason for status change")
+    status_expire_at: Optional[datetime] = Field(None, description="Expiration time for SUSPENDED status")
+
+
 @router.get("", response_model=UserListResponse)
 async def get_users(
     model: Optional[str] = Query(None),
@@ -57,6 +67,8 @@ async def get_users(
     db: Session = Depends(get_db)
 ):
     """Get list of users"""
+    check_user_manage_access(current_user)
+
     query = db.query(User).filter(User.deleted_at.is_(None))
     
     if model:
@@ -92,6 +104,8 @@ async def create_user(
     db: Session = Depends(get_db)
 ):
     """Create a new user"""
+    check_user_manage_access(current_user)
+
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
@@ -123,6 +137,8 @@ async def update_user(
     db: Session = Depends(get_db)
 ):
     """Update a user"""
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -151,6 +167,8 @@ async def get_user_by_id(
     db: Session = Depends(get_db)
 ):
     """Get user by ID"""
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(
         User.id == user_id,
         User.deleted_at.is_(None)
@@ -172,6 +190,8 @@ async def delete_user(
     Soft delete a user
     Không xóa vĩnh viễn, chỉ đánh dấu deleted_at
     """
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -199,6 +219,8 @@ async def activate_user(
     activated = 1: Kích hoạt
     activated = 0: Vô hiệu hóa
     """
+    check_user_manage_access(current_user)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -224,6 +246,8 @@ async def assign_roles_to_user(
     Assign roles to a user
     Xóa tất cả roles cũ và gán roles mới
     """
+    check_user_manage_access(current_user)
+
     from app.models.user import UserRole
     from app.models.role import Role
     
@@ -266,6 +290,8 @@ async def get_user_roles(
     db: Session = Depends(get_db)
 ):
     """Get all roles assigned to a user"""
+    check_user_manage_access(current_user)
+
     from app.models.user import UserRole
     from app.models.role import Role
     
@@ -284,3 +310,68 @@ async def get_user_roles(
             for role in roles
         ]
     }
+
+
+@router.put("/{user_id}/status")
+async def update_user_status(
+    user_id: int,
+    status_data: UpdateUserStatusRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update user account status (ACTIVE, SUSPENDED, BANNED)
+    Admin only endpoint
+    Prevents self-ban/self-suspend
+    """
+    check_user_manage_access(current_user)
+
+    # Validate status value
+    try:
+        new_status = UserStatus[status_data.status.upper()]
+    except KeyError:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid status. Must be one of: ACTIVE, SUSPENDED, BANNED"
+        )
+    
+    # Find target user
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent self-ban/self-suspend
+    if user.id == current_user.id and new_status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400, 
+            detail="You cannot suspend or ban yourself"
+        )
+    
+    # Validate SUSPENDED requires expire time
+    if new_status == UserStatus.SUSPENDED and not status_data.status_expire_at:
+        raise HTTPException(
+            status_code=400,
+            detail="status_expire_at is required for SUSPENDED status (or use BANNED for permanent)"
+        )
+    
+    # Update status
+    user.status = new_status
+    user.status_reason = status_data.status_reason
+    user.status_expire_at = status_data.status_expire_at if new_status == UserStatus.SUSPENDED else None
+    user.updated_by = current_user.email
+    user.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "success": True,
+        "message": f"User status updated to {new_status.value}",
+        "data": {
+            "user_id": user.id,
+            "status": user.status.value,
+            "status_reason": user.status_reason,
+            "status_expire_at": user.status_expire_at.isoformat() if user.status_expire_at else None
+        }
+    }
+

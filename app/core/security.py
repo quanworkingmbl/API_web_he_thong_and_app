@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional
+import hashlib
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from app.core.config import settings
@@ -23,9 +24,18 @@ def get_password_hash(password: str) -> str:
     """Hash a password"""
     return pwd_context.hash(password)
 
+
+def _decode_token(token: str, secret_key: str) -> Optional[dict]:
+    try:
+        payload = jwt.decode(token, secret_key, algorithms=[settings.ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token"""
     to_encode = data.copy()
+    to_encode.setdefault("token_type", "access")
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
@@ -35,11 +45,48 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
+
+def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT refresh token"""
+    to_encode = data.copy()
+    to_encode["token_type"] = "refresh"
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.refresh_token_secret_key,
+        algorithm=settings.ALGORITHM,
+    )
+    return encoded_jwt
+
 def decode_access_token(token: str) -> Optional[dict]:
     """Decode and verify a JWT token"""
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        return payload
-    except JWTError:
+    payload = _decode_token(token, settings.SECRET_KEY)
+    if payload is None:
         return None
+    token_type = payload.get("token_type")
+    # Accept legacy tokens that don't include token_type.
+    if token_type and token_type != "access":
+        return None
+    return payload
+
+
+def decode_refresh_token(token: str) -> Optional[dict]:
+    """Decode and verify a JWT refresh token"""
+    payload = _decode_token(token, settings.refresh_token_secret_key)
+    if payload is None:
+        return None
+    if payload.get("token_type") != "refresh":
+        return None
+    return payload
+
+
+def hash_refresh_token(token: str) -> str:
+    """Create a deterministic hash for refresh token persistence."""
+    raw = f"{settings.refresh_token_secret_key}:{token}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
