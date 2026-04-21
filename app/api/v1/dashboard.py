@@ -6,10 +6,19 @@ from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.models.user import User
 from app.api.v1.auth import get_current_user
+from app.core.permissions import check_dashboard_access
 from pydantic import BaseModel
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 router = APIRouter()
+
+
+def _to_vnd_int(value: Optional[Decimal]) -> int:
+    """Chuẩn hóa tiền về số nguyên VND để API trả dạng số nhất quán."""
+    if value is None:
+        return 0
+    decimal_value = value if isinstance(value, Decimal) else Decimal(str(value))
+    return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 # ==============================================================================
 # RESPONSE SCHEMAS
@@ -55,8 +64,11 @@ async def get_dashboard_overview(
     """
     Tổng quan dashboard - hiển thị các thống kê chính của hệ thống
     """
+    check_dashboard_access(current_user)
+
     from app.models.user import User
     from app.models.product import Product, ProductStatus
+    from app.models.order import Order, OrderStatus
     
     # Đếm users theo loại
     total_users = db.query(User).filter(User.deleted_at.is_(None)).count()
@@ -75,7 +87,22 @@ async def get_dashboard_overview(
         Product.status == ProductStatus.PENDING
     ).count()
     
-    # TODO: Thêm thống kê orders và revenue khi có Order model
+    # Thống kê orders
+    total_orders = db.query(Order).count()
+    pending_orders = db.query(Order).filter(Order.status == OrderStatus.PENDING).count()
+
+    # Revenue
+    delivered_orders = db.query(Order).filter(Order.status == OrderStatus.DELIVERED).all()
+    total_revenue = sum(o.total_amount for o in delivered_orders) if delivered_orders else 0
+    total_platform_fee = sum(o.platform_fee_amount for o in delivered_orders) if delivered_orders else 0
+
+    # Revenue tháng này
+    first_day_of_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    this_month_orders = db.query(Order).filter(
+        Order.status == OrderStatus.DELIVERED,
+        Order.created_at >= first_day_of_month
+    ).all()
+    this_month_revenue = sum(o.total_amount for o in this_month_orders) if this_month_orders else 0
     
     return {
         "success": True,
@@ -90,12 +117,13 @@ async def get_dashboard_overview(
                 "pending": pending_products
             },
             "orders": {
-                "total": 0,  # TODO: Implement when Order model is ready
-                "pending": 0
+                "total": total_orders,
+                "pending": pending_orders
             },
             "revenue": {
-                "total": "0.00",  # TODO: Implement when Payment integration is complete
-                "this_month": "0.00"
+                "total": _to_vnd_int(total_revenue),
+                "platform_fee": _to_vnd_int(total_platform_fee),
+                "this_month": _to_vnd_int(this_month_revenue)
             }
         }
     }
@@ -110,22 +138,44 @@ async def get_revenue_stats(
     """
     Thống kê doanh thu theo thời gian
     """
-    # TODO: Implement revenue stats when Order/Payment models are complete
+    check_dashboard_access(current_user)
+
+    from app.models.order import Order, OrderStatus
+
+    # Tính ngày bắt đầu dựa trên period
+    now = datetime.utcnow()
+    if period == "day":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
+        start_date = now - timedelta(days=7)
+    elif period == "month":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:  # year
+        start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    delivered_orders = db.query(Order).filter(
+        Order.status == OrderStatus.DELIVERED,
+        Order.created_at >= start_date
+    ).all()
+
+    total_revenue = sum(o.total_amount for o in delivered_orders) if delivered_orders else 0
+    platform_commission = sum(o.platform_fee_amount for o in delivered_orders) if delivered_orders else 0
+    seller_revenue = sum(o.seller_amount for o in delivered_orders) if delivered_orders else 0
+    order_count = len(delivered_orders)
+
     return {
         "success": True,
         "data": {
             "period": period,
-            "total_revenue": "0.00",
-            "platform_commission": "0.00", 
-            "seller_revenue": "0.00",
-            "order_count": 0,
-            "chart_data": []
-        },
-        "message": "Revenue stats - will be implemented with Order model"
+            "total_revenue": _to_vnd_int(total_revenue),
+            "platform_commission": _to_vnd_int(platform_commission),
+            "seller_revenue": _to_vnd_int(seller_revenue),
+            "order_count": order_count,
+        }
     }
 
 
-@router.get("/dashboard/products")  
+@router.get("/dashboard/products")
 async def get_product_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -133,6 +183,8 @@ async def get_product_stats(
     """
     Thống kê sản phẩm theo trạng thái và loại nhãn
     """
+    check_dashboard_access(current_user)
+
     from app.models.product import Product, ProductStatus, ProductLabel
     
     total = db.query(Product).count()
@@ -170,22 +222,41 @@ async def get_order_stats(
     """
     Thống kê đơn hàng
     """
-    # TODO: Implement when Order model is ready
+    check_dashboard_access(current_user)
+
+    from app.models.order import Order, OrderStatus
+
+    total = db.query(Order).count()
+    by_status = {}
+    for status in OrderStatus:
+        cnt = db.query(Order).filter(Order.status == status).count()
+        by_status[status.value.lower()] = cnt
+
+    # Đơn hàng gần đây (7 ngày)
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    recent_orders = db.query(Order).filter(
+        Order.created_at >= seven_days_ago
+    ).order_by(Order.created_at.desc()).limit(10).all()
+
     return {
         "success": True,
         "data": {
-            "total": 0,
-            "by_status": {
-                "pending": 0,
-                "confirmed": 0,
-                "shipping": 0,
-                "delivered": 0,
-                "cancelled": 0
-            },
-            "recent_orders": []
-        },
-        "message": "Order stats - will be implemented with Order model"
+            "total": total,
+            "by_status": by_status,
+            "recent_orders": [
+                {
+                    "id": o.id,
+                    "order_number": o.order_number,
+                    "customer_name": o.customer_name,
+                    "total_amount": _to_vnd_int(o.total_amount),
+                    "status": o.status.value if hasattr(o.status, 'value') else str(o.status),
+                    "created_at": o.created_at.isoformat() if o.created_at else None,
+                }
+                for o in recent_orders
+            ]
+        }
     }
+
 
 
 @router.get("/dashboard/users")
@@ -196,6 +267,8 @@ async def get_user_stats(
     """
     Thống kê người dùng theo loại và trạng thái
     """
+    check_dashboard_access(current_user)
+
     from app.models.user import User
     
     total = db.query(User).filter(User.deleted_at.is_(None)).count()

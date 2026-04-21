@@ -6,10 +6,11 @@ from app.core.database import Base
 
 
 class BusinessType(str, enum.Enum):
-    INDIVIDUAL = "INDIVIDUAL"       # Hộ kinh doanh cá thể
-    HOUSEHOLD = "HOUSEHOLD"         # Hộ gia đình
+    # INDIVIDUAL đã bị loại khỏi API nhưng giữ lại để backward-compatible với DB
+    INDIVIDUAL = "INDIVIDUAL"       # Không còn cho phép đăng ký mới
+    HOUSEHOLD = "HOUSEHOLD"         # Hộ kinh doanh gia đình
     COOPERATIVE = "COOPERATIVE"     # Hợp tác xã
-    COMPANY = "COMPANY"             # Doanh nghiệp
+    COMPANY = "COMPANY"             # Doanh nghiệp / Công ty
 
 
 class VerificationStatus(str, enum.Enum):
@@ -23,19 +24,33 @@ class SellerProfile(Base):
     __tablename__ = "seller_profiles"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
 
     # Thông tin kinh doanh
     business_name = Column(String(255), nullable=False)         # Tên cơ sở / shop
-    business_type = Column(SQLEnum(BusinessType), default=BusinessType.INDIVIDUAL)
+    business_type = Column(SQLEnum(BusinessType), default=BusinessType.HOUSEHOLD)
     description = Column(Text, nullable=True)                   # Mô tả cơ sở
     address = Column(Text, nullable=True)                       # Địa chỉ cơ sở
+
+    # Store slug and contact
+    slug = Column(String(255), unique=True, nullable=True, index=True)  # URL cửa hàng
+    shop_phone = Column(String(20), nullable=True)
+    shop_email = Column(String(255), nullable=True)
+
+    # Địa chỉ lấy hàng chuẩn hóa
+    pickup_address_id = Column(Integer, ForeignKey("addresses.id", ondelete="SET NULL"), nullable=True)
 
     # Giấy tờ xác minh
     id_card_number = Column(String(20), nullable=True)          # CCCD / CMND
     id_card_front_url = Column(Text, nullable=True)             # Ảnh mặt trước CCCD
     id_card_back_url = Column(Text, nullable=True)              # Ảnh mặt sau CCCD
-    business_license_url = Column(Text, nullable=True)          # Giấy phép kinh doanh
+    business_license_url = Column(Text, nullable=True)           # Hình ảnh giấy phép kinh doanh
+    business_registration_cert_url = Column(Text, nullable=True)  # Giấy CN Đăng ký Kinh doanh (bản sao CN)
+    food_safety_cert_url = Column(Text, nullable=True)            # Giấy CN An toàn thực phẩm (ATTP)
+
+    # Tax and business registration
+    tax_id = Column(String(50), nullable=True, index=True)      # Mã số thuế (MST)
+    business_registration_number = Column(String(50), nullable=True)  # Số đăng ký kinh doanh
 
     # Tài khoản ngân hàng
     bank_name = Column(String(255), nullable=True)
@@ -44,7 +59,7 @@ class SellerProfile(Base):
 
     # Trạng thái xác minh
     verification_status = Column(
-        SQLEnum(VerificationStatus), default=VerificationStatus.PENDING
+        SQLEnum(VerificationStatus), default=VerificationStatus.PENDING, index=True
     )
     verified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     verified_at = Column(DateTime(timezone=True), nullable=True)

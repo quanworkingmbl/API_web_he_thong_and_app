@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.core.permissions import check_dashboard_access
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -28,7 +29,7 @@ class ConsumerStatsResponse(BaseModel):
 class TrendingProductResponse(BaseModel):
     id: int
     name: str
-    producer_name: str
+    seller_name: Optional[str] = None
     order_count: int
     rating: float
 
@@ -45,6 +46,8 @@ async def get_producer_stats(
     """
     Thống kê người sản xuất (nông dân, hợp tác xã, làng nghề)
     """
+    check_dashboard_access(current_user)
+
     from app.models.user import User
     
     # Thống kê cơ bản
@@ -92,6 +95,8 @@ async def get_consumer_stats(
     """
     Thống kê người tiêu dùng
     """
+    check_dashboard_access(current_user)
+
     from app.models.user import User
     
     total = db.query(User).filter(
@@ -133,6 +138,8 @@ async def get_trending_products(
     Sản phẩm trending (được đặt hàng nhiều nhất)
     TODO: Implement khi có Order model
     """
+    check_dashboard_access(current_user)
+
     from app.models.product import Product, ProductStatus
     
     # Lấy sản phẩm đã duyệt mới nhất (tạm thời, sau này sẽ sort theo order count)
@@ -166,6 +173,8 @@ async def get_region_stats(
     Thống kê sản phẩm theo vùng miền
     TODO: Implement khi có Region model
     """
+    check_dashboard_access(current_user)
+
     return {
         "success": True,
         "data": {
@@ -184,6 +193,8 @@ async def get_category_stats(
     Thống kê sản phẩm theo danh mục
     TODO: Implement khi có Category model
     """
+    check_dashboard_access(current_user)
+
     return {
         "success": True,
         "data": {

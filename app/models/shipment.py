@@ -27,17 +27,25 @@ class Shipment(Base):
     __tablename__ = "shipments"
 
     id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, unique=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, unique=True, index=True)
 
     # Shipping provider
     provider = Column(SQLEnum(ShippingProvider), default=ShippingProvider.GHN)
+    service_code = Column(String(50), nullable=True)  # EXPRESS, STANDARD, etc.
 
     # Mã vận đơn từ đơn vị vận chuyển
     tracking_code = Column(String(100), nullable=True, index=True)
     provider_order_code = Column(String(100), nullable=True)  # Mã của GHN/GHTK
 
     # Trạng thái vận chuyển
-    status = Column(SQLEnum(ShipmentStatus), default=ShipmentStatus.PENDING)
+    status = Column(SQLEnum(ShipmentStatus), default=ShipmentStatus.PENDING, index=True)
+
+    # Shipper info
+    shipper_name = Column(String(255), nullable=True)
+    shipper_phone = Column(String(20), nullable=True)
+
+    # COD (Cash On Delivery)
+    cod_amount = Column(Numeric(10, 2), default=0)
 
     # Chi phí và thời gian
     fee = Column(Numeric(10, 2), default=0)
@@ -45,9 +53,22 @@ class Shipment(Base):
     estimated_delivery = Column(DateTime(timezone=True), nullable=True)
     actual_delivery = Column(DateTime(timezone=True), nullable=True)
 
-    # Địa chỉ (snapshot từ order)
+    # Package dimensions
+    width = Column(Integer, nullable=True)  # cm
+    height = Column(Integer, nullable=True)  # cm
+    length = Column(Integer, nullable=True)  # cm
+    insurance_value = Column(Numeric(10, 2), nullable=True)
+
+    # Địa chỉ (với FK nếu dùng chuẩn hóa)
+    from_address_id = Column(Integer, nullable=True)  # FK to addresses hoặc store pickup
+    to_address_id = Column(Integer, nullable=True)  # FK to addresses
+
+    # Địa chỉ text (legacy/snapshot)
     from_address = Column(Text, nullable=True)
     to_address = Column(Text, nullable=True)
+
+    # Webhook signature để validate callbacks từ shipping provider
+    webhook_signature = Column(String(255), nullable=True)
 
     # Note & tracking detail
     note = Column(Text, nullable=True)

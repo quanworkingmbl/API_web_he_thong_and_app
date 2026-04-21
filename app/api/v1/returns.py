@@ -20,6 +20,12 @@ from app.models.order import Order, OrderStatus
 from app.api.v1.auth import get_current_user
 from app.models.user import User
 from pydantic import BaseModel, Field
+from app.services.notification import (
+    notify_return_request_to_admin,
+    notify_return_approved_to_buyer,
+    notify_return_rejected_to_buyer,
+    notify_return_received_to_buyer,
+)
 
 router = APIRouter()
 
@@ -91,6 +97,26 @@ async def create_return_request(
     db.commit()
     db.refresh(return_req)
 
+    # [NOTIFICATION R1] Thông báo Admin: yêu cầu đổi/trả mới
+    try:
+        order = db.query(Order).filter(Order.id == return_data.order_id).first()
+        admin_ids = [
+            u.id for u in db.query(User).filter(User.type == "admin").all()
+        ]
+        if admin_ids:
+            notify_return_request_to_admin(
+                db=db,
+                admin_user_ids=admin_ids,
+                return_id=return_req.id,
+                order_number=order.order_number if order else str(return_data.order_id),
+                customer_name=current_user.name or "Khách hàng",
+                return_type=return_req.return_type.value if hasattr(return_req.return_type, "value") else return_req.return_type,
+                reason=return_data.reason,
+            )
+            db.commit()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": "Yêu cầu đổi/trả đã được gửi. Chúng tôi sẽ xử lý trong 1-3 ngày làm việc.",
@@ -110,6 +136,7 @@ async def get_my_return_requests(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm theo mã đơn hàng"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -117,6 +144,13 @@ async def get_my_return_requests(
     query = db.query(ReturnRequest).filter(ReturnRequest.user_id == current_user.id)
     if status:
         query = query.filter(ReturnRequest.status == status)
+    if search:
+        matching_orders = db.query(Order.id).filter(
+            Order.customer_id == current_user.id,
+            Order.order_number.ilike(f"%{search}%")
+        ).all()
+        matching_ids = [o.id for o in matching_orders]
+        query = query.filter(ReturnRequest.order_id.in_(matching_ids))
 
     total = query.count()
     skip = (page - 1) * limit
@@ -138,6 +172,41 @@ async def get_my_return_requests(
             for r in requests
         ],
         "meta": {"total": total, "page": page, "limit": limit}
+    }
+
+
+@router.put("/{return_id}/cancel", summary="Khách hàng hủy yêu cầu đổi/trả")
+async def cancel_return_request(
+    return_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Khách hàng hủy yêu cầu đổi/trả.
+    Chỉ hủy được khi yêu cầu đang ở trạng thái PENDING.
+    """
+    req = db.query(ReturnRequest).filter(
+        ReturnRequest.id == return_id,
+        ReturnRequest.user_id == current_user.id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại hoặc không phải của bạn")
+
+    if req.status != ReturnStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ hủy được yêu cầu ở trạng thái PENDING. Hiện tại: {req.status.value}"
+        )
+
+    req.status = ReturnStatus.CANCELLED
+    req.handled_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã hủy yêu cầu đổi/trả",
+        "return_id": return_id,
+        "status": "CANCELLED"
     }
 
 
@@ -219,6 +288,20 @@ async def approve_return_request(
     req.handled_at = datetime.utcnow()
     db.commit()
 
+    # [NOTIFICATION R2] Thông báo Buyer: yêu cầu được duyệt
+    try:
+        return_type_val = req.return_type.value if hasattr(req.return_type, "value") else str(req.return_type)
+        notify_return_approved_to_buyer(
+            db=db,
+            buyer_id=req.user_id,
+            return_id=return_id,
+            return_type=return_type_val,
+            note=handle_data.note,
+        )
+        db.commit()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": "Đã duyệt yêu cầu đổi/trả. Khách hàng sẽ được thông báo gửi hàng về.",
@@ -249,6 +332,20 @@ async def reject_return_request(
     req.handled_at = datetime.utcnow()
     db.commit()
 
+    # [NOTIFICATION R3] Thông báo Buyer: yêu cầu bị từ chối
+    try:
+        return_type_val = req.return_type.value if hasattr(req.return_type, "value") else str(req.return_type)
+        notify_return_rejected_to_buyer(
+            db=db,
+            buyer_id=req.user_id,
+            return_id=return_id,
+            return_type=return_type_val,
+            note=handle_data.note,
+        )
+        db.commit()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": "Đã từ chối yêu cầu đổi/trả",
@@ -276,9 +373,23 @@ async def mark_return_received(
     req.handled_at = datetime.utcnow()
     db.commit()
 
+    # [NOTIFICATION R4] Thông báo Buyer: hệ thống đã nhận hàng trả về
+    try:
+        return_type_val = req.return_type.value if hasattr(req.return_type, "value") else str(req.return_type)
+        notify_return_received_to_buyer(
+            db=db,
+            buyer_id=req.user_id,
+            return_id=return_id,
+            return_type=return_type_val,
+        )
+        db.commit()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": "Đã nhận hàng trả về. Tiến hành hoàn tiền hoặc gửi hàng đổi.",
         "return_id": return_id,
         "status": "RECEIVED"
     }
+

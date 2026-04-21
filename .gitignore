@@ -4,9 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
+# env/
 venv/
-ENV/
+# ENV/
 build/
 develop-eggs/
 dist/
@@ -22,11 +22,15 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-md/
+
 # Environment
-# .env
+.env
 # .env.local
 # .env.*.local
+
+# Google Cloud service account keys
+project-f3e21dd2-0270-45f3-91c-392a0d4991a3.json
+*service-account*.json
 # IDE
 .vscode/
 .idea/
