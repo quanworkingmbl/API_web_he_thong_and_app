@@ -563,7 +563,8 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
     items_data = []
     subtotal = Decimal("0")
 
-    for item in cart.items:
+    # Sắp xếp theo item.id để đảm bảo thứ tự ổn định, không đổi vị trí sau mỗi update
+    for item in sorted(cart.items, key=lambda x: x.id):
         product = db.query(Product).filter(Product.id == item.product_id).first()
         if not product:
             continue
@@ -1524,26 +1525,6 @@ async def add_mobile_cart_item(
     _, unit_price = validate_line_for_sale(db, product, item_data.quantity, item_data.variant_id)
 
     cart = _get_or_create_mobile_cart(current_user.id, db)
-
-    # Kiểu A: một giỏ chỉ chứa sản phẩm của một seller.
-    current_seller_ids = {
-        sid
-        for (sid,) in db.query(Product.seller_id)
-        .join(CartItem, CartItem.product_id == Product.id)
-        .filter(CartItem.cart_id == cart.id)
-        .distinct()
-        .all()
-    }
-    if len(current_seller_ids) > 1:
-        raise HTTPException(
-            status_code=409,
-            detail="Giỏ hàng đang chứa nhiều seller (dữ liệu cũ). Vui lòng xóa giỏ hàng để tiếp tục theo chuẩn mobile.",
-        )
-    if current_seller_ids and product.seller_id not in current_seller_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="Giỏ hàng chỉ hỗ trợ 1 seller. Vui lòng checkout/xóa giỏ hiện tại trước khi thêm sản phẩm seller khác.",
-        )
 
     existing_item = _mobile_cart_line_filter(db, cart.id, item_data.product_id, item_data.variant_id).first()
 
