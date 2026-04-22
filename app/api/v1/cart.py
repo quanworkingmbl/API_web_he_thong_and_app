@@ -16,6 +16,8 @@ from app.services.inventory import (
 )
 from pydantic import BaseModel, Field
 
+_SHIPPING_FEE = Decimal("30000")
+
 router = APIRouter()
 
 
@@ -37,23 +39,28 @@ class CartItemResponse(BaseModel):
     id: int
     product_id: int
     seller_id: int
+    seller_name: str = ""
     variant_id: Optional[int] = None
     product_name: str
     product_image: Optional[str]
+    unit_label: str = "1 sản phẩm"
+    location_label: str = ""
     unit_price: Decimal
     quantity: int
     subtotal: Decimal
     stock_quantity: int
+    is_active: bool = True
 
     class Config:
         from_attributes = True
 
 
 class CartResponse(BaseModel):
-    id: int
-    user_id: int
     items: List[CartItemResponse]
     total_items: int
+    subtotal: Decimal
+    shipping_fee: str
+    discount_amount: str
     total_amount: Decimal
     updated_at: Optional[datetime]
 
@@ -88,9 +95,12 @@ def _cart_line_filter(db: Session, cart_id: int, product_id: int, variant_id: Op
 def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
     """Build CartResponse với đầy đủ thông tin sản phẩm."""
     items_data = []
-    total_amount = Decimal("0")
+    subtotal_total = Decimal("0")
 
-    for item in cart.items:
+    # Sắp xếp theo item.id để đảm bảo thứ tự ổn định, không đổi vị trí sau mỗi update
+    sorted_items = sorted(cart.items, key=lambda x: x.id)
+
+    for item in sorted_items:
         product = db.query(Product).filter(Product.id == item.product_id).first()
         if not product:
             continue
@@ -100,28 +110,56 @@ def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
             else None
         )
         avail = get_available_stock(db, product, item.variant_id)
-        subtotal = item.unit_price * item.quantity
-        total_amount += subtotal
+        line_subtotal = item.unit_price * item.quantity
+        subtotal_total += line_subtotal
+
+        # Lấy seller name từ relationship (tránh N+1 query)
+        seller_name = ""
+        if product.seller and product.seller.full_name:
+            seller_name = product.seller.full_name
+
+        # Lấy category name làm location_label
+        location_label = ""
+        if product.category_id:
+            from app.models.category import Category
+            cat = db.query(Category).filter(Category.id == product.category_id).first()
+            if cat:
+                location_label = cat.name
+
+        # unit_label từ variant hoặc product unit
+        unit_label = "1 sản phẩm"
+        if variant and hasattr(variant, "unit") and variant.unit:
+            unit_label = str(variant.unit)
+        elif hasattr(product, "unit") and product.unit:
+            unit_label = str(product.unit)
+
         items_data.append(
             CartItemResponse(
                 id=item.id,
                 product_id=item.product_id,
                 seller_id=product.seller_id,
+                seller_name=seller_name,
                 variant_id=item.variant_id,
                 product_name=product.name,
                 product_image=product.images,
+                unit_label=unit_label,
+                location_label=location_label,
                 unit_price=item.unit_price,
                 quantity=item.quantity,
-                subtotal=subtotal,
+                subtotal=line_subtotal,
                 stock_quantity=avail,
+                is_active=product.is_active,
             )
         )
 
+    total_amount = subtotal_total + _SHIPPING_FEE
+
     return CartResponse(
-        id=cart.id,
-        user_id=cart.user_id,
         items=items_data,
         total_items=len(items_data),
+        subtotal=subtotal_total,
+        shipping_fee=str(_SHIPPING_FEE),
+        discount_amount="0",
         total_amount=total_amount,
         updated_at=cart.updated_at,
     )
@@ -163,26 +201,7 @@ async def add_cart_item(
 
     cart = _get_or_create_cart(current_user.id, db)
 
-    # Kiểu A: một giỏ chỉ chứa sản phẩm của một seller.
-    current_seller_ids = {
-        sid
-        for (sid,) in db.query(Product.seller_id)
-        .join(CartItem, CartItem.product_id == Product.id)
-        .filter(CartItem.cart_id == cart.id)
-        .distinct()
-        .all()
-    }
-    if len(current_seller_ids) > 1:
-        raise HTTPException(
-            status_code=409,
-            detail="Giỏ hàng đang chứa nhiều seller (dữ liệu cũ). Vui lòng xóa giỏ hàng để tiếp tục theo Kiểu A.",
-        )
-    if current_seller_ids and product.seller_id not in current_seller_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="Giỏ hàng chỉ hỗ trợ 1 seller. Vui lòng checkout/xóa giỏ hiện tại trước khi thêm sản phẩm seller khác.",
-        )
-
+    # Multi-seller: giỏ hàng hỗ trợ sản phẩm của nhiều seller cùng lúc.
     existing_item = _cart_line_filter(
         db, cart.id, item_data.product_id, item_data.variant_id
     ).first()
