@@ -64,6 +64,47 @@ async def get_my_notifications(
 
     data = []
     for n in notifications:
+        ref_name: str | None = None
+        ref_image: str | None = None
+
+        try:
+            if n.ref_type == "order" and n.ref_id:
+                from app.models.order import Order
+                obj = db.query(Order).filter(Order.id == n.ref_id).first()
+                if obj:
+                    ref_name = f"Đơn hàng #{getattr(obj, 'order_number', n.ref_id)}"
+            elif n.ref_type == "product" and n.ref_id:
+                from app.models.product import Product
+                obj = db.query(Product).filter(Product.id == n.ref_id).first()
+                if obj:
+                    ref_name = obj.name
+                    # Lấy ảnh đầu tiên từ field images (có thể là JSON array hoặc URL đơn)
+                    import json as _json
+                    raw = obj.images or ""
+                    try:
+                        imgs = _json.loads(raw)
+                        ref_image = imgs[0] if isinstance(imgs, list) and imgs else raw or None
+                    except Exception:
+                        ref_image = raw or None
+            elif n.ref_type == "content" and n.ref_id:
+                from app.models.content import Content
+                obj = db.query(Content).filter(Content.id == n.ref_id).first()
+                if obj:
+                    ref_name = obj.title
+                    ref_image = obj.images or None
+            elif n.ref_type == "complaint" and n.ref_id:
+                from app.models.complaint import Complaint
+                obj = db.query(Complaint).filter(Complaint.id == n.ref_id).first()
+                if obj:
+                    ref_name = f"Khiếu nại #{n.ref_id}: {getattr(obj, 'title', '') or ''}"
+            elif n.ref_type == "seller_profile" and n.ref_id:
+                from app.models.user import User as _User
+                obj = db.query(_User).filter(_User.id == n.ref_id).first()
+                if obj:
+                    ref_name = obj.full_name or obj.name or f"Người dùng #{n.ref_id}"
+        except Exception:
+            pass  # Không break nếu enrich lỗi
+
         data.append({
             "id": n.id,
             "category": n.category,
@@ -72,10 +113,13 @@ async def get_my_notifications(
             "action_url": n.action_url,
             "ref_type": n.ref_type,
             "ref_id": n.ref_id,
+            "ref_name": ref_name,
+            "ref_image": ref_image,
             "is_read": n.is_read,
             "read_at": n.read_at.isoformat() if n.read_at else None,
             "created_at": n.created_at.isoformat() if n.created_at else None,
         })
+
 
     return {
         "success": True,
