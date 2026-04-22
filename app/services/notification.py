@@ -1,21 +1,18 @@
 """
 Notification Service – Helper functions để tạo thông báo
 
-Cách dùng trong endpoint:
-    from app.services.notification import create_notification, create_order_notification
-
-    # Trong endpoint, trước db.commit():
-    create_notification(
-        db=db,
-        user_id=seller_id,
-        category="ORDER",
-        title=f"Đơn hàng mới #{order_number}",
-        message=f"Khách {customer_name} vừa đặt {total_amount}₫",
-        ref_type="order",
-        ref_id=order_id,
-        action_url=f"/seller/orders/{order_id}",
-    )
-    db.commit()   # commit cả notification lẫn thay đổi chính
+action_url mapping (khớp với routes CMS thực tế – createHashRouter):
+  /seller/orders?highlight={id}          – Seller: trang orders
+  /orders?highlight={id}                 – Buyer: trang orders
+  /products?highlight={id}              – Admin: trang duyệt sản phẩm
+  /seller/products?highlight={id}       – Seller: trang sản phẩm của mình
+  /content?highlight={id}               – Admin: trang duyệt bài viết
+  /seller/posts?highlight={id}          – Seller: trang bài viết của mình
+  /management/seller-kyc?highlight={id} – Admin: trang duyệt KYC seller
+  /seller                               – Seller: dashboard (sau khi KYC OK)
+  /seller/kyc                           – Seller: trang KYC (sau khi bị từ chối)
+  /complaint?highlight={id}             – Admin: trang khiếu nại
+  /returns?highlight={id}               – Admin: trang đổi/trả
 """
 
 from sqlalchemy.orm import Session
@@ -107,7 +104,7 @@ def notify_new_order_to_seller(
         message=f"Khách hàng {customer_name} vừa đặt đơn {order_number} — {int(total_amount):,}₫. Xác nhận ngay!",
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/seller/orders/{order_id}",
+        action_url=f"/seller/orders?highlight={order_id}",
     )
 
 
@@ -127,7 +124,7 @@ def notify_order_placed_to_buyer(
         message=f"Đơn hàng {order_number} ({int(total_amount):,}₫) đã được gửi đến người bán. Chờ xác nhận.",
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/orders/{order_id}",
+        action_url=f"/orders?highlight={order_id}",
     )
 
 
@@ -146,7 +143,7 @@ def notify_order_confirmed_to_buyer(
         message=f"Đơn hàng {order_number} đã được người bán xác nhận và đang chuẩn bị hàng.",
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/orders/{order_id}",
+        action_url=f"/orders?highlight={order_id}",
     )
 
 
@@ -166,7 +163,7 @@ def notify_order_rejected_to_buyer(
         message=f"Đơn hàng {order_number} đã bị người bán từ chối. Lý do: {reason}",
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/orders/{order_id}",
+        action_url=f"/orders?highlight={order_id}",
     )
 
 
@@ -185,7 +182,7 @@ def notify_order_processing_to_buyer(
         message=f"Đơn hàng {order_number} đang được người bán đóng gói và chuẩn bị giao.",
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/orders/{order_id}",
+        action_url=f"/orders?highlight={order_id}",
     )
 
 
@@ -204,7 +201,7 @@ def notify_order_shipping_to_buyer(
         message=f"Đơn hàng {order_number} đã được giao cho đơn vị vận chuyển. Chuẩn bị nhận hàng!",
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/orders/{order_id}",
+        action_url=f"/orders?highlight={order_id}",
     )
 
 
@@ -224,7 +221,7 @@ def notify_order_delivered_to_seller(
         message=f"Khách hàng đã xác nhận nhận hàng đơn {order_number}. Doanh thu {int(seller_amount):,}₫ đã được ghi nhận.",
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/seller/orders/{order_id}",
+        action_url=f"/seller/orders?highlight={order_id}",
     )
 
 
@@ -247,7 +244,7 @@ def notify_order_cancelled_to_seller(
         message=msg,
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/seller/orders/{order_id}",
+        action_url=f"/seller/orders?highlight={order_id}",
     )
 
 
@@ -270,7 +267,7 @@ def notify_order_cancelled_by_admin(
         message=msg,
         ref_type="order",
         ref_id=order_id,
-        action_url=f"/orders/{order_id}",
+        action_url=f"/orders?highlight={order_id}",
     )
 
 
@@ -296,7 +293,7 @@ def notify_product_pending_to_admin(
             message=f"Sản phẩm '{product_name}' của {seller_name} vừa được nộp và đang chờ xét duyệt.",
             ref_type="product",
             ref_id=product_id,
-            action_url=f"/admin/products/{product_id}",
+            action_url=f"/products?highlight={product_id}",
         ))
     return notifs
 
@@ -316,7 +313,7 @@ def notify_product_approved_to_seller(
         message=f"Sản phẩm '{product_name}' đã được duyệt và hiện đang hiển thị trên sàn.",
         ref_type="product",
         ref_id=product_id,
-        action_url=f"/seller/products/{product_id}",
+        action_url=f"/seller/products?highlight={product_id}",
     )
 
 
@@ -337,7 +334,7 @@ def notify_product_rejected_to_seller(
         message=f"Sản phẩm '{product_name}' chưa được duyệt.{detail}",
         ref_type="product",
         ref_id=product_id,
-        action_url=f"/seller/products/{product_id}",
+        action_url=f"/seller/products?highlight={product_id}",
     )
 
 
@@ -363,7 +360,7 @@ def notify_content_pending_to_admin(
             message=f"Bài viết '{content_title}' của {author_name} đang chờ xét duyệt.",
             ref_type="content",
             ref_id=content_id,
-            action_url=f"/admin/content/{content_id}",
+            action_url=f"/content?highlight={content_id}",
         ))
     return notifs
 
@@ -383,7 +380,7 @@ def notify_content_approved_to_author(
         message=f"Bài viết '{content_title}' đã được duyệt và đăng lên hệ thống.",
         ref_type="content",
         ref_id=content_id,
-        action_url=f"/seller/posts/{content_id}",
+        action_url=f"/seller/posts?highlight={content_id}",
     )
 
 
@@ -404,7 +401,7 @@ def notify_content_rejected_to_author(
         message=f"Bài viết '{content_title}' chưa được duyệt.{detail}",
         ref_type="content",
         ref_id=content_id,
-        action_url=f"/seller/posts/{content_id}",
+        action_url=f"/seller/posts?highlight={content_id}",
     )
 
 
@@ -430,7 +427,7 @@ def notify_kyc_pending_to_admin(
             message=f"Người dùng {seller_name} ({business_name}) vừa nộp hồ sơ đăng ký seller.",
             ref_type="seller_profile",
             ref_id=seller_user_id,
-            action_url=f"/admin/sellers/{seller_user_id}",
+            action_url=f"/management/seller-kyc?highlight={seller_user_id}",
         ))
     return notifs
 
@@ -445,7 +442,7 @@ def notify_kyc_verified_to_seller(db, seller_id: int):
         message="Hồ sơ kinh doanh của bạn đã được xác minh thành công. Bạn có thể bắt đầu đăng sản phẩm và bán hàng ngay!",
         ref_type="seller_profile",
         ref_id=seller_id,
-        action_url="/seller/dashboard",
+        action_url="/seller",
     )
 
 
@@ -459,7 +456,7 @@ def notify_kyc_rejected_to_seller(db, seller_id: int, rejection_reason: str):
         message=f"Hồ sơ kinh doanh của bạn chưa được duyệt. Lý do: {rejection_reason}. Vui lòng bổ sung thông tin và nộp lại.",
         ref_type="seller_profile",
         ref_id=seller_id,
-        action_url="/seller/register",
+        action_url="/seller/kyc",
     )
 
 
@@ -487,7 +484,7 @@ def notify_new_complaint_to_admin(
             message=f"Khách hàng {customer_name}{order_info} vừa gửi khiếu nại: '{title}'.",
             ref_type="complaint",
             ref_id=complaint_id,
-            action_url=f"/admin/complaints/{complaint_id}",
+            action_url=f"/complaint?highlight={complaint_id}",
         ))
     return notifs
 
@@ -509,7 +506,8 @@ def notify_new_complaint_to_seller(
         message=f"Khách hàng {customer_name} đã gửi khiếu nại liên quan đến{order_info} của bạn. Vui lòng phối hợp xử lý.",
         ref_type="complaint",
         ref_id=complaint_id,
-        action_url=f"/seller/complaints/{complaint_id}",
+        # Seller không có trang complaint riêng → dẫn đến trang orders để xem context
+        action_url=f"/seller/orders?highlight={order_number}" if order_number else "/seller/orders",
     )
 
 
@@ -530,7 +528,7 @@ def notify_complaint_assigned_to_cs(
         message=f"{assigned_by_name} đã giao bạn xử lý khiếu nại #{complaint_id}{order_info}.",
         ref_type="complaint",
         ref_id=complaint_id,
-        action_url=f"/admin/complaints/{complaint_id}",
+        action_url=f"/complaint?highlight={complaint_id}",
     )
 
 
@@ -549,7 +547,8 @@ def notify_complaint_comment_to_buyer(
         message=f"{commenter_name} vừa phản hồi khiếu nại của bạn. Xem chi tiết để tiếp tục trao đổi.",
         ref_type="complaint",
         ref_id=complaint_id,
-        action_url=f"/complaints/{complaint_id}",
+        # Buyer không có trang complaint riêng → dẫn đến orders
+        action_url=f"/orders?highlight={complaint_id}",
     )
 
 
@@ -572,7 +571,7 @@ def notify_complaint_comment_to_admin(
             message=f"{role_label} {commenter_name} vừa phản hồi trên khiếu nại #{complaint_id}.",
             ref_type="complaint",
             ref_id=complaint_id,
-            action_url=f"/admin/complaints/{complaint_id}",
+            action_url=f"/complaint?highlight={complaint_id}",
         ))
     return notifs
 
@@ -593,7 +592,7 @@ def notify_complaint_resolved_to_buyer(
         message=f"Khiếu nại của bạn đã được xử lý hoàn tất.{detail} Vui lòng xác nhận để đóng khiếu nại.",
         ref_type="complaint",
         ref_id=complaint_id,
-        action_url=f"/complaints/{complaint_id}",
+        action_url=f"/orders?highlight={complaint_id}",
     )
 
 
@@ -623,7 +622,7 @@ def notify_return_request_to_admin(
             message=f"Khách hàng {customer_name} yêu cầu {type_label} đơn #{order_number}: {short_reason}",
             ref_type="return",
             ref_id=return_id,
-            action_url=f"/admin/returns/{return_id}",
+            action_url=f"/returns?highlight={return_id}",
         ))
     return notifs
 
@@ -646,7 +645,7 @@ def notify_return_approved_to_buyer(
         message=f"Yêu cầu {type_label} của bạn đã được chấp nhận.{detail} Vui lòng gửi hàng về địa chỉ được cung cấp.",
         ref_type="return",
         ref_id=return_id,
-        action_url=f"/orders/returns/{return_id}",
+        action_url=f"/orders?highlight={return_id}",
     )
 
 
@@ -668,7 +667,7 @@ def notify_return_rejected_to_buyer(
         message=f"Yêu cầu {type_label} của bạn chưa được chấp nhận.{detail}",
         ref_type="return",
         ref_id=return_id,
-        action_url=f"/orders/returns/{return_id}",
+        action_url=f"/orders?highlight={return_id}",
     )
 
 
@@ -688,5 +687,5 @@ def notify_return_received_to_buyer(
         message=f"Chúng tôi đã nhận được hàng trả về của bạn. Đang tiến hành xử lý {type_label}.",
         ref_type="return",
         ref_id=return_id,
-        action_url=f"/orders/returns/{return_id}",
+        action_url=f"/orders?highlight={return_id}",
     )
