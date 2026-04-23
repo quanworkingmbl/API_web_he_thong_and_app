@@ -76,20 +76,51 @@ async def get_seller_wallet(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Lấy thông tin ví: pending, available, đã rút."""
+    """Lấy thông tin ví: pending, available, đã rút + thống kê doanh thu."""
     _require_seller(current_user)
     wallet = _get_or_create_wallet(current_user.id, db)
+
+    from sqlalchemy import func as sf
+    from app.models.order import Order, OrderStatus
+
+    # Tổng tất cả đơn DELIVERED đã credited cho seller
+    total_stats = db.query(
+        sf.count(Order.id).label("total_orders"),
+        sf.coalesce(sf.sum(Order.seller_amount), 0).label("total_earned"),
+    ).filter(
+        Order.seller_id == current_user.id,
+        Order.status == OrderStatus.DELIVERED,
+        Order.wallet_credited == True,
+        Order.is_active == True,
+    ).first()
+
+    # Tháng hiện tại
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    month_stats = db.query(
+        sf.coalesce(sf.sum(Order.seller_amount), 0).label("month_earned"),
+    ).filter(
+        Order.seller_id == current_user.id,
+        Order.status == OrderStatus.DELIVERED,
+        Order.wallet_credited == True,
+        Order.is_active == True,
+        Order.delivered_at >= month_start,
+    ).first()
 
     return {
         "success": True,
         "data": {
             "seller_id": current_user.id,
-            "pending_balance": str(wallet.pending_balance),
-            "available_balance": str(wallet.available_balance),
-            "total_withdrawn": str(wallet.total_withdrawn),
-            "updated_at": wallet.updated_at.isoformat() if wallet.updated_at else None
+            "pending_balance": str(wallet.pending_balance or 0),
+            "available_balance": str(wallet.available_balance or 0),
+            "total_withdrawn": str(wallet.total_withdrawn or 0),
+            "total_earned": str(total_stats.total_earned if total_stats else 0),
+            "total_delivered_orders": total_stats.total_orders if total_stats else 0,
+            "this_month_earned": str(month_stats.month_earned if month_stats else 0),
+            "updated_at": wallet.updated_at.isoformat() if wallet.updated_at else None,
         }
     }
+
 
 
 @router.get("/history", summary="Lịch sử kỳ đối soát")

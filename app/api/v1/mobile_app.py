@@ -52,6 +52,7 @@ from app.services.notification import (
     notify_order_delivered_to_seller,
     notify_order_cancelled_to_seller,
 )
+from app.services.wallet import credit_seller_wallet
 from pydantic import BaseModel, Field
 from decimal import Decimal
 import uuid
@@ -2211,6 +2212,10 @@ async def confirm_order_received(
         note=note,
         auto_flush=True,
     )
+
+    # [WALLET] Cộng tiền vào ví seller khi user xác nhận nhận hàng
+    # Chỉ thực hiện tại đây – KHÔNG cộng khi seller/admin set DELIVERED
+    credit_seller_wallet(db=db, order=order)
 
     # [NOTIFICATION O7] Thông báo cho Seller: khách đã nhận hàng
     notify_order_delivered_to_seller(

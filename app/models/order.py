@@ -78,6 +78,10 @@ class Order(Base):
     # Soft-delete
     is_active = Column(Boolean, default=True, nullable=False, index=True)
 
+    # Đã cộng tiền vào ví seller chưa (chống double-credit)
+    wallet_credited = Column(Boolean, default=False, nullable=False, index=True)
+
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
