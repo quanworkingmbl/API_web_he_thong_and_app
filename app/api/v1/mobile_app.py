@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, 
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from app.core.database import get_db
 from app.models.content import Content, ContentStatus, ContentAuditLog, ContentAuditAction
 from app.models.product import Product, ProductStatus
@@ -33,6 +33,7 @@ from app.models.address import Address, Province, District, Ward
 from app.models.promotion import Promotion, PromotionStatus
 from app.models.promotion_usage import PromotionUsage
 from app.models.complaint import Review
+from app.models.review_image import ReviewImage
 from app.models.shipment import Shipment
 from app.models.seller_profile import SellerProfile, VerificationStatus
 from app.api.v1.auth import get_current_user, get_current_user_optional
@@ -2644,4 +2645,301 @@ async def upload_profile_avatar(
         "success": True,
         "message": "Avatar uploaded successfully",
         "data": {"avatar_url": avatar_url}
+    }
+
+
+# ==============================================================================
+# REVIEWS – Đánh giá sản phẩm (Mobile)
+# ==============================================================================
+
+REVIEW_DEADLINE_DAYS = 5  # Số ngày được phép đánh giá sau khi nhận hàng
+
+
+@router.get("/orders/my/pending-reviews", summary="Danh sách sản phẩm cần đánh giá")
+async def get_pending_reviews(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Trả về danh sách ORDER ITEM của các đơn DELIVERED mà user chưa đánh giá.
+    - Chỉ hiển thị trong vòng REVIEW_DEADLINE_DAYS ngày kể từ delivered_at.
+    - Mỗi item có đủ thông tin để render card đánh giá.
+    """
+    deadline_cutoff = datetime.utcnow() - timedelta(days=REVIEW_DEADLINE_DAYS)
+
+    # Lấy tất cả đơn DELIVERED của user, còn trong deadline
+    delivered_orders = db.query(Order).filter(
+        Order.customer_id == current_user.id,
+        Order.status == OrderStatus.DELIVERED,
+        Order.delivered_at >= deadline_cutoff,
+    ).all()
+
+    if not delivered_orders:
+        return {"success": True, "data": [], "meta": {"total": 0}}
+
+    order_ids = [o.id for o in delivered_orders]
+    order_map = {o.id: o for o in delivered_orders}
+
+    # Lấy tất cả order items trong các đơn đó
+    all_items = db.query(OrderItem).filter(
+        OrderItem.order_id.in_(order_ids)
+    ).all()
+
+    if not all_items:
+        return {"success": True, "data": [], "meta": {"total": 0}}
+
+    # Lấy tập product_id đã được review bởi user này
+    reviewed_product_ids = set(
+        r.product_id for r in db.query(Review.product_id).filter(
+            Review.user_id == current_user.id,
+            Review.product_id.in_([i.product_id for i in all_items]),
+        ).all()
+    )
+
+    pending_list = []
+    for item in all_items:
+        if item.product_id in reviewed_product_ids:
+            continue  # Đã đánh giá sản phẩm này rồi
+
+        order = order_map.get(item.order_id)
+        if not order or not order.delivered_at:
+            continue
+
+        delivered_at = order.delivered_at
+        if delivered_at.tzinfo is not None:
+            from datetime import timezone
+            deadline_cutoff_aware = datetime.now(timezone.utc) - timedelta(days=REVIEW_DEADLINE_DAYS)
+            if delivered_at < deadline_cutoff_aware:
+                continue
+        else:
+            if delivered_at < deadline_cutoff:
+                continue
+
+        days_left = REVIEW_DEADLINE_DAYS - (
+            datetime.utcnow() - (delivered_at.replace(tzinfo=None) if delivered_at.tzinfo else delivered_at)
+        ).days
+        days_left = max(0, days_left)
+
+        pending_list.append({
+            "order_id": item.order_id,
+            "order_number": order.order_number,
+            "order_item_id": item.id,
+            "product_id": item.product_id,
+            "product_name": item.product_name,
+            "product_image": _extract_first_media_url(item.product_image),
+            "unit_price": str(item.unit_price),
+            "quantity": item.quantity,
+            "delivered_at": delivered_at.isoformat(),
+            "days_left": days_left,
+        })
+
+    # Sắp xếp: ít ngày còn lại nhất lên đầu (sắp hết hạn)
+    pending_list.sort(key=lambda x: x["days_left"])
+
+    return {
+        "success": True,
+        "data": pending_list,
+        "meta": {"total": len(pending_list)},
+    }
+
+
+@router.post("/reviews", summary="Gửi đánh giá sản phẩm")
+async def submit_review(
+    product_id: int = Form(...),
+    order_id: int = Form(...),
+    order_item_id: Optional[int] = Form(None),
+    rating: int = Form(..., ge=1, le=5),
+    comment: Optional[str] = Form(None, max_length=2000),
+    is_anonymous: bool = Form(False),
+    images: Optional[List[UploadFile]] = File(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Tạo đánh giá sản phẩm (multipart/form-data).
+    - Yêu cầu: đơn hàng ở trạng thái DELIVERED và còn trong REVIEW_DEADLINE_DAYS.
+    - Upload tối đa 5 ảnh kèm đánh giá (JPEG/PNG/WebP, tối đa 10MB mỗi ảnh).
+    """
+    # Kiểm tra sản phẩm tồn tại
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
+
+    # Verify đơn hàng DELIVERED, thuộc user
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.customer_id == current_user.id,
+        Order.status == OrderStatus.DELIVERED,
+    ).first()
+    if not order:
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ có thể đánh giá sau khi đơn hàng đã được giao thành công",
+        )
+
+    # Kiểm tra deadline 5 ngày
+    if order.delivered_at:
+        delivered_naive = order.delivered_at.replace(tzinfo=None) if order.delivered_at.tzinfo else order.delivered_at
+        if (datetime.utcnow() - delivered_naive).days > REVIEW_DEADLINE_DAYS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Đã quá {REVIEW_DEADLINE_DAYS} ngày kể từ khi nhận hàng, không thể đánh giá",
+            )
+
+    # Kiểm tra đã đánh giá sản phẩm này chưa
+    existing = db.query(Review).filter(
+        Review.product_id == product_id,
+        Review.user_id == current_user.id,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Bạn đã đánh giá sản phẩm này rồi",
+        )
+
+    # Validate và upload ảnh
+    uploaded_urls: List[str] = []
+    if images:
+        valid_images = [f for f in images if f and f.filename]
+        if len(valid_images) > 5:
+            raise HTTPException(status_code=400, detail="Tối đa 5 ảnh mỗi đánh giá")
+
+        for img_file in valid_images:
+            mime = img_file.content_type or ""
+            if mime not in _ALLOWED_IMG:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ảnh '{img_file.filename}' không hợp lệ. Chỉ chấp nhận JPEG, PNG, WebP.",
+                )
+            img_bytes = await img_file.read()
+            if len(img_bytes) > 10 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ảnh '{img_file.filename}' quá lớn. Tối đa 10MB.",
+                )
+            try:
+                url = _upload_to_supabase(img_bytes, img_file.filename or "review.jpg", mime)
+                uploaded_urls.append(url)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Upload ảnh thất bại: {e}")
+
+    # Tạo review
+    review = Review(
+        product_id=product_id,
+        user_id=current_user.id,
+        order_item_id=order_item_id,
+        rating=rating,
+        comment=comment,
+    )
+    db.add(review)
+    db.flush()  # lấy review.id
+
+    # Lưu ảnh kèm theo
+    for idx, url in enumerate(uploaded_urls):
+        db.add(ReviewImage(
+            review_id=review.id,
+            image_url=url,
+            sort_order=idx,
+        ))
+
+    db.commit()
+    db.refresh(review)
+
+    return {
+        "success": True,
+        "message": "Đánh giá đã được gửi thành công. Cảm ơn bạn!",
+        "data": {
+            "id": review.id,
+            "product_id": review.product_id,
+            "rating": review.rating,
+            "comment": review.comment,
+            "image_count": len(uploaded_urls),
+            "created_at": review.created_at.isoformat() if review.created_at else None,
+        },
+    }
+
+
+@router.get("/reviews/product/{product_id}", summary="Đánh giá của sản phẩm (public)")
+async def get_product_reviews_mobile(
+    product_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    rating_filter: Optional[int] = Query(None, ge=1, le=5, description="Lọc theo số sao"),
+    db: Session = Depends(get_db),
+):
+    """
+    Lấy danh sách đánh giá của sản phẩm – public (không cần đăng nhập).
+    Trả về: thống kê tổng hợp + danh sách review kèm ảnh.
+    """
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
+
+    # Thống kê
+    stats = db.query(
+        sql_func.count(Review.id).label("total"),
+        sql_func.avg(Review.rating).label("avg_rating"),
+    ).filter(Review.product_id == product_id).first()
+
+    total_reviews = stats.total or 0
+    avg_rating = round(float(stats.avg_rating), 1) if stats.avg_rating else 0.0
+
+    # Phân bố sao
+    rating_distribution = {}
+    for star in range(1, 6):
+        count = db.query(sql_func.count(Review.id)).filter(
+            Review.product_id == product_id,
+            Review.rating == star,
+        ).scalar() or 0
+        rating_distribution[str(star)] = count
+
+    # Query reviews
+    q = db.query(Review).filter(Review.product_id == product_id)
+    if rating_filter:
+        q = q.filter(Review.rating == rating_filter)
+    total_filtered = q.count()
+    skip = (page - 1) * limit
+    reviews = q.order_by(Review.created_at.desc()).offset(skip).limit(limit).all()
+
+    review_list = []
+    for r in reviews:
+        user = db.query(User).filter(User.id == r.user_id).first()
+        name = (user.name or "Người dùng") if user else "Người dùng ẩn danh"
+        # Che tên để bảo vệ privacy: A***n
+        if len(name) > 2:
+            name = name[0] + "*" * (len(name) - 2) + name[-1]
+
+        # Ảnh kèm review
+        review_images = [
+            img.image_url
+            for img in sorted(r.images, key=lambda x: x.sort_order)
+        ] if r.images else []
+
+        review_list.append({
+            "id": r.id,
+            "reviewer_name": name,
+            "rating": r.rating,
+            "comment": r.comment,
+            "images": review_images,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "product_id": product_id,
+            "product_name": product.name,
+            "stats": {
+                "total_reviews": total_reviews,
+                "avg_rating": avg_rating,
+                "rating_distribution": rating_distribution,
+            },
+            "reviews": review_list,
+        },
+        "meta": {
+            "total": total_filtered,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total_filtered + limit - 1) // limit if total_filtered > 0 else 1,
+        },
     }
