@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, func as sql_func
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime
 from app.core.database import get_db
 from app.models.product import Product, ProductApproval, ProductStatus, ProductLabel, ProductPriceLog
 from app.models.category import Category
+from app.models.complaint import Review
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.core.permissions import check_product_label_access, check_seller_kyc_verified
@@ -46,8 +47,8 @@ class ProductResponse(BaseModel):
     category_name: Optional[str] = None
     status: str
     label: Optional[str]
-    product_type: Optional[str] = None    # AGRICULTURAL | HANDICRAFT
-    packaging_type: Optional[str] = None  # thung, lon, hop, bo...
+    product_type: Optional[str] = None
+    packaging_type: Optional[str] = None
     images: Optional[str]
     videos: Optional[str] = None
     sku: Optional[str] = None
@@ -58,6 +59,9 @@ class ProductResponse(BaseModel):
     approved_at: Optional[str] = None
     created_at: str
     updated_at: Optional[str]
+    # Review stats
+    avg_rating: float = 0.0
+    total_reviews: int = 0
 
     class Config:
         from_attributes = True
@@ -172,6 +176,15 @@ def _build_product_response(p, db):
     """Build ProductResponse tu model – tai su dung o moi endpoint."""
     seller = db.query(User).filter(User.id == p.seller_id).first()
     category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
+
+    # Thống kê đánh giá
+    review_stats = db.query(
+        sql_func.count(Review.id).label("total"),
+        sql_func.avg(Review.rating).label("avg"),
+    ).filter(Review.product_id == p.id).first()
+    total_reviews = review_stats.total or 0
+    avg_rating = round(float(review_stats.avg), 1) if review_stats.avg else 0.0
+
     return ProductResponse(
         id=p.id, name=p.name, description=p.description, price=p.price,
         is_active=bool(p.is_active), seller_id=p.seller_id,
@@ -187,6 +200,8 @@ def _build_product_response(p, db):
         approved_at=p.approved_at.isoformat() if p.approved_at else None,
         created_at=p.created_at.isoformat() if p.created_at else "",
         updated_at=p.updated_at.isoformat() if p.updated_at else None,
+        avg_rating=avg_rating,
+        total_reviews=total_reviews,
     )
 
 
@@ -549,3 +564,112 @@ async def update_product_label(
     product.label = label
     db.commit()
     return {"success": True, "message": "Product label updated"}
+
+
+# ==============================================================================
+# REVIEWS – Xem đánh giá sản phẩm (Admin / Seller)
+# ==============================================================================
+
+@router.get("/{product_id}/reviews", summary="Danh sách đánh giá (Admin/Seller)")
+async def get_product_reviews_cms(
+    product_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    rating_filter: Optional[int] = Query(None, ge=1, le=5),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Xem danh sách đánh giá sản phẩm cho Admin và Seller.
+    - Admin: xem mọi sản phẩm.
+    - Seller: chỉ xem đánh giá sản phẩm của mình.
+    Trả về full thông tin reviewer (không che tên).
+    """
+    is_admin = current_user.type in ("admin", "content_manager")
+    is_seller = current_user.type in ("seller", "producer")
+
+    if not is_admin and not is_seller:
+        raise HTTPException(status_code=403, detail="Không có quyền truy cập")
+
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
+
+    # Seller chỉ xem sản phẩm của mình
+    if is_seller and not is_admin:
+        if product.seller_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Không có quyền xem đánh giá sản phẩm này")
+
+    # Thống kê tổng hợp
+    stats = db.query(
+        sql_func.count(Review.id).label("total"),
+        sql_func.avg(Review.rating).label("avg_rating"),
+    ).filter(Review.product_id == product_id).first()
+    total_reviews = stats.total or 0
+    avg_rating = round(float(stats.avg_rating), 1) if stats.avg_rating else 0.0
+
+    # Phân bố theo sao
+    rating_distribution = {}
+    for star in range(1, 6):
+        cnt = db.query(sql_func.count(Review.id)).filter(
+            Review.product_id == product_id,
+            Review.rating == star,
+        ).scalar() or 0
+        rating_distribution[str(star)] = cnt
+
+    # Query reviews với filter
+    q = db.query(Review).filter(Review.product_id == product_id)
+    if rating_filter:
+        q = q.filter(Review.rating == rating_filter)
+    total_filtered = q.count()
+    skip = (page - 1) * limit
+    reviews = q.order_by(Review.created_at.desc()).offset(skip).limit(limit).all()
+
+    review_list = []
+    for r in reviews:
+        reviewer = db.query(User).filter(User.id == r.user_id).first()
+        # CMS hiển thị full tên
+        reviewer_name = reviewer.name if reviewer else "Người dùng ẩn danh"
+        reviewer_email = reviewer.email if reviewer else None
+
+        # Ảnh đièm kèm review
+        from app.models.review_image import ReviewImage
+        review_images = [
+            img.image_url
+            for img in db.query(ReviewImage)
+                .filter(ReviewImage.review_id == r.id)
+                .order_by(ReviewImage.sort_order)
+                .all()
+        ]
+
+        review_list.append({
+            "id": r.id,
+            "reviewer_name": reviewer_name,
+            "reviewer_email": reviewer_email,
+            "rating": r.rating,
+            "comment": r.comment,
+            "images": review_images,
+            "moderation_status": r.moderation_status.value if hasattr(r.moderation_status, "value") else str(r.moderation_status),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "product_id": product_id,
+            "product_name": product.name,
+            "stats": {
+                "total_reviews": total_reviews,
+                "avg_rating": avg_rating,
+                "rating_distribution": rating_distribution,
+            },
+            "reviews": review_list,
+        },
+        "meta": {
+            "total": total_filtered,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total_filtered + limit - 1) // limit if total_filtered > 0 else 1,
+        },
+    }
