@@ -383,28 +383,73 @@ async def delete_product(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Soft-delete SP (is_active=False). Chi hard-delete neu chua co don hang."""
+    """Soft-delete SP (is_active=False) neu co don hang. Hard-delete kem xoa toan bo du lieu lien quan neu chua co."""
     is_admin = current_user.type == "admin"
     q = db.query(Product).filter(Product.id == product_id)
     if not is_admin:
         q = q.filter(Product.seller_id == current_user.id)
     product = q.first()
     if not product:
-        raise HTTPException(status_code=404,
-            detail="Product not found" if is_admin else "San pham khong ton tai hoac khong co quyen")
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found" if is_admin else "San pham khong ton tai hoac khong co quyen",
+        )
+
+    # Kiem tra co don hang chua – neu co thi chi soft-delete
     try:
         from sqlalchemy import text
         has_orders = db.execute(
             text("SELECT 1 FROM order_items WHERE product_id = :pid LIMIT 1"),
-            {"pid": product_id}).fetchone() is not None
+            {"pid": product_id},
+        ).fetchone() is not None
     except Exception:
         has_orders = False
+
     if has_orders:
         product.is_active = False
         product.updated_at = datetime.utcnow()
         db.commit()
-        return {"success": True, "message": "San pham da duoc an (co don hang lien quan)",
-                "data": {"product_id": product_id, "is_active": False}}
+        return {
+            "success": True,
+            "message": "San pham da duoc an (co don hang lien quan)",
+            "data": {"product_id": product_id, "is_active": False},
+        }
+
+    # Hard-delete: xoa toan bo ban ghi con truoc de tranh loi FK constraint
+    from sqlalchemy import text
+
+    # Thu tu xoa quan trong: bang con cua product_variants truoc, sau do product_variants, cuoi cung la product
+    _child_tables = [
+        # 1. Xoa cac ban ghi phu thuoc vao product_variants truoc
+        "product_option_values",   # FK -> product_options.id & product_variants.id
+        "product_media",            # FK -> products.id & product_variants.id
+        "cart_items",               # FK -> products.id & product_variants.id
+        "inventory_movements",      # FK -> products.id & product_variants.id
+        "stock_reservations",       # FK -> products.id & product_variants.id
+        # 2. Xoa cac bang tham chieu truc tiep vao products.id
+        "product_options",          # FK -> products.id
+        "product_variants",         # FK -> products.id
+        "product_certificates",     # FK -> products.id
+        "product_origins",          # FK -> products.id
+        "product_approvals",        # FK -> products.id
+        "product_price_logs",       # FK -> products.id
+        "ai_moderation_logs",       # FK -> products.id (nullable)
+        "product_embeddings",       # FK -> products.id
+        "wishlist_items",           # FK -> products.id (neu co)
+        "reviews",                  # FK -> products.id (neu co)
+        "complaints",               # FK -> products.id (nullable)
+    ]
+
+    for table in _child_tables:
+        try:
+            db.execute(
+                text(f"DELETE FROM {table} WHERE product_id = :pid"),
+                {"pid": product_id},
+            )
+        except Exception:
+            # Bo qua neu bang khong ton tai hoac cot khong khop ten
+            pass
+
     db.delete(product)
     db.commit()
     return {"success": True, "message": "Da xoa san pham"}
