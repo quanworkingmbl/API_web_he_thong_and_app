@@ -1946,6 +1946,8 @@ async def get_my_orders(
             "first_item_image": first_image,
             "items": [
                 {
+                    "id": item.id,
+                    "product_id": item.product_id,
                     "product_name": item.product_name,
                     "product_image": _extract_first_media_url(item.product_image),
                     "unit_price": str(item.unit_price),
