@@ -655,6 +655,22 @@ async def get_public_posts(
     post_list = []
     for p in posts:
         author = db.query(User).filter(User.id == p.author_id).first()
+
+        # Lấy thông tin sản phẩm liên kết nếu có
+        linked_product = None
+        if p.product_id:
+            prod = db.query(Product).filter(
+                Product.id == p.product_id,
+                Product.is_active == True
+            ).first()
+            if prod:
+                linked_product = {
+                    "id": prod.id,
+                    "name": prod.name,
+                    "price": str(prod.price),
+                    "image": _extract_primary_image(prod.images),
+                }
+
         post_list.append({
             "id": p.id,
             "title": p.title,
@@ -664,6 +680,8 @@ async def get_public_posts(
             "author_type": author.type if author else None,
             "images": p.images,
             "videos": p.videos,
+            "product_id": p.product_id,
+            "linked_product": linked_product,
             "created_at": p.created_at.isoformat()
         })
     
