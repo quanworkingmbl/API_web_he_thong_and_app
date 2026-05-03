@@ -1331,6 +1331,7 @@ class UpdateSellerPostRequest(BaseModel):
     title: Optional[str] = Field(None, min_length=2, max_length=255)
     content: Optional[str] = None
     content_type: Optional[str] = None
+    product_id: Optional[int] = None   # Cho phép cập nhật hoặc gỡ sản phẩm liên kết
     images: Optional[str] = None
     videos: Optional[str] = None
 

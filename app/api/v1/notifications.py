@@ -12,7 +12,7 @@ Endpoints (Mobile + Seller Web):
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.notification import Notification
 from app.api.v1.auth import get_current_user
@@ -117,7 +117,7 @@ async def get_my_notifications(
             "ref_image": ref_image,
             "is_read": n.is_read,
             "read_at": n.read_at.isoformat() if n.read_at else None,
-            "created_at": n.created_at.isoformat() if n.created_at else None,
+            "created_at": n.created_at.isoformat() + "Z" if n.created_at and n.created_at.tzinfo is None else (n.created_at.isoformat() if n.created_at else None),
         })
 
 
@@ -180,7 +180,7 @@ async def mark_notification_read(
 
     if not notif.is_read:
         notif.is_read = True
-        notif.read_at = datetime.utcnow()
+        notif.read_at = datetime.now(timezone.utc)
         db.commit()
 
     return {
@@ -200,7 +200,7 @@ async def mark_all_notifications_read(
     db: Session = Depends(get_db),
 ):
     """Đánh dấu tất cả thông báo chưa đọc của user là đã đọc."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     updated = (
         db.query(Notification)
         .filter(

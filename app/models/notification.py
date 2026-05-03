@@ -9,7 +9,7 @@ Lưu trữ tất cả thông báo cho mọi loại người dùng:
 
 from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, Index
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import Base
 
 
@@ -43,7 +43,7 @@ class Notification(Base):
     read_at = Column(DateTime, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationship
     user = relationship("User", back_populates=None, lazy="select", foreign_keys=[user_id])
