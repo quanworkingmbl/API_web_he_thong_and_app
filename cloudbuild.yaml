@@ -1,0 +1,65 @@
+# ============================================================
+# Cloud Build — CI/CD Pipeline
+# Tự động: Build Docker → Push Artifact Registry → Deploy Cloud Run
+# Trigger: mỗi lần git push lên branch 'main'
+# ============================================================
+
+substitutions:
+  _REGION: asia-southeast1
+  _REPO: mbl-cms-repo
+  _SERVICE: backend-api          # Tên Cloud Run service
+  _PROJECT: mbl-cms-backend-2026 # Project chính chứa Cloud SQL + Cloud Run
+
+steps:
+  # ── Step 1: Build Docker image ──────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Build'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:latest'
+      - '.'
+
+  # ── Step 2: Push lên Artifact Registry ──────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}'
+
+  # ── Step 3: Deploy lên Cloud Run ────────────────────────────
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Deploy'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'   # API public, không cần auth GCP
+      - '--port=8080'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=0'         # Scale về 0 khi không có request → tiết kiệm tiền
+      - '--max-instances=3'
+      - '--timeout=120'
+      # Secrets từ Secret Manager (an toàn, không lộ trong code)
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest,AWS_ACCESS_KEY_ID=AWS_ACCESS_KEY_ID:latest,AWS_SECRET_ACCESS_KEY=AWS_SECRET_ACCESS_KEY:latest'
+
+# Lưu image vào Artifact Registry sau khi build
+images:
+  - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:latest'
+
+# Cấu hình log
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_MEDIUM'  # Máy build (đủ dùng, tiết kiệm)
+
+# Timeout cho toàn bộ pipeline (10 phút là đủ)
+timeout: '600s'
