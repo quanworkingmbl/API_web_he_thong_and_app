@@ -45,5 +45,6 @@ USER appuser
 # Expose port
 EXPOSE 8080
 
-# Chỉ chạy gunicorn — alembic migrate đã được chạy trong Cloud Build step
-CMD ["sh", "-c", "exec gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -"]
+# Chạy alembic migrate (tạo bảng) rồi mới start gunicorn
+# Cloud Run CÓ kết nối Cloud SQL — không timeout vì gunicorn chỉ start SAU migrate
+CMD ["sh", "-c", "alembic upgrade head && exec gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -"]
