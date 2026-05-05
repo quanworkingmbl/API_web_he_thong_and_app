@@ -37,21 +37,17 @@ COPY . .
 # Cloud Run yêu cầu lắng nghe trên cổng $PORT (mặc định 8080)
 ENV PORT=8080
 
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+
 # Tạo user không phải root (best practice bảo mật)
 RUN adduser --disabled-password --gecos "" appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chmod +x /entrypoint.sh
 USER appuser
 
 # Expose port (chỉ mang tính tài liệu, Cloud Run dùng biến $PORT)
 EXPOSE 8080
 
-# Chạy bằng Gunicorn (production-grade)
-# --workers 2: 2 worker processes (phù hợp db-g1-small, Cloud Run 1 vCPU)
-# --timeout 120: timeout 2 phút cho các request nặng (AI, upload)
-CMD exec gunicorn app.main:app \
-    --bind 0.0.0.0:$PORT \
-    --workers 2 \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --timeout 120 \
-    --access-logfile - \
-    --error-logfile -
+# Chạy entrypoint: alembic upgrade head → gunicorn
+CMD ["/entrypoint.sh"]
