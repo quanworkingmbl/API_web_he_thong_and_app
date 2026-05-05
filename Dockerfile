@@ -45,6 +45,5 @@ USER appuser
 # Expose port
 EXPOSE 8080
 
-# Chạy: alembic migrate trước → gunicorn
-# Dùng sh -c inline để tránh vấn đề CRLF của file .sh trên Windows
-CMD ["sh", "-c", "alembic upgrade head && exec gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -"]
+# Chỉ chạy gunicorn — alembic migrate đã được chạy trong Cloud Build step
+CMD ["sh", "-c", "exec gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -"]
