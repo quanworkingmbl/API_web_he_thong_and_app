@@ -25,7 +25,9 @@ from app.core.url_utils import build_safe_database_url
 
 db_url = settings.DIRECT_URL if settings.DIRECT_URL else settings.DATABASE_URL
 db_url = build_safe_database_url(db_url)
-config.set_main_option("sqlalchemy.url", db_url)
+# Escape % to %% because configparser uses % for interpolation
+safe_db_url_for_config = db_url.replace('%', '%%')
+config.set_main_option("sqlalchemy.url", safe_db_url_for_config)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
