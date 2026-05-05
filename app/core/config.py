@@ -27,7 +27,11 @@ class Settings(BaseSettings):
     # API Secret Header (X-Quan-Secret)
     API_SECRET_KEY: str = "VLU15122004"
 
-    # AWS S3 Storage
+    # Google Cloud Storage (thay thế AWS S3)
+    GCS_BUCKET_NAME: str = "mbl-cms-media-bucket"
+    GCS_PUBLIC_URL_BASE: str = "https://storage.googleapis.com"
+
+    # AWS S3 (giữ lại để không crash nếu code cũ đọc, nhưng không dùng nữa)
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_REGION: str = "us-east-1"

@@ -8,44 +8,51 @@ from app.models.user import User
 from app.core.config import settings
 from app.core.permissions import check_ownership
 from pydantic import BaseModel
+from google.cloud import storage as gcs
 import os
 import uuid
-import boto3
-from botocore.client import Config
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ==============================================================================
-# AWS S3 Storage config
+# Google Cloud Storage config
 # ==============================================================================
-
-AWS_ACCESS_KEY_ID     = settings.AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY = settings.AWS_SECRET_ACCESS_KEY
-AWS_REGION            = settings.AWS_REGION
-AWS_S3_BUCKET         = settings.AWS_S3_BUCKET
-
-# Public URL base: https://<bucket>.s3.<region>.amazonaws.com/<key>
-AWS_S3_PUBLIC_URL_BASE = f"https://{AWS_S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/"
+GCS_BUCKET_NAME    = settings.GCS_BUCKET_NAME
+GCS_PUBLIC_URL_BASE = settings.GCS_PUBLIC_URL_BASE.rstrip("/")
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/quicktime"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
-def get_s3_client():
-    """Trả về boto3 S3 client kết nối AWS S3"""
-    client_kwargs = {
-        "region_name": AWS_REGION,
-        "config": Config(signature_version="s3v4"),
-    }
+def get_gcs_client() -> gcs.Client:
+    """Trả về GCS client — trên Cloud Run dùng Workload Identity, không cần key file."""
+    return gcs.Client()
 
-    access_key = (AWS_ACCESS_KEY_ID or "").strip()
-    secret_key = (AWS_SECRET_ACCESS_KEY or "").strip()
-    if access_key and secret_key:
-        client_kwargs["aws_access_key_id"] = access_key
-        client_kwargs["aws_secret_access_key"] = secret_key
 
-    return boto3.client("s3", **client_kwargs)
+def upload_to_gcs(content: bytes, key: str, content_type: str) -> str:
+    """Upload file lên GCS, trả về public URL."""
+    client = get_gcs_client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    blob   = bucket.blob(key)
+    blob.upload_from_string(content, content_type=content_type)
+    # Bucket cần được cấu hình public read hoặc dùng signed URL
+    return f"{GCS_PUBLIC_URL_BASE}/{GCS_BUCKET_NAME}/{key}"
 
+
+def delete_from_gcs(file_url: str) -> None:
+    """Xóa file trên GCS từ public URL."""
+    try:
+        # Lấy key từ URL: https://storage.googleapis.com/<bucket>/<key>
+        prefix = f"{GCS_PUBLIC_URL_BASE}/{GCS_BUCKET_NAME}/"
+        key = file_url.replace(prefix, "")
+        client = get_gcs_client()
+        bucket = client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(key)
+        blob.delete()
+    except Exception as e:
+        logger.warning(f"Không thể xóa file GCS '{file_url}': {e}")
 
 
 # ==============================================================================
@@ -55,7 +62,7 @@ def get_s3_client():
 class MediaResponse(BaseModel):
     id: int
     filename: str
-    file_path: str          # public URL trên Supabase Storage
+    file_path: str
     file_type: Optional[str]
     file_size: Optional[int]
     mime_type: Optional[str]
@@ -123,10 +130,9 @@ async def upload_file(
     db: Session = Depends(get_db),
 ):
     """
-    Upload file (image/video) lên AWS S3.
+    Upload file (image/video) lên Google Cloud Storage.
     Trả về public URL để dùng trong trường `images` của content/product.
     """
-    # Validate MIME type
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
@@ -135,18 +141,15 @@ async def upload_file(
 
     content = await file.read()
 
-    # Validate size
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=400,
             detail=f"File quá lớn. Tối đa {MAX_FILE_SIZE // (1024*1024)} MB.",
         )
 
-    # Tạo tên file duy nhất
-    ext           = os.path.splitext(file.filename or "file")[1].lower() or ".bin"
-    unique_key    = f"{uuid.uuid4()}{ext}"
+    ext        = os.path.splitext(file.filename or "file")[1].lower() or ".bin"
+    unique_key = f"uploads/{uuid.uuid4()}{ext}"
 
-    # Xác định loại
     if file.content_type and file.content_type.startswith("image/"):
         file_type = "image"
     elif file.content_type and file.content_type.startswith("video/"):
@@ -154,24 +157,15 @@ async def upload_file(
     else:
         file_type = "document"
 
-    # Upload lên AWS S3
     try:
-        s3 = get_s3_client()
-        s3.put_object(
-            Bucket=AWS_S3_BUCKET,
-            Key=unique_key,
-            Body=content,
-            ContentType=file.content_type or "application/octet-stream",
-        )
+        public_url = upload_to_gcs(content, unique_key, file.content_type or "application/octet-stream")
     except Exception as e:
+        logger.error(f"GCS upload error: {e}")
         raise HTTPException(status_code=500, detail=f"Upload thất bại: {str(e)}")
 
-    public_url = AWS_S3_PUBLIC_URL_BASE + unique_key
-
-    # Lưu record vào DB
     new_media = Media(
         filename=file.filename,
-        file_path=public_url,        # lưu public URL thay cho local path
+        file_path=public_url,
         file_type=file_type,
         file_size=len(content),
         mime_type=file.content_type,
@@ -185,7 +179,7 @@ async def upload_file(
         "success": True,
         "id": new_media.id,
         "filename": file.filename,
-        "url": public_url,           # ← dùng URL này cho trường images/videos
+        "url": public_url,
         "file_type": file_type,
         "file_size": len(content),
     }
@@ -197,22 +191,14 @@ async def delete_media(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Xóa media (cả trên AWS S3 và DB)"""
+    """Xóa media (cả trên GCS và DB)"""
     media = db.query(Media).filter(Media.id == media_id).first()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
 
-    # Check ownership - only the uploader or admin can delete
     check_ownership(media.uploaded_by, current_user, allow_admin=True)
 
-    # Xóa trên AWS S3
-    try:
-        # Lấy key từ URL
-        key = media.file_path.split(f".amazonaws.com/")[-1]
-        s3  = get_s3_client()
-        s3.delete_object(Bucket=AWS_S3_BUCKET, Key=key)
-    except Exception:
-        pass  # không chặn nếu file không tồn tại trên storage
+    delete_from_gcs(media.file_path)
 
     db.delete(media)
     db.commit()
