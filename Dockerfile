@@ -37,17 +37,14 @@ COPY . .
 # Cloud Run yêu cầu lắng nghe trên cổng $PORT (mặc định 8080)
 ENV PORT=8080
 
-# Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-
 # Tạo user không phải root (best practice bảo mật)
 RUN adduser --disabled-password --gecos "" appuser && \
-    chown -R appuser:appuser /app && \
-    chmod +x /entrypoint.sh
+    chown -R appuser:appuser /app
 USER appuser
 
-# Expose port (chỉ mang tính tài liệu, Cloud Run dùng biến $PORT)
+# Expose port
 EXPOSE 8080
 
-# Chạy entrypoint: alembic upgrade head → gunicorn
-CMD ["/entrypoint.sh"]
+# Chạy: alembic migrate trước → gunicorn
+# Dùng sh -c inline để tránh vấn đề CRLF của file .sh trên Windows
+CMD ["sh", "-c", "alembic upgrade head && exec gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -"]

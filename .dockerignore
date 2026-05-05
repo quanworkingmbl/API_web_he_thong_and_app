@@ -23,4 +23,8 @@ alembic/versions/*.pyc
 .pytest_cache
 .coverage
 htmlcov/
+entrypoint.sh
+seed_cloud_sql.sql
+reset_and_seed_rds.sql
+global-bundle.pem
 

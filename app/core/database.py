@@ -52,9 +52,12 @@ def build_safe_database_url(raw_url: str) -> str:
     path     = match.group('path') or '/cms_db'
     query    = match.group('query') or ''
 
-    # URL-encode user & password to handle special chars (; [ ] @ etc.)
-    safe_user = quote(user, safe='')
-    safe_pass = quote(password, safe='')
+    # Decode trước (phòng double-encode nếu URL đã encode sẵn), rồi re-encode chuẩn
+    from urllib.parse import unquote
+    raw_user = unquote(user)
+    raw_pass = unquote(password)
+    safe_user = quote(raw_user, safe='')
+    safe_pass = quote(raw_pass, safe='')
 
     # Remove pgbouncer from query params
     if query:
