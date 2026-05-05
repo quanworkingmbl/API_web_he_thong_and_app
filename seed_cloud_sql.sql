@@ -72,28 +72,28 @@ INSERT INTO carts (id, user_id) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- ── 10. ORDERS ───────────────────────────────────────────────
-INSERT INTO orders (id, customer_id, seller_id, status, total_amount, shipping_address, payment_method, customer_name, customer_phone) VALUES
-(1, 5, 3, 'DELIVERED', 115000, 'Số 10 Ngõ 5, Phố Huế, Hà Nội',    'COD',           'Hoàng Văn Em',  '0901234567'),
-(2, 6, 4, 'PENDING',   115000, 'Số 20 Đường Lê Lợi, TP.HCM',       'BANK_TRANSFER', 'Đỗ Thị Phương', '0912345678')
+INSERT INTO orders (id, order_number, customer_id, seller_id, status, total_amount, shipping_address, payment_method, customer_name, customer_phone) VALUES
+(1, 'ORD-202605-001', 5, 3, 'DELIVERED', 115000, 'Số 10 Ngõ 5, Phố Huế, Hà Nội',    'COD',           'Hoàng Văn Em',  '0901234567'),
+(2, 'ORD-202605-002', 6, 4, 'PENDING',   115000, 'Số 20 Đường Lê Lợi, TP.HCM',       'BANK_TRANSFER', 'Đỗ Thị Phương', '0912345678')
 ON CONFLICT (id) DO NOTHING;
 
 -- ── 11. ORDER_ITEMS ──────────────────────────────────────────
-INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, total_price) VALUES
-(1, 1, 1, 2, 15000, 30000),
-(2, 1, 2, 1, 25000, 25000),
-(3, 1, 4, 1, 35000, 35000),
-(4, 2, 3, 1, 45000, 45000),
-(5, 2, 5, 1, 30000, 30000)
+INSERT INTO order_items (id, order_id, product_id, product_name, quantity, unit_price, total_price) VALUES
+(1, 1, 1, 'Rau muống sạch',     2, 15000, 30000),
+(2, 1, 2, 'Cà chua bi đỏ',      1, 25000, 25000),
+(3, 1, 4, 'Gạo ST25',            1, 35000, 35000),
+(4, 2, 3, 'Xoài cát Hòa Lộc',  1, 45000, 45000),
+(5, 2, 5, 'Dưa hấu không hạt',  1, 30000, 30000)
 ON CONFLICT (id) DO NOTHING;
 
 -- ── 12. CONTENTS (Bài viết) ──────────────────────────────────
-INSERT INTO contents (id, title, content, author_id, status, is_active, images) VALUES
+INSERT INTO contents (id, title, content, content_type, author_id, status, is_active, images) VALUES
 (1, 'Bí quyết trồng rau sạch tại nhà',
    'Trồng rau sạch tại nhà không khó nếu bạn biết cách chọn đất và phân bón phù hợp. Bài viết chia sẻ kinh nghiệm 5 năm làm nông nghiệp hữu cơ.',
-   3, 'APPROVED', TRUE, '["https://storage.googleapis.com/mbl-cms-media-bucket/sample/rau-muong.jpg"]'),
+   'POST', 3, 'APPROVED', TRUE, '["https://storage.googleapis.com/mbl-cms-media-bucket/sample/rau-muong.jpg"]'),
 (2, 'Vì sao nên chọn gạo ST25?',
    'Gạo ST25 được vinh danh là gạo ngon nhất thế giới năm 2019. Tìm hiểu về quy trình canh tác đặc biệt tạo nên hạt gạo thơm ngon này.',
-   4, 'APPROVED', TRUE, '["https://storage.googleapis.com/mbl-cms-media-bucket/sample/gao-st25.jpg"]')
+   'POST', 4, 'APPROVED', TRUE, '["https://storage.googleapis.com/mbl-cms-media-bucket/sample/gao-st25.jpg"]')
 ON CONFLICT (id) DO NOTHING;
 
 -- ── 13. Reset sequences ───────────────────────────────────────
