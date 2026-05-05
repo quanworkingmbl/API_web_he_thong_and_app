@@ -20,32 +20,13 @@ config = context.config
 # Use DIRECT_URL for migrations if available, otherwise use DATABASE_URL
 # Direct connection is better for migrations (port 5432)
 # Pooled connection (port 6543) may have limitations with migrations
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
-
-def clean_database_url(url: str) -> str:
-    """Remove pgbouncer parameter from connection string"""
-    if not url:
-        return url
-    # Remove ?pgbouncer=true if present
-    if '?pgbouncer=true' in url:
-        url = url.replace('?pgbouncer=true', '')
-    elif '&pgbouncer=true' in url:
-        url = url.replace('&pgbouncer=true', '')
-    # Parse and clean query parameters
-    parsed = urlparse(url)
-    if parsed.query:
-        params = parse_qs(parsed.query)
-        # Remove pgbouncer from params
-        params.pop('pgbouncer', None)
-        # Rebuild URL
-        new_query = urlencode(params, doseq=True) if params else ''
-        parsed = parsed._replace(query=new_query)
-        url = urlunparse(parsed)
-    return url
+# Import hàm parse URL an toàn (xử lý ký tự đặc biệt trong password như ; [ ])
+from app.core.database import build_safe_database_url
 
 db_url = settings.DIRECT_URL if settings.DIRECT_URL else settings.DATABASE_URL
-db_url = clean_database_url(db_url)
+db_url = build_safe_database_url(db_url)
 config.set_main_option("sqlalchemy.url", db_url)
+
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
