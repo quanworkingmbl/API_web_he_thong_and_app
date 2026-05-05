@@ -20,13 +20,12 @@ config = context.config
 # Use DIRECT_URL for migrations if available, otherwise use DATABASE_URL
 # Direct connection is better for migrations (port 5432)
 # Pooled connection (port 6543) may have limitations with migrations
-# Import hàm parse URL an toàn (xử lý ký tự đặc biệt trong password như ; [ ])
-from app.core.database import build_safe_database_url
+# Import URL builder từ url_utils (KHÔNG import database để tránh kéo theo create_engine)
+from app.core.url_utils import build_safe_database_url
 
 db_url = settings.DIRECT_URL if settings.DIRECT_URL else settings.DATABASE_URL
 db_url = build_safe_database_url(db_url)
 config.set_main_option("sqlalchemy.url", db_url)
-
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

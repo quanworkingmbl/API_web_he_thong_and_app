@@ -1,110 +1,36 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode, quote
 from app.core.config import settings
-import re
+from app.core.url_utils import build_safe_database_url
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Re-export để alembic/env.py cũ không bị lỗi nếu còn import từ đây
+__all__ = ["engine", "SessionLocal", "Base", "get_db", "build_safe_database_url"]
 
-def build_safe_database_url(raw_url: str) -> str:
-    """
-    Safely parse and clean the DATABASE_URL.
-    - Handles special characters in password (;, [, ], @, etc.)
-    - Removes pgbouncer=true query param
-    - Ensures postgresql:// scheme (not postgres://)
-    """
-    if not raw_url:
-        raise ValueError("DATABASE_URL is not set. Please configure it in Cloud Run secrets.")
-
-    # Normalize scheme: postgres:// → postgresql://
-    url = raw_url.strip()
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://"):]
-
-    # Remove pgbouncer param inline (before full parse, to avoid parse errors)
-    url = re.sub(r'[?&]pgbouncer=true', '', url)
-
-    # Use regex to extract parts without relying on urlparse for broken URLs
-    # Pattern: scheme://user:pass@host:port/dbname?query
-    pattern = re.compile(
-        r'^(?P<scheme>[a-z+]+)://'
-        r'(?P<user>[^:@]+)?'
-        r'(?::(?P<password>.+?))?'
-        r'@(?P<host>[^/:?]+)'
-        r'(?::(?P<port>\d+))?'
-        r'(?P<path>/[^?]*)?'
-        r'(?:\?(?P<query>.*))?$',
-        re.DOTALL
-    )
-    match = pattern.match(url)
-    if not match:
-        # Cannot parse — return as-is and let SQLAlchemy handle it
-        logger.warning("Could not parse DATABASE_URL with regex; using raw value.")
-        return url
-
-    scheme   = match.group('scheme') or 'postgresql'
-    user     = match.group('user') or ''
-    password = match.group('password') or ''
-    host     = match.group('host') or ''
-    port     = match.group('port') or '5432'
-    path     = match.group('path') or '/cms_db'
-    query    = match.group('query') or ''
-
-    # Decode trước (phòng double-encode nếu URL đã encode sẵn), rồi re-encode chuẩn
-    from urllib.parse import unquote
-    raw_user = unquote(user)
-    raw_pass = unquote(password)
-    safe_user = quote(raw_user, safe='')
-    safe_pass = quote(raw_pass, safe='')
-
-    # Remove pgbouncer from query params
-    if query:
-        params = parse_qs(query, keep_blank_values=True)
-        params.pop('pgbouncer', None)
-        query = urlencode(params, doseq=True)
-
-    # Rebuild the URL
-    if query:
-        clean = f"{scheme}://{safe_user}:{safe_pass}@{host}:{port}{path}?{query}"
-    else:
-        clean = f"{scheme}://{safe_user}:{safe_pass}@{host}:{port}{path}"
-
-    return clean
-
-
-# Build safe DATABASE_URL
+# Build safe URL
 try:
     clean_url = build_safe_database_url(settings.DATABASE_URL)
-    logger.info(f"Database URL constructed successfully (host masked).")
+    logger.info("Database URL built successfully.")
 except Exception as e:
-    logger.error(f"FATAL: Could not build DATABASE_URL: {e}")
+    logger.error(f"FATAL: Cannot build DATABASE_URL: {e}")
     raise
 
-# Create engine — Cloud Run: keep pool small to avoid Cloud SQL connection limits
-# db-g1-small max_connections ≈ 100; with 3 instances × pool=3 = 9 connections max
+# Engine — pool nhỏ phù hợp Cloud Run (stateless, scale-to-0)
 engine = create_engine(
     clean_url,
-    pool_pre_ping=True,   # Detect stale connections
-    pool_size=3,          # Small pool per instance (Cloud Run stateless)
-    max_overflow=5,       # Allow brief bursts
+    pool_pre_ping=True,
+    pool_size=3,
+    max_overflow=5,
     pool_timeout=30,
-    pool_recycle=1800,    # Recycle connections every 30 min
-    connect_args={
-        "connect_timeout": 10,
-        "sslmode": "require",  # Cloud SQL public IP requires SSL
-    }
+    pool_recycle=1800,
 )
 
-# Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create Base class for models
 Base = declarative_base()
 
 
-# Dependency to get DB session
 def get_db():
     db = SessionLocal()
     try:
