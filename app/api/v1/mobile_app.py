@@ -55,40 +55,29 @@ from app.services.notification import (
 from app.services.wallet import credit_seller_wallet
 from pydantic import BaseModel, Field
 from decimal import Decimal
+from google.cloud import storage as gcs
 import uuid
 import os
-import boto3
 import json
-from botocore.client import Config
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Supabase S3 config (dùng chung với media.py)
-_S3_ENDPOINT  = os.getenv("SUPABASE_S3_ENDPOINT", "")
-_S3_KEY       = os.getenv("SUPABASE_S3_ACCESS_KEY", "")
-_S3_SECRET    = os.getenv("SUPABASE_S3_SECRET_KEY", "")
-_S3_REGION    = os.getenv("SUPABASE_S3_REGION", "ap-south-1")
-_PROJECT_ID   = os.getenv("SUPABASE_PROJECT_ID", "")
-_BUCKET       = os.getenv("SUPABASE_STORAGE_BUCKET", "file_test00")
-_PUBLIC_BASE  = f"https://{_PROJECT_ID}.supabase.co/storage/v1/object/public/{_BUCKET}/"
+# Google Cloud Storage config
+_GCS_BUCKET   = os.getenv("GCS_BUCKET_NAME", "mbl-cms-media-bucket")
+_PUBLIC_BASE  = f"https://storage.googleapis.com/{_GCS_BUCKET}/"
 _ALLOWED_IMG  = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 _ALLOWED_VID  = {"video/mp4", "video/quicktime", "video/avi", "video/x-msvideo", "video/x-ms-wmv"}
 _ALLOWED_MEDIA = _ALLOWED_IMG | _ALLOWED_VID
 
 def _upload_to_supabase(content: bytes, filename: str, mime: str) -> str:
-    """Upload bytes lên Supabase Storage, trả về public URL"""
+    """Upload bytes lên GCS (thầy Supabase đã migrate sang GCS), trả về public URL"""
     ext = os.path.splitext(filename)[1].lower() or ".jpg"
-    key = f"{uuid.uuid4()}{ext}"
-    s3  = boto3.client(
-        "s3",
-        endpoint_url=_S3_ENDPOINT,
-        aws_access_key_id=_S3_KEY,
-        aws_secret_access_key=_S3_SECRET,
-        region_name=_S3_REGION,
-        config=Config(signature_version="s3v4"),
-    )
-    s3.put_object(Bucket=_BUCKET, Key=key, Body=content, ContentType=mime)
+    key = f"posts/{uuid.uuid4()}{ext}"
+    client = gcs.Client()
+    bucket = client.bucket(_GCS_BUCKET)
+    blob   = bucket.blob(key)
+    blob.upload_from_string(content, content_type=mime)
     return _PUBLIC_BASE + key
 
 router = APIRouter()
