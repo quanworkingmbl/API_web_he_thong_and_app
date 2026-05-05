@@ -21,6 +21,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    from alembic import context
+    if context.is_offline_mode():
+        op.add_column("users", sa.Column("date_of_birth", sa.Date(), nullable=True))
+        return
+
     bind = op.get_bind()
     inspector = inspect(bind)
     columns = {col["name"] for col in inspector.get_columns("users")}
