@@ -7,8 +7,9 @@
 substitutions:
   _REGION: asia-southeast1
   _REPO: mbl-cms-repo
-  _SERVICE: backend-api          # Tên Cloud Run service
-  _PROJECT: mbl-cms-backend-2026 # Project chính chứa Cloud SQL + Cloud Run
+  _SERVICE: api-web-he-thong-and-app   # Tên Cloud Run service (phải khớp với service đang chạy)
+  _PROJECT: mbl-cms-backend-2026       # Project chính chứa Cloud SQL + Cloud Run
+  _CLOUDSQL_INSTANCE: mbl-cms-backend-2026:asia-southeast1:mbl-cms-db  # Cloud SQL connection name
 
 steps:
   # ── Step 1: Build Docker image ──────────────────────────────
@@ -41,15 +42,15 @@ steps:
       - '--image=${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
       - '--region=${_REGION}'
       - '--platform=managed'
-      - '--allow-unauthenticated'   # API public, không cần auth GCP
+      - '--allow-unauthenticated'
       - '--port=8080'
       - '--memory=512Mi'
       - '--cpu=1'
-      - '--min-instances=0'         # Scale về 0 khi không có request → tiết kiệm tiền
+      - '--min-instances=0'
       - '--max-instances=3'
       - '--timeout=120'
-      # Secrets từ Secret Manager (an toàn, không lộ trong code)
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest,AWS_ACCESS_KEY_ID=AWS_ACCESS_KEY_ID:latest,AWS_SECRET_ACCESS_KEY=AWS_SECRET_ACCESS_KEY:latest'
+      # Chỉ inject secrets nhạy cảm — biến còn lại đọc từ default trong config.py
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest'
 
 # Lưu image vào Artifact Registry sau khi build
 images:
