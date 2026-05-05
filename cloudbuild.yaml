@@ -1,18 +1,12 @@
-# ============================================================
-# Cloud Build — CI/CD Pipeline
-# Tự động: Build Docker → Push Artifact Registry → Deploy Cloud Run
-# Trigger: mỗi lần git push lên branch 'main'
-# ============================================================
-
 substitutions:
   _REGION: asia-southeast1
   _REPO: mbl-cms-repo
-  _SERVICE: api-web-he-thong-and-app   # Tên Cloud Run service (phải khớp với service đang chạy)
-  _PROJECT: mbl-cms-backend-2026       # Project chính chứa Cloud SQL + Cloud Run
-  _CLOUDSQL_INSTANCE: mbl-cms-backend-2026:asia-southeast1:mbl-cms-db  # Cloud SQL connection name
+  _SERVICE: api-web-he-thong-and-app
+  _PROJECT: mbl-cms-backend-2026
+  _CLOUDSQL_INSTANCE: mbl-cms-backend-2026:asia-southeast1:mbl-cms-db
 
 steps:
-  # ── Step 1: Build Docker image ──────────────────────────────
+  # ── Step 1: Build Docker image ───────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
     id: 'Build'
     args:
@@ -31,7 +25,20 @@ steps:
       - '--all-tags'
       - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}'
 
-  # ── Step 3: Deploy lên Cloud Run ────────────────────────────
+  # ── Step 3: Alembic migrate (chạy trong Cloud Build, KHÔNG chạy khi startup) ──
+  # Dùng image vừa build để chạy alembic upgrade head trước khi deploy
+  - name: '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+    id: 'Migrate'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - 'alembic upgrade head'
+    env:
+      - 'DATABASE_URL=$$DATABASE_URL'
+    secretEnv:
+      - 'DATABASE_URL'
+
+  # ── Step 4: Deploy lên Cloud Run ────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'Deploy'
     entrypoint: 'gcloud'
@@ -49,18 +56,19 @@ steps:
       - '--min-instances=0'
       - '--max-instances=3'
       - '--timeout=120'
-      # Chỉ inject secrets nhạy cảm — biến còn lại đọc từ default trong config.py
       - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest'
 
-# Lưu image vào Artifact Registry sau khi build
+availableSecrets:
+  secretManager:
+    - versionName: projects/${_PROJECT}/secrets/DATABASE_URL/versions/latest
+      env: 'DATABASE_URL'
+
 images:
   - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
   - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:latest'
 
-# Cấu hình log
 options:
   logging: CLOUD_LOGGING_ONLY
-  machineType: 'E2_MEDIUM'  # Máy build (đủ dùng, tiết kiệm)
+  machineType: 'E2_MEDIUM'
 
-# Timeout cho toàn bộ pipeline (10 phút là đủ)
-timeout: '600s'
+timeout: '900s'
