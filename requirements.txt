@@ -33,3 +33,6 @@ httpx>=0.28.1,<1.0.0
 
 # --- Google AI (chỉ cần google-genai, không cần aiplatform SDK) ---
 google-genai>=1.66.0
+
+# --- Google Cloud Storage (thay thế AWS S3) ---
+google-cloud-storage>=2.14.0
