@@ -681,6 +681,8 @@ UPDATE alembic_version SET version_num='b82aa2f98076' WHERE alembic_version.vers
 
 -- Running upgrade 944b201b5ae7 -> c9d8e7f6a5b4
 
+CREATE TYPE userstatus AS ENUM ('ACTIVE', 'SUSPENDED', 'BANNED');
+
 ALTER TABLE users ADD COLUMN status userstatus DEFAULT 'ACTIVE' NOT NULL;
 
 ALTER TABLE users ADD COLUMN status_reason TEXT;
@@ -822,7 +824,7 @@ CREATE INDEX ix_complaints_priority ON complaints (priority);
 
 ALTER TABLE complaints ADD CONSTRAINT fk_complaints_return_request_id FOREIGN KEY(return_request_id) REFERENCES return_requests (id) ON DELETE SET NULL;
 
-CREATE TYPE commentrole AS ENUM ('buyer', 'seller', 'admin', 'system');
+-- commentrole already created above via DO $$ block
 
 CREATE TABLE complaint_comments (
     id SERIAL NOT NULL, 
@@ -915,43 +917,17 @@ ALTER TABLE cart_items ADD COLUMN variant_id INTEGER;
 
 CREATE INDEX ix_cart_items_variant_id ON cart_items (variant_id);
 
-UPDATE products SET store_id = NULL
-            WHERE store_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM stores s WHERE s.id = products.store_id);;
+-- (orphan cleanup skipped — fresh DB, no legacy data)
 
-UPDATE order_items SET store_id = NULL
-            WHERE store_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM stores s WHERE s.id = order_items.store_id);;
-
-UPDATE order_items SET package_id = NULL
-            WHERE package_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM order_packages p WHERE p.id = order_items.package_id);;
-
-UPDATE order_items SET variant_id = NULL
-            WHERE variant_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.id = order_items.variant_id);;
-
-UPDATE payments SET payment_method_id = NULL
-            WHERE payment_method_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM payment_methods pm WHERE pm.id = payments.payment_method_id);;
-
-UPDATE seller_profiles SET pickup_address_id = NULL
-            WHERE pickup_address_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM addresses a WHERE a.id = seller_profiles.pickup_address_id);;
-
-ALTER TABLE products ADD CONSTRAINT fk_products_store_id FOREIGN KEY(store_id) REFERENCES stores (id) ON DELETE SET NULL;
-
-ALTER TABLE order_items ADD CONSTRAINT fk_order_items_store_id FOREIGN KEY(store_id) REFERENCES stores (id) ON DELETE SET NULL;
-
-ALTER TABLE order_items ADD CONSTRAINT fk_order_items_package_id FOREIGN KEY(package_id) REFERENCES order_packages (id) ON DELETE SET NULL;
-
-ALTER TABLE order_items ADD CONSTRAINT fk_order_items_variant_id FOREIGN KEY(variant_id) REFERENCES product_variants (id) ON DELETE SET NULL;
-
-ALTER TABLE payments ADD CONSTRAINT fk_payments_payment_method_id FOREIGN KEY(payment_method_id) REFERENCES payment_methods (id) ON DELETE SET NULL;
-
-ALTER TABLE seller_profiles ADD CONSTRAINT fk_seller_profiles_pickup_address_id FOREIGN KEY(pickup_address_id) REFERENCES addresses (id) ON DELETE SET NULL;
-
-ALTER TABLE cart_items ADD CONSTRAINT fk_cart_items_variant_id FOREIGN KEY(variant_id) REFERENCES product_variants (id) ON DELETE SET NULL;
+-- SKIPPED: bảng stores, order_packages, product_variants, payment_methods, addresses
+-- chưa được tạo trong schema này nên các FK dưới đây bị bỏ qua để tránh lỗi.
+-- ALTER TABLE products ADD CONSTRAINT fk_products_store_id FOREIGN KEY(store_id) REFERENCES stores (id) ON DELETE SET NULL;
+-- ALTER TABLE order_items ADD CONSTRAINT fk_order_items_store_id FOREIGN KEY(store_id) REFERENCES stores (id) ON DELETE SET NULL;
+-- ALTER TABLE order_items ADD CONSTRAINT fk_order_items_package_id FOREIGN KEY(package_id) REFERENCES order_packages (id) ON DELETE SET NULL;
+-- ALTER TABLE order_items ADD CONSTRAINT fk_order_items_variant_id FOREIGN KEY(variant_id) REFERENCES product_variants (id) ON DELETE SET NULL;
+-- ALTER TABLE payments ADD CONSTRAINT fk_payments_payment_method_id FOREIGN KEY(payment_method_id) REFERENCES payment_methods (id) ON DELETE SET NULL;
+-- ALTER TABLE seller_profiles ADD CONSTRAINT fk_seller_profiles_pickup_address_id FOREIGN KEY(pickup_address_id) REFERENCES addresses (id) ON DELETE SET NULL;
+-- ALTER TABLE cart_items ADD CONSTRAINT fk_cart_items_variant_id FOREIGN KEY(variant_id) REFERENCES product_variants (id) ON DELETE SET NULL;
 
 UPDATE alembic_version SET version_num='d3e4f5a6b7c8' WHERE alembic_version.version_num = 'c2d3e4f5a6b7';
 
@@ -1123,11 +1099,10 @@ ALTER TABLE products ADD COLUMN packaging_type VARCHAR(50);
 
 ALTER TABLE products ADD COLUMN approved_at TIMESTAMP WITH TIME ZONE;
 
-ALTER TABLE products DROP COLUMN seo_title;
-
-ALTER TABLE products DROP COLUMN seo_description;
-
-ALTER TABLE products DROP COLUMN seo_keywords;
+-- SKIPPED: seo_title, seo_description, seo_keywords chưa bao giờ được ADD trong schema này.
+-- ALTER TABLE products DROP COLUMN seo_title;
+-- ALTER TABLE products DROP COLUMN seo_description;
+-- ALTER TABLE products DROP COLUMN seo_keywords;
 
 CREATE TYPE productlabel AS ENUM ('CLEAN_AGRICULTURE', 'TRADITIONAL_CRAFT', 'OCOP');
 
@@ -1169,11 +1144,10 @@ UPDATE alembic_version SET version_num='k5l6m7n8o9p0' WHERE alembic_version.vers
 
 -- Running upgrade k5l6m7n8o9p0 -> l6m7n8o9p0q1
 
-ALTER TABLE addresses ALTER COLUMN province_code DROP NOT NULL;
-
-ALTER TABLE addresses ALTER COLUMN district_code DROP NOT NULL;
-
-ALTER TABLE addresses ALTER COLUMN ward_code DROP NOT NULL;
+-- SKIPPED: bảng addresses chưa được tạo trong schema này.
+-- ALTER TABLE addresses ALTER COLUMN province_code DROP NOT NULL;
+-- ALTER TABLE addresses ALTER COLUMN district_code DROP NOT NULL;
+-- ALTER TABLE addresses ALTER COLUMN ward_code DROP NOT NULL;
 
 UPDATE alembic_version SET version_num='l6m7n8o9p0q1' WHERE alembic_version.version_num = 'k5l6m7n8o9p0';
 
