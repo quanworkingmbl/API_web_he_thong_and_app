@@ -37,13 +37,11 @@ COPY . .
 # Cloud Run yêu cầu lắng nghe trên cổng $PORT (mặc định 8080)
 ENV PORT=8080
 
-# Tạo user không phải root (best practice bảo mật)
+# Tạo user không phải root + cấp quyền execute cho entrypoint
 RUN adduser --disabled-password --gecos "" appuser && \
+    chmod +x /app/entrypoint.sh && \
     chown -R appuser:appuser /app
 USER appuser
-
-# Cấp quyền execute cho entrypoint
-RUN chmod +x /app/entrypoint.sh
 
 # Expose port
 EXPOSE 8080
