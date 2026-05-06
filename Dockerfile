@@ -42,8 +42,11 @@ RUN adduser --disabled-password --gecos "" appuser && \
     chown -R appuser:appuser /app
 USER appuser
 
+# Cấp quyền execute cho entrypoint
+RUN chmod +x /app/entrypoint.sh
+
 # Expose port
 EXPOSE 8080
 
-# Start gunicorn
-CMD ["sh", "-c", "exec gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -"]
+# Dùng entrypoint.sh để start (alembic đã chạy trong Cloud Build Step 3)
+CMD ["/app/entrypoint.sh"]

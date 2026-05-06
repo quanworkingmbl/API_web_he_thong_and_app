@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "=== Running Alembic migrations ==="
-alembic upgrade head
+# NOTE: alembic upgrade head đã được chạy trong Cloud Build Step 3.
+# KHÔNG chạy lại ở đây để tránh lỗi kết nối DB khi container cold start.
 
 echo "=== Starting Gunicorn ==="
 exec gunicorn app.main:app \
