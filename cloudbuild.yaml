@@ -57,6 +57,7 @@ steps:
       - '--max-instances=3'
       - '--timeout=300'
       - '--startup-cpu-boost'
+      - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
       - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest'
 
 availableSecrets:
