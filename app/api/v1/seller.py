@@ -1348,7 +1348,10 @@ async def get_seller_posts(
     """Lấy danh sách bài đăng của seller đang đăng nhập."""
     _require_seller(current_user)
 
-    query = db.query(Content).filter(Content.author_id == current_user.id)
+    query = db.query(Content).filter(
+        Content.author_id == current_user.id,
+        Content.is_active == True,
+    )
     if status:
         query = query.filter(Content.status == status)
     if search:
@@ -1427,7 +1430,8 @@ async def update_seller_post(
 
     post = db.query(Content).filter(
         Content.id == post_id,
-        Content.author_id == current_user.id
+        Content.author_id == current_user.id,
+        Content.is_active == True,
     ).first()
     if not post:
         raise HTTPException(status_code=404, detail="Bài đăng không tồn tại hoặc không có quyền chỉnh sửa")
@@ -1462,17 +1466,24 @@ async def delete_seller_post(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Seller xóa bài đăng của mình."""
+    """
+    Seller xóa bài đăng của mình (soft-delete: is_active=False).
+    Không xóa vĩnh viễn để giữ lịch sử audit log.
+    """
     _require_seller(current_user)
 
     post = db.query(Content).filter(
         Content.id == post_id,
-        Content.author_id == current_user.id
+        Content.author_id == current_user.id,
+        Content.is_active == True,
     ).first()
     if not post:
         raise HTTPException(status_code=404, detail="Bài đăng không tồn tại hoặc không có quyền xóa")
 
-    db.delete(post)
+    # Soft-delete: tránh ForeignKeyViolation với content_audit_logs
+    post.is_active = False
+    post.deleted_at = datetime.utcnow()
+    post.deleted_by = current_user.id
     db.commit()
 
     return {"success": True, "message": "Đã xóa bài đăng"}
