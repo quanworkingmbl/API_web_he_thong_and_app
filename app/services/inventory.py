@@ -20,6 +20,37 @@ from app.models.product import Product
 from app.models.product_variant import ProductVariant
 
 
+def _maybe_notify_out_of_stock(
+    db: Session,
+    product: Product,
+    variant=None,
+) -> None:
+    """Gửi notification cho seller khi tồn kho = 0. Không raise exception."""
+    qty = int(variant.stock_quantity) if variant else int(product.stock_quantity or 0)
+    if qty > 0:
+        return
+    try:
+        from app.models.notification import Notification  # noqa: PLC0415
+        name = product.name or f"Sản phẩm #{product.id}"
+        variant_note = f" (phiên bản: {variant.variant_name or variant.id})" if variant else ""
+        notif = Notification(
+            user_id=product.seller_id,
+            category="SYSTEM",
+            title="⚠️ Sản phẩm đã hết hàng",
+            message=(
+                f'Sản phẩm "{name}"{variant_note} đã hết hàng. '
+                "Vui lòng cập nhật tồn kho để tiếp tục bán hàng."
+            ),
+            action_url=f"/seller/products/{product.id}",
+            ref_type="product",
+            ref_id=product.id,
+        )
+        db.add(notif)
+        db.flush()  # flush, không commit – caller quản lý transaction
+    except Exception:  # noqa: BLE001
+        pass  # Không để lỗi notification phá luồng chính
+
+
 def count_active_variants(db: Session, product_id: int) -> int:
     n = (
         db.query(func.count(ProductVariant.id))
@@ -106,7 +137,7 @@ def validate_line_for_sale(
 def decrement_stock(
     db: Session, product: Product, quantity: int, variant_id: Optional[int]
 ) -> None:
-    """Trừ tồn (đã kiểm tra trước đó)."""
+    """Trừ tồn (cần validate_line_for_sale trước). Tự gửi notification khi hết hàng."""
     if requires_variant(db, product.id):
         if variant_id is None:
             raise ValueError("variant_id required when product has variants")
@@ -122,8 +153,10 @@ def decrement_stock(
         if not v:
             raise ValueError("Variant not found")
         v.stock_quantity = int(v.stock_quantity) - quantity
+        _maybe_notify_out_of_stock(db, product, v)
     else:
         product.stock_quantity = int(product.stock_quantity or 0) - quantity
+        _maybe_notify_out_of_stock(db, product)
 
 
 def increment_stock(
