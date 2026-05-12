@@ -4,6 +4,8 @@ substitutions:
   _SERVICE: api-web-he-thong-and-app
   _PROJECT: mbl-cms-backend-2026
   _CLOUDSQL_INSTANCE: mbl-cms-backend-2026:asia-southeast1:mbl-cms-db
+  _CORS_ORIGINS: >-
+    http://localhost:3000,http://localhost:5173,https://quancmsbe.site,https://www.quancmsbe.site,https://api.quancmsbe.site,https://mbl-cms.store,https://www.mbl-cms.store
 
 steps:
   # ── Step 1: Build Docker image ───────────────────────────────
@@ -58,8 +60,8 @@ steps:
       - '--timeout=300'
       - '--startup-cpu-boost'
       - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
-      - '--update-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest'
-      - '--env-vars-file=cloudrun_env.yaml'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest'
+      - '--set-env-vars=CORS_ORIGINS=${_CORS_ORIGINS}'
 
 availableSecrets:
   secretManager:
