@@ -224,26 +224,39 @@ async def get_products(
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    """Lay danh sach san pham. Consumer: chi APPROVED+active. Seller: them SP cua minh. Admin: tat ca."""
+    """
+    Lay danh sach san pham.
+    - Admin / content_manager : thay tat ca (co the loc them qua is_active nen neu muon)
+    - Seller / producer       : SP duoc duyet + SP cua chinh minh (ca an)
+    - Consumer / anonymous    : chi APPROVED + is_active=True
+    """
     query = db.query(Product)
-    ut = ((current_user.type if current_user else None) or "").lower()
+    ut = ((current_user.type if current_user else None) or "").lower().strip()
 
+    is_admin    = current_user is not None and ut in ("admin", "content_manager")
+    is_seller   = current_user is not None and ut in ("producer", "seller")
+    is_consumer = not is_admin and not is_seller
+
+    # ---------- 1. Filter is_active ----------
     if is_active is not None:
+        # Caller truc tiep chi dinh gia tri -> ap dung cho moi role
         query = query.filter(Product.is_active == is_active)
-    elif not include_inactive:
-        if not current_user or ut not in ("admin", "producer", "seller", "content_manager"):
-            query = query.filter(Product.is_active == True)
-    else:
-        if current_user and ut in ("producer", "seller"):
-            query = query.filter(
-                (Product.is_active == True) | (Product.seller_id == current_user.id)
-            )
-        elif not current_user or ut not in ("admin", "content_manager"):
-            query = query.filter(Product.is_active == True)
-
-    if ut in ("admin", "content_manager"):
+    elif is_admin:
+        # Admin xem tat ca – khong loc is_active (tru khi truyen tuong minh)
         pass
-    elif ut in ("producer", "seller"):
+    elif is_seller:
+        # Seller: SP active cua tat ca + SP cua chinh minh (ca an)
+        query = query.filter(
+            or_(Product.is_active == True, Product.seller_id == current_user.id)
+        )
+    else:
+        # Consumer / anonymous: chi active
+        query = query.filter(Product.is_active == True)
+
+    # ---------- 2. Filter status ----------
+    if is_admin:
+        pass  # Admin xem tat ca trang thai
+    elif is_seller:
         query = query.filter(
             or_(Product.status == ProductStatus.APPROVED,
                 Product.seller_id == current_user.id)
