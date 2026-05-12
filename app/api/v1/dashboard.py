@@ -135,14 +135,11 @@ async def get_revenue_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Thống kê doanh thu theo thời gian
-    """
+    """Thống kê doanh thu theo thời gian"""
     check_dashboard_access(current_user)
 
     from app.models.order import Order, OrderStatus
 
-    # Tính ngày bắt đầu dựa trên period
     now = datetime.utcnow()
     if period == "day":
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -171,6 +168,166 @@ async def get_revenue_stats(
             "platform_commission": _to_vnd_int(platform_commission),
             "seller_revenue": _to_vnd_int(seller_revenue),
             "order_count": order_count,
+        }
+    }
+
+
+@router.get("/dashboard/finance", summary="Admin – Tổng hợp tài chính toàn nền tảng")
+async def get_finance_overview(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Tổng hợp dòng tiền toàn platform dành cho Admin:
+    - GMV (tổng tiền hàng khách trả)
+    - VAT thu được
+    - Phí nền tảng thu được
+    - Tiền đã trả cho sellers
+    - Top 10 sellers doanh thu cao nhất
+    - 6 tháng gần nhất (theo tháng)
+    """
+    check_dashboard_access(current_user)
+    if current_user.type != "admin":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Chỉ admin mới truy cập được")
+
+    from app.models.order import Order, OrderStatus
+    from app.models.user import User as UserModel
+    from app.models.settlement import SellerWallet
+    from sqlalchemy import func as sf
+
+    now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_start  = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # ── 1. Tổng tất cả đơn DELIVERED ────────────────────────────────────────
+    all_delivered = db.query(Order).filter(
+        Order.status == OrderStatus.DELIVERED,
+        Order.is_active == True,
+    ).all()
+
+    gmv              = sum(o.subtotal           for o in all_delivered)  # tiền hàng thuần (không kể ship)
+    total_shipping   = sum(o.shipping_fee       for o in all_delivered)
+    total_discount   = sum(o.discount_amount    for o in all_delivered)
+    total_vat        = sum(o.vat_amount or 0    for o in all_delivered)
+    total_fee        = sum(o.platform_fee_amount for o in all_delivered)
+    total_seller_out = sum(o.seller_amount      for o in all_delivered)
+    order_count      = len(all_delivered)
+
+    # ── 2. Tháng này ────────────────────────────────────────────────────────
+    this_month = [o for o in all_delivered if o.delivered_at and o.delivered_at >= month_start]
+    month_gmv        = sum(o.subtotal            for o in this_month)
+    month_vat        = sum(o.vat_amount or 0     for o in this_month)
+    month_fee        = sum(o.platform_fee_amount  for o in this_month)
+    month_seller_out = sum(o.seller_amount        for o in this_month)
+
+    # ── 3. Năm này ──────────────────────────────────────────────────────────
+    this_year = [o for o in all_delivered if o.delivered_at and o.delivered_at >= year_start]
+    year_gmv         = sum(o.subtotal            for o in this_year)
+    year_vat         = sum(o.vat_amount or 0     for o in this_year)
+    year_fee         = sum(o.platform_fee_amount  for o in this_year)
+    year_seller_out  = sum(o.seller_amount        for o in this_year)
+
+    # ── 4. 6 tháng gần nhất (by month) ─────────────────────────────────────
+    monthly = []
+    for i in range(5, -1, -1):  # tháng -5 → tháng hiện tại
+        if now.month - i <= 0:
+            y = now.year - 1
+            m = now.month - i + 12
+        else:
+            y = now.year
+            m = now.month - i
+        m_start = datetime(y, m, 1)
+        m_end   = datetime(y, m+1, 1) if m < 12 else datetime(y+1, 1, 1)
+        m_orders = [
+            o for o in all_delivered
+            if o.delivered_at and m_start <= o.delivered_at < m_end
+        ]
+        monthly.append({
+            "month":      f"{y}-{m:02d}",
+            "gmv":        _to_vnd_int(sum(o.subtotal            for o in m_orders)),
+            "vat":        _to_vnd_int(sum(o.vat_amount or 0     for o in m_orders)),
+            "fee":        _to_vnd_int(sum(o.platform_fee_amount  for o in m_orders)),
+            "seller_out": _to_vnd_int(sum(o.seller_amount        for o in m_orders)),
+            "orders":     len(m_orders),
+        })
+
+    # ── 5. Top 10 sellers doanh thu cao nhất (tổng seller_amount) ──────────
+    from collections import defaultdict
+    seller_totals: dict = defaultdict(lambda: {"gmv": Decimal("0"), "vat": Decimal("0"),
+                                                "fee": Decimal("0"), "net": Decimal("0"), "cnt": 0})
+    for o in all_delivered:
+        sid = o.seller_id
+        seller_totals[sid]["gmv"] += o.subtotal or Decimal("0")
+        seller_totals[sid]["vat"] += o.vat_amount or Decimal("0")
+        seller_totals[sid]["fee"] += o.platform_fee_amount or Decimal("0")
+        seller_totals[sid]["net"] += o.seller_amount or Decimal("0")
+        seller_totals[sid]["cnt"] += 1
+
+    top_seller_ids = sorted(seller_totals, key=lambda s: seller_totals[s]["net"], reverse=True)[:10]
+    seller_names = {
+        u.id: u.name
+        for u in db.query(UserModel).filter(UserModel.id.in_(top_seller_ids)).all()
+    }
+    top_sellers = [
+        {
+            "seller_id":   sid,
+            "seller_name": seller_names.get(sid, f"Seller #{sid}"),
+            "gmv":         _to_vnd_int(seller_totals[sid]["gmv"]),
+            "vat":         _to_vnd_int(seller_totals[sid]["vat"]),
+            "platform_fee":_to_vnd_int(seller_totals[sid]["fee"]),
+            "seller_net":  _to_vnd_int(seller_totals[sid]["net"]),
+            "order_count": seller_totals[sid]["cnt"],
+        }
+        for sid in top_seller_ids
+    ]
+
+    # ── 6. Tổng ví sellers ──────────────────────────────────────────────────
+    wallet_totals = db.query(
+        sf.coalesce(sf.sum(SellerWallet.pending_balance),   0).label("total_pending"),
+        sf.coalesce(sf.sum(SellerWallet.available_balance), 0).label("total_available"),
+        sf.coalesce(sf.sum(SellerWallet.total_withdrawn),   0).label("total_withdrawn"),
+    ).first()
+
+    return {
+        "success": True,
+        "data": {
+            # ── Tổng tích lũy ──────────────────────────────────────────────
+            "all_time": {
+                "gmv":              _to_vnd_int(gmv),
+                "shipping_fee":     _to_vnd_int(total_shipping),
+                "discount":         _to_vnd_int(total_discount),
+                "vat_collected":    _to_vnd_int(total_vat),      # VAT nền tảng thu
+                "platform_fee":     _to_vnd_int(total_fee),      # Phí 5% nền tảng thu
+                "seller_payout":    _to_vnd_int(total_seller_out),# Tổng trả về seller
+                "order_count":      order_count,
+            },
+            # ── Tháng này ──────────────────────────────────────────────────
+            "this_month": {
+                "gmv":           _to_vnd_int(month_gmv),
+                "vat_collected": _to_vnd_int(month_vat),
+                "platform_fee":  _to_vnd_int(month_fee),
+                "seller_payout": _to_vnd_int(month_seller_out),
+                "order_count":   len(this_month),
+            },
+            # ── Năm này ────────────────────────────────────────────────────
+            "this_year": {
+                "gmv":           _to_vnd_int(year_gmv),
+                "vat_collected": _to_vnd_int(year_vat),
+                "platform_fee":  _to_vnd_int(year_fee),
+                "seller_payout": _to_vnd_int(year_seller_out),
+                "order_count":   len(this_year),
+            },
+            # ── 6 tháng theo từng tháng ─────────────────────────────────
+            "monthly_chart": monthly,
+            # ── Top 10 sellers ──────────────────────────────────────────
+            "top_sellers":  top_sellers,
+            # ── Tổng số dư ví toàn sellers ─────────────────────────────
+            "wallet_summary": {
+                "total_pending":   _to_vnd_int(wallet_totals.total_pending),
+                "total_available": _to_vnd_int(wallet_totals.total_available),
+                "total_withdrawn": _to_vnd_int(wallet_totals.total_withdrawn),
+            },
         }
     }
 

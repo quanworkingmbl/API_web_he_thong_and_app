@@ -148,17 +148,17 @@ async def get_settlement_history(
         "success": True,
         "data": [
             {
-                "id": s.id,
-                "seller_id": s.seller_id,
-                "period_start": s.period_start.isoformat(),
-                "period_end": s.period_end.isoformat(),
-                "total_orders": s.total_orders,
-                "total_amount": str(s.total_amount),
-                "total_platform_fee": str(s.total_platform_fee),
+                "id":                  s.id,
+                "seller_id":           s.seller_id,
+                "period_start":        s.period_start.isoformat(),
+                "period_end":          s.period_end.isoformat(),
+                "total_orders":        s.total_orders,
+                "total_amount":        str(s.total_amount),
+                "total_platform_fee":  str(s.total_platform_fee),
                 "total_seller_amount": str(s.total_seller_amount),
-                "status": s.status.value,
-                "note": s.note,
-                "created_at": s.created_at.isoformat() if s.created_at else None
+                "status":              s.status.value,
+                "note":                s.note,
+                "created_at":          s.created_at.isoformat() if s.created_at else None
             }
             for s in items
         ],
@@ -192,6 +192,7 @@ async def create_settlement(
     total_amount = sum(o.subtotal for o in delivered_orders)
     total_platform_fee = sum(o.platform_fee_amount for o in delivered_orders)
     total_seller_amount = sum(o.seller_amount for o in delivered_orders)
+    total_vat = sum(o.vat_amount or 0 for o in delivered_orders)
 
     settlement = Settlement(
         seller_id=data.seller_id,
@@ -218,11 +219,12 @@ async def create_settlement(
         "success": True,
         "message": f"Đã tạo kỳ đối soát với {total_orders} đơn hàng",
         "data": {
-            "settlement_id": settlement.id,
-            "total_orders": total_orders,
-            "total_amount": str(total_amount),
+            "settlement_id":      settlement.id,
+            "total_orders":       total_orders,
+            "total_amount":       str(total_amount),
+            "total_vat":          str(total_vat),
             "total_platform_fee": str(total_platform_fee),
-            "total_seller_amount": str(total_seller_amount)
+            "total_seller_amount": str(total_seller_amount),
         }
     }
 

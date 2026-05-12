@@ -51,7 +51,10 @@ class Order(Base):
     shipping_fee = Column(Numeric(10, 2), nullable=False, default=0)
     discount_amount = Column(Numeric(10, 2), nullable=False, default=0)
     total_amount = Column(Numeric(15, 2), nullable=False, default=0)
-    
+    # VAT – tính từ vat_rate của từng sản phẩm (VAT included trong giá niêm yết)
+    # Platform giữ để nộp thuế thay seller. Đơn cũ = 0 (grandfathered).
+    vat_amount = Column(Numeric(10, 2), nullable=False, default=0)
+
     # Platform commission
     platform_fee_percentage = Column(Numeric(5, 2), nullable=False, default=5.0)
     platform_fee_amount = Column(Numeric(10, 2), nullable=False, default=0)
