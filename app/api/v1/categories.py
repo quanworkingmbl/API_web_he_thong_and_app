@@ -21,14 +21,14 @@ class CategoryResponse(BaseModel):
     id: int
     name: str
     slug: str
-    description: Optional[str]
-    icon: Optional[str]
-    image: Optional[str]
-    parent_id: Optional[int]
-    order: int
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    image: Optional[str] = None
+    parent_id: Optional[int] = None
+    order: Optional[int] = 0        # Có thể NULL trong DB với data cũ
     is_active: bool
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
