@@ -59,6 +59,7 @@ steps:
       - '--startup-cpu-boost'
       - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
       - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest'
+      - '--set-env-vars=CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://quancmsbe.site,https://www.quancmsbe.site,https://api.quancmsbe.site,https://mbl-cms.store,https://www.mbl-cms.store'
 
 availableSecrets:
   secretManager:
