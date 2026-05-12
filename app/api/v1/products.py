@@ -231,21 +231,15 @@ async def get_products(
     if is_active is not None:
         query = query.filter(Product.is_active == is_active)
     elif not include_inactive:
-        # Mặc định: tất cả role đều chỉ thấy sản phẩm active
-        # Muốn thấy cả inactive → truyền include_inactive=True
-        if ut in ("producer", "seller"):
-            query = query.filter(
-                (Product.is_active == True) | (Product.seller_id == current_user.id)
-            )
-        else:
+        if not current_user or ut not in ("admin", "producer", "seller", "content_manager"):
             query = query.filter(Product.is_active == True)
     else:
-        # include_inactive=True: seller/producer chỉ thấy sản phẩm của mình + tất cả active
         if current_user and ut in ("producer", "seller"):
             query = query.filter(
                 (Product.is_active == True) | (Product.seller_id == current_user.id)
             )
-        # Admin/content_manager: thấy tất cả kể cả inactive khi include_inactive=True
+        elif not current_user or ut not in ("admin", "content_manager"):
+            query = query.filter(Product.is_active == True)
 
     if ut in ("admin", "content_manager"):
         pass
