@@ -2764,8 +2764,8 @@ async def submit_review(
     order_item_id: Optional[int] = Form(None),
     rating: int = Form(..., ge=1, le=5),
     comment: Optional[str] = Form(None, max_length=2000),
-    is_anonymous: bool = Form(False),
-    images: Optional[List[UploadFile]] = File(None),
+    is_anonymous: Optional[bool] = Form(None),   # Optional để tránh Pydantic v2 strict bool
+    images: List[UploadFile] = File(default=[]),  # default=[] thay vì Optional[List]
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
