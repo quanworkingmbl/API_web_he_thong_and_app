@@ -259,6 +259,8 @@ async def get_seller_dashboard(
     ).all()
     total_revenue = sum(o.seller_amount for o in delivered_orders)
     total_platform_fee = sum(o.platform_fee_amount for o in delivered_orders)
+    total_vat = sum(o.vat_amount or 0 for o in delivered_orders)
+    total_gross = sum(o.subtotal for o in delivered_orders)  # trước khi trừ phí và VAT
 
     # Thống kê 30 ngày gần nhất
     last_30_days = datetime.utcnow() - timedelta(days=30)
@@ -302,22 +304,24 @@ async def get_seller_dashboard(
                 "by_status": orders_by_status
             },
             "revenue": {
-                "total_seller_amount": _to_vnd_int(total_revenue),
-                "total_platform_fee": _to_vnd_int(total_platform_fee),
-                "last_30_days": _to_vnd_int(recent_revenue)
+                "total_gross":         _to_vnd_int(total_gross),        # Doanh thu gộp (trước phí + thuế)
+                "total_vat":           _to_vnd_int(total_vat),           # VAT đã bị trừ
+                "total_platform_fee":  _to_vnd_int(total_platform_fee),  # Phí nền tảng 5%
+                "total_seller_amount": _to_vnd_int(total_revenue),       # Seller thực nhận
+                "last_30_days":        _to_vnd_int(recent_revenue),      # 30 ngày gần nhất (net)
             },
             "products": {
-                "total": total_products,
+                "total":    total_products,
                 "approved": approved_products,
-                "pending": pending_products,
+                "pending":  pending_products,
                 "low_stock": low_stock_products
             },
             # Backward-compatible flat fields cho các màn hình CMS cũ.
-            "total_products": total_products,
+            "total_products":    total_products,
             "approved_products": approved_products,
-            "pending_products": pending_products,
-            "total_orders": total_orders,
-            "total_revenue": _to_vnd_int(total_revenue),
+            "pending_products":  pending_products,
+            "total_orders":      total_orders,
+            "total_revenue":     _to_vnd_int(total_revenue),
         }
     }
 

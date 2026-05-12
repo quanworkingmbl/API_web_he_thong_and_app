@@ -1794,7 +1794,42 @@ async def create_order(
     discount_amount = coupon_discount
     total_amount = subtotal + shipping_fee - discount_amount
     platform_fee_amount = subtotal * platform_fee_percentage / Decimal("100")
-    seller_amount = subtotal - platform_fee_amount
+
+    # ── Tính VAT từng sản phẩm (VAT included trong giá niêm yết) ─────────────
+    # Công thức: VAT = giá_bán × rate / (100 + rate)  [VAT đã gộp trong giá]
+    # Mặc định hệ thống: 10% nếu sản phẩm chưa khai báo vat_rate
+    # Nền tảng giữ VAT và nộp thuế thay seller.
+    DEFAULT_VAT_RATE = Decimal("10.0")   # mặc định 10%
+    tax_detail = []
+    total_vat_amount = Decimal("0")
+    for item_data in items_of_seller:
+        p = item_data["product"]
+        # Dùng vat_rate của sản phẩm; fallback về 10% nếu chưa khai báo
+        vat_rate = Decimal(str(p.vat_rate)) if p.vat_rate is not None else DEFAULT_VAT_RATE
+        item_price = item_data["total_price"]
+        if vat_rate > 0:
+            item_vat = (item_price * vat_rate / (Decimal("100") + vat_rate)).quantize(Decimal("0.01"))
+        else:
+            item_vat = Decimal("0")
+        item_data["_tax_amount"] = item_vat  # dùng khi tạo OrderItem
+        total_vat_amount += item_vat
+        tax_detail.append({
+            "product_id":   p.id,
+            "product_name": p.name,
+            "vat_rate":     float(vat_rate),
+            "item_total":   float(item_price),
+            "vat_amount":   float(item_vat),
+        })
+    total_vat_amount = total_vat_amount.quantize(Decimal("0.01"))
+
+    # Seller nhận = subtotal − phí nền tảng 5% − VAT đã tách ra
+    seller_amount = subtotal - platform_fee_amount - total_vat_amount
+
+    import json as _json
+    tax_breakdown_json = _json.dumps({
+        "total_vat": float(total_vat_amount),
+        "items": tax_detail,
+    }, ensure_ascii=False)
 
     order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
 
@@ -1817,6 +1852,7 @@ async def create_order(
         shipping_fee=shipping_fee,
         discount_amount=discount_amount,
         total_amount=total_amount,
+        vat_amount=total_vat_amount,
         platform_fee_percentage=platform_fee_percentage,
         platform_fee_amount=platform_fee_amount,
         seller_amount=seller_amount,
@@ -1825,6 +1861,7 @@ async def create_order(
         payment_status=payment_status,
         customer_note=checkout_data.customer_note,
         coupon_code=checkout_data.coupon_code or (applied_promo.code if applied_promo else None),
+        tax_breakdown=tax_breakdown_json,
     )
     db.add(new_order)
     db.flush()
@@ -1842,6 +1879,7 @@ async def create_order(
                 unit_price=item_data["unit_price"],
                 quantity=item_data["quantity"],
                 total_price=item_data["total_price"],
+                tax_amount=item_data.get("_tax_amount", Decimal("0")),
             )
         )
         decrement_stock(db, p, item_data["quantity"], item_data["variant_id"])
