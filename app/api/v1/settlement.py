@@ -178,10 +178,12 @@ async def create_settlement(
     """
     _require_admin(current_user)
 
-    # Lấy các đơn hàng DELIVERED trong kỳ
+    # Lấy các đơn hàng DELIVERED trong kỳ VÀ đã được credited vào ví
+    # wallet_credited = True đảm bảo chỉ tính đơn user đã xác nhận nhận hàng
     delivered_orders = db.query(Order).filter(
         Order.seller_id == data.seller_id,
         Order.status == OrderStatus.DELIVERED,
+        Order.wallet_credited == True,      # chỉ đơn đã credited – tránh COD chưa thu
         Order.delivered_at >= data.period_start,
         Order.delivered_at <= data.period_end
     ).all()
@@ -204,9 +206,10 @@ async def create_settlement(
     )
     db.add(settlement)
 
-    # Cập nhật pending_balance trong ví seller
-    wallet = _get_or_create_wallet(data.seller_id, db)
-    wallet.pending_balance += total_seller_amount
+    # ⚠️ KHÔNG cộng wallet.pending_balance ở đây!
+    # pending_balance đã được cộng bởi credit_seller_wallet()
+    # khi user xác nhận nhận hàng (confirm_order_received).
+    # Cộng thêm ở đây sẽ gây double-credit.
 
     db.commit()
     db.refresh(settlement)
