@@ -277,19 +277,60 @@ async def get_product_origin_for_owner(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """
+    Seller xem nguồn gốc + toàn bộ giấy chứng nhận (kể cả PENDING, REJECTED)
+    của sản phẩm thuộc sở hữu mình.
+    """
     _require_seller(current_user)
     _check_product_owner(product_id, current_user, db)
 
     origin = db.query(ProductOrigin).filter(ProductOrigin.product_id == product_id).first()
+
+    # Lấy toàn bộ certificates (kể cả chưa được duyệt)
+    certs = db.query(ProductCertificate).filter(
+        ProductCertificate.product_id == product_id
+    ).order_by(ProductCertificate.created_at.desc()).all()
+
+    certificates_payload = [
+        {
+            "id": c.id,
+            "certificate_name": c.certificate_name,
+            "certificate_number": c.certificate_number,
+            "issued_by": c.issued_by,
+            "issue_date": c.issue_date.isoformat() if c.issue_date else None,
+            "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
+            "document_url": c.document_url,
+            "verification_status": c.verification_status.value
+            if hasattr(c.verification_status, "value")
+            else str(c.verification_status),
+            "verified_at": c.verified_at.isoformat() if c.verified_at else None,
+            "rejection_reason": c.rejection_reason,
+        }
+        for c in certs
+    ]
+
     if not origin:
-        return {"success": True, "data": None, "message": "Sản phẩm chưa có thông tin nguồn gốc"}
+        return {
+            "success": True,
+            "data": {
+                "origin": None,
+                "certificates": certificates_payload,
+            },
+            "message": "Sản phẩm chưa có thông tin nguồn gốc",
+        }
 
     payload = _serialize_origin(origin, include_status=True)
     if origin.region_id:
         region = db.query(Region).filter(Region.id == origin.region_id).first()
         payload["region_name"] = region.name if region else None
 
-    return {"success": True, "data": payload}
+    return {
+        "success": True,
+        "data": {
+            "origin": payload,
+            "certificates": certificates_payload,
+        },
+    }
 
 
 @router.get("/origins/product/{product_id}/review", summary="Admin xem nguồn gốc theo sản phẩm")
