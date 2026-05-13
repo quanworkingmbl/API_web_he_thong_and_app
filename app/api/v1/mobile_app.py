@@ -1976,15 +1976,17 @@ async def get_my_orders(
 
     order_list = []
 
-    # Lấy tất cả review của user một lần (dùng full Review object, chắc chắn hơn)
-    all_user_reviews = db.query(Review).filter(
-        Review.user_id == current_user.id
-    ).all()
-    reviewed_product_ids = {r.product_id for r in all_user_reviews if r.product_id is not None}
-
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    _log.info(f"[has_reviewed] user={current_user.id}, reviewed_product_ids={reviewed_product_ids}")
+    # Dùng raw SQL để tránh SQLAlchemy Enum load lỗi khi DB có giá trị enum không hợp lệ
+    # (ví dụ moderation_status = NULL hoặc '' sẽ khiến db.query(Review).all() raise error)
+    from sqlalchemy import text as _sql_text
+    _rev_result = db.execute(
+        _sql_text(
+            "SELECT DISTINCT product_id FROM reviews "
+            "WHERE user_id = :uid AND product_id IS NOT NULL"
+        ),
+        {"uid": current_user.id}
+    )
+    reviewed_product_ids = {row[0] for row in _rev_result.fetchall()}
 
     for o in orders:
         items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
