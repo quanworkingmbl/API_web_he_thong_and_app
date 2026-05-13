@@ -2037,6 +2037,48 @@ async def get_my_orders(
 REVIEW_DEADLINE_DAYS = 5  # Số ngày được phép đánh giá sau khi nhận hàng
 
 # ==============================================================================
+# DEBUG ENDPOINT — XEM DATA THỰC TẾ TRONG DB (XÓA SAU KHI FIX)
+# ==============================================================================
+
+@router.get("/debug/review-status", summary="[DEBUG] Kiểm tra review & order data")
+async def debug_review_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Debug: xem review và order item data của user hiện tại để tìm bug has_reviewed"""
+    # Lấy tất cả review của user
+    reviews = db.query(Review).filter(Review.user_id == current_user.id).all()
+    reviewed_pids = {r.product_id for r in reviews if r.product_id is not None}
+
+    # Lấy tất cả đơn DELIVERED của user
+    delivered_orders = db.query(Order).filter(
+        Order.customer_id == current_user.id,
+        Order.status == "DELIVERED",
+    ).all()
+
+    result = []
+    for o in delivered_orders:
+        items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
+        pids_in_order = [i.product_id for i in items]
+        matched = [p for p in pids_in_order if p in reviewed_pids]
+        result.append({
+            "order_id": o.id,
+            "order_number": o.order_number,
+            "order_status_raw": str(o.status),
+            "product_ids_in_order": pids_in_order,
+            "reviewed_product_ids": list(reviewed_pids),
+            "matched_pids": matched,
+            "has_reviewed_expected": len(matched) > 0,
+        })
+
+    return {
+        "user_id": current_user.id,
+        "total_reviews_in_db": len(reviews),
+        "reviews": [{"id": r.id, "product_id": r.product_id, "user_id": r.user_id} for r in reviews],
+        "delivered_orders": result,
+    }
+
+# ==============================================================================
 # PENDING REVIEWS — phải đặt TRƯỚC route /orders/my/{order_id} để tránh conflict
 # ==============================================================================
 
