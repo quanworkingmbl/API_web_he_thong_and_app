@@ -2010,6 +2010,99 @@ async def get_my_orders(
         "meta": {"total": total, "page": page, "limit": limit, "total_pages": (total + limit - 1) // limit}
     }
 
+REVIEW_DEADLINE_DAYS = 5  # Số ngày được phép đánh giá sau khi nhận hàng
+
+# ==============================================================================
+# PENDING REVIEWS — phải đặt TRƯỚC route /orders/my/{order_id} để tránh conflict
+# ==============================================================================
+
+@router.get("/orders/my/pending-reviews", summary="Danh sách sản phẩm cần đánh giá")
+async def get_pending_reviews(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Trả về danh sách ORDER ITEM của các đơn DELIVERED mà user chưa đánh giá.
+    - Chỉ hiển thị trong vòng REVIEW_DEADLINE_DAYS ngày kể từ delivered_at.
+    - Mỗi item có đủ thông tin để render card đánh giá.
+    """
+    deadline_cutoff = datetime.utcnow() - timedelta(days=REVIEW_DEADLINE_DAYS)
+
+    # Lấy tất cả đơn DELIVERED của user, còn trong deadline
+    delivered_orders = db.query(Order).filter(
+        Order.customer_id == current_user.id,
+        Order.status == OrderStatus.DELIVERED,
+        Order.delivered_at >= deadline_cutoff,
+    ).all()
+
+    if not delivered_orders:
+        return {"success": True, "data": [], "meta": {"total": 0}}
+
+    order_ids = [o.id for o in delivered_orders]
+    order_map = {o.id: o for o in delivered_orders}
+
+    # Lấy tất cả order items trong các đơn đó
+    all_items = db.query(OrderItem).filter(
+        OrderItem.order_id.in_(order_ids)
+    ).all()
+
+    if not all_items:
+        return {"success": True, "data": [], "meta": {"total": 0}}
+
+    # Lấy tập product_id đã được review bởi user này
+    reviewed_product_ids = set(
+        r.product_id for r in db.query(Review.product_id).filter(
+            Review.user_id == current_user.id,
+            Review.product_id.in_([i.product_id for i in all_items]),
+        ).all()
+    )
+
+    pending_list = []
+    for item in all_items:
+        if item.product_id in reviewed_product_ids:
+            continue  # Đã đánh giá sản phẩm này rồi
+
+        order = order_map.get(item.order_id)
+        if not order or not order.delivered_at:
+            continue
+
+        delivered_at = order.delivered_at
+        if delivered_at.tzinfo is not None:
+            from datetime import timezone
+            deadline_cutoff_aware = datetime.now(timezone.utc) - timedelta(days=REVIEW_DEADLINE_DAYS)
+            if delivered_at < deadline_cutoff_aware:
+                continue
+        else:
+            if delivered_at < deadline_cutoff:
+                continue
+
+        days_left = REVIEW_DEADLINE_DAYS - (
+            datetime.utcnow() - (delivered_at.replace(tzinfo=None) if delivered_at.tzinfo else delivered_at)
+        ).days
+        days_left = max(0, days_left)
+
+        pending_list.append({
+            "order_id": item.order_id,
+            "order_number": order.order_number,
+            "order_item_id": item.id,
+            "product_id": item.product_id,
+            "product_name": item.product_name,
+            "product_image": _extract_first_media_url(item.product_image),
+            "unit_price": str(item.unit_price),
+            "quantity": item.quantity,
+            "delivered_at": delivered_at.isoformat(),
+            "days_left": days_left,
+        })
+
+    # Sắp xếp: ít ngày còn lại nhất lên đầu (sắp hết hạn)
+    pending_list.sort(key=lambda x: x["days_left"])
+
+    return {
+        "success": True,
+        "data": pending_list,
+        "meta": {"total": len(pending_list)},
+    }
+
 
 @router.get("/orders/my/{order_id}")
 async def get_my_order_detail(
@@ -2703,96 +2796,10 @@ async def upload_profile_avatar(
 # ==============================================================================
 # REVIEWS – Đánh giá sản phẩm (Mobile)
 # ==============================================================================
-
-REVIEW_DEADLINE_DAYS = 5  # Số ngày được phép đánh giá sau khi nhận hàng
-
-
-@router.get("/orders/my/pending-reviews", summary="Danh sách sản phẩm cần đánh giá")
-async def get_pending_reviews(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Trả về danh sách ORDER ITEM của các đơn DELIVERED mà user chưa đánh giá.
-    - Chỉ hiển thị trong vòng REVIEW_DEADLINE_DAYS ngày kể từ delivered_at.
-    - Mỗi item có đủ thông tin để render card đánh giá.
-    """
-    deadline_cutoff = datetime.utcnow() - timedelta(days=REVIEW_DEADLINE_DAYS)
-
-    # Lấy tất cả đơn DELIVERED của user, còn trong deadline
-    delivered_orders = db.query(Order).filter(
-        Order.customer_id == current_user.id,
-        Order.status == OrderStatus.DELIVERED,
-        Order.delivered_at >= deadline_cutoff,
-    ).all()
-
-    if not delivered_orders:
-        return {"success": True, "data": [], "meta": {"total": 0}}
-
-    order_ids = [o.id for o in delivered_orders]
-    order_map = {o.id: o for o in delivered_orders}
-
-    # Lấy tất cả order items trong các đơn đó
-    all_items = db.query(OrderItem).filter(
-        OrderItem.order_id.in_(order_ids)
-    ).all()
-
-    if not all_items:
-        return {"success": True, "data": [], "meta": {"total": 0}}
-
-    # Lấy tập product_id đã được review bởi user này
-    reviewed_product_ids = set(
-        r.product_id for r in db.query(Review.product_id).filter(
-            Review.user_id == current_user.id,
-            Review.product_id.in_([i.product_id for i in all_items]),
-        ).all()
-    )
-
-    pending_list = []
-    for item in all_items:
-        if item.product_id in reviewed_product_ids:
-            continue  # Đã đánh giá sản phẩm này rồi
-
-        order = order_map.get(item.order_id)
-        if not order or not order.delivered_at:
-            continue
-
-        delivered_at = order.delivered_at
-        if delivered_at.tzinfo is not None:
-            from datetime import timezone
-            deadline_cutoff_aware = datetime.now(timezone.utc) - timedelta(days=REVIEW_DEADLINE_DAYS)
-            if delivered_at < deadline_cutoff_aware:
-                continue
-        else:
-            if delivered_at < deadline_cutoff:
-                continue
-
-        days_left = REVIEW_DEADLINE_DAYS - (
-            datetime.utcnow() - (delivered_at.replace(tzinfo=None) if delivered_at.tzinfo else delivered_at)
-        ).days
-        days_left = max(0, days_left)
-
-        pending_list.append({
-            "order_id": item.order_id,
-            "order_number": order.order_number,
-            "order_item_id": item.id,
-            "product_id": item.product_id,
-            "product_name": item.product_name,
-            "product_image": _extract_first_media_url(item.product_image),
-            "unit_price": str(item.unit_price),
-            "quantity": item.quantity,
-            "delivered_at": delivered_at.isoformat(),
-            "days_left": days_left,
-        })
-
-    # Sắp xếp: ít ngày còn lại nhất lên đầu (sắp hết hạn)
-    pending_list.sort(key=lambda x: x["days_left"])
-
-    return {
-        "success": True,
-        "data": pending_list,
-        "meta": {"total": len(pending_list)},
-    }
+# NOTE: GET /orders/my/pending-reviews đã được di chuyển lên TRƯỚC route
+# /orders/my/{order_id} để tránh FastAPI route conflict (422 error).
+# Xem phần "PENDING REVIEWS" bên trên.
+# ==============================================================================
 
 
 @router.post("/reviews", summary="Gửi đánh giá sản phẩm")
