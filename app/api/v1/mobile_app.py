@@ -1975,20 +1975,42 @@ async def get_my_orders(
     orders = query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
 
     order_list = []
+
+    # Batch query: lấy TẤT CẢ product_id user đã review 1 lần (tránh N+1 query)
+    reviewed_product_ids = {
+        r.product_id
+        for r in db.query(Review.product_id).filter(
+            Review.user_id == current_user.id,
+        ).all()
+        if r.product_id is not None
+    }
+
     for o in orders:
         items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
         seller = db.query(User).filter(User.id == o.seller_id).first()
         first_image = _extract_first_media_url(items[0].product_image) if items else None
+
+        # Kiểm tra đơn này đã có ít nhất 1 sản phẩm được review chưa
+        raw_status = o.status.value if hasattr(o.status, 'value') else str(o.status)
+        is_delivered = raw_status.upper() == "DELIVERED"
+        product_ids_in_order = [i.product_id for i in items if i.product_id]
+        has_reviewed = (
+            is_delivered
+            and len(product_ids_in_order) > 0
+            and any(pid in reviewed_product_ids for pid in product_ids_in_order)
+        )
+
         order_list.append({
             "id": o.id,
             "order_number": o.order_number,
             "seller_name": seller.name if seller else None,
             "total_amount": str(o.total_amount),
-            "status": o.status.value if hasattr(o.status, 'value') else str(o.status),
+            "status": raw_status,
             "payment_method": o.payment_method.value if hasattr(o.payment_method, 'value') else str(o.payment_method),
             "payment_status": o.payment_status,
             "item_count": len(items),
             "first_item_image": first_image,
+            "has_reviewed": has_reviewed,  # ← Flutter dùng field này để hiển thị nút
             "items": [
                 {
                     "id": item.id,
