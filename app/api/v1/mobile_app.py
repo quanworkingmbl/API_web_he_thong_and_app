@@ -2152,6 +2152,21 @@ async def get_my_order_detail(
     can_cancel = current_status in (OrderStatus.PENDING, OrderStatus.CONFIRMED)
     can_review = current_status == OrderStatus.DELIVERED
 
+    # Kiểm tra user đã review TẤT CẢ sản phẩm trong đơn chưa
+    has_reviewed = False
+    if can_review and items:
+        product_ids_in_order = [i.product_id for i in items if i.product_id]
+        if product_ids_in_order:
+            reviewed_ids = {
+                r.product_id
+                for r in db.query(Review.product_id).filter(
+                    Review.user_id == current_user.id,
+                    Review.product_id.in_(product_ids_in_order),
+                ).all()
+            }
+            # Coi là "đã review" nếu ít nhất 1 sản phẩm đã được review
+            has_reviewed = len(reviewed_ids) > 0
+
     return {
         "success": True,
         "data": {
@@ -2171,6 +2186,7 @@ async def get_my_order_detail(
             "coupon_code": order.coupon_code,
             "can_cancel": can_cancel,
             "can_review": can_review,
+            "has_reviewed": has_reviewed,
             "created_at": order.created_at.isoformat(),
             "confirmed_at": order.confirmed_at.isoformat() if order.confirmed_at else None,
             "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
