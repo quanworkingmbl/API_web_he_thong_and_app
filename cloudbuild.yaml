@@ -62,6 +62,7 @@ steps:
       - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
       - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest'
       - '--set-env-vars=CORS_ORIGINS=${_CORS_ORIGINS}'
+      - '--traffic=100'   # ← Luôn route 100% traffic sang revision mới nhất
 
 availableSecrets:
   secretManager:
