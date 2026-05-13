@@ -255,14 +255,14 @@ async def get_finance_overview(
     order_count      = len(all_delivered)
 
     # ── 2. Tháng này ────────────────────────────────────────────────────────
-    this_month = [o for o in all_delivered if o.delivered_at and o.delivered_at >= month_start]
+    this_month = [o for o in all_delivered if (o.delivered_at or o.created_at) and (o.delivered_at or o.created_at) >= month_start]
     month_gmv        = sum(o.subtotal            for o in this_month)
     month_vat        = sum(o.vat_amount or 0     for o in this_month)
     month_fee        = sum(o.platform_fee_amount  for o in this_month)
     month_seller_out = sum(o.seller_amount        for o in this_month)
 
     # ── 3. Năm này ──────────────────────────────────────────────────────────
-    this_year = [o for o in all_delivered if o.delivered_at and o.delivered_at >= year_start]
+    this_year = [o for o in all_delivered if (o.delivered_at or o.created_at) and (o.delivered_at or o.created_at) >= year_start]
     year_gmv         = sum(o.subtotal            for o in this_year)
     year_vat         = sum(o.vat_amount or 0     for o in this_year)
     year_fee         = sum(o.platform_fee_amount  for o in this_year)
@@ -281,7 +281,7 @@ async def get_finance_overview(
         m_end   = datetime(y, m+1, 1) if m < 12 else datetime(y+1, 1, 1)
         m_orders = [
             o for o in all_delivered
-            if o.delivered_at and m_start <= o.delivered_at < m_end
+            if (o.delivered_at or o.created_at) and m_start <= (o.delivered_at or o.created_at) < m_end
         ]
         monthly.append({
             "month":      f"{y}-{m:02d}",
