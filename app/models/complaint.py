@@ -183,5 +183,7 @@ class Review(Base):
     images     = relationship("ReviewImage", back_populates="review", cascade="all, delete-orphan")
 
     __table_args__ = (
-        UniqueConstraint('user_id', 'product_id', name='uq_user_product_review'),
+        # Cho phép user review cùng sản phẩm ở các đơn hàng khác nhau
+        # → unique theo order_item_id (mỗi item chỉ được review 1 lần)
+        UniqueConstraint('user_id', 'order_item_id', name='uq_user_orderitem_review'),
     )

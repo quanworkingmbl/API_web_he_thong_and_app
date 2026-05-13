@@ -2931,11 +2931,21 @@ async def submit_review(
                 detail=f"Đã quá {REVIEW_DEADLINE_DAYS} ngày kể từ khi nhận hàng, không thể đánh giá",
             )
 
-    # Kiểm tra đã đánh giá sản phẩm này chưa
-    existing = db.query(Review).filter(
-        Review.product_id == product_id,
-        Review.user_id == current_user.id,
-    ).first()
+    # Kiểm tra đã đánh giá cho đơn hàng này chưa (KHÔNG check toàn cục theo product_id)
+    # → cho phép user mua cùng sản phẩm ở đơn khác vẫn review được
+    if order_item_id:
+        # Ưu tiên check theo order_item_id (chính xác nhất)
+        existing = db.query(Review).filter(
+            Review.order_item_id == order_item_id,
+            Review.user_id == current_user.id,
+        ).first()
+    else:
+        # Fallback: check theo order_id + product_id (vẫn cho phép review ở đơn khác)
+        existing = db.query(Review).filter(
+            Review.order_id == order_id,
+            Review.product_id == product_id,
+            Review.user_id == current_user.id,
+        ).first()
     if existing:
         raise HTTPException(
             status_code=400,
