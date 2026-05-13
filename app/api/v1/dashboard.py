@@ -104,9 +104,48 @@ async def get_dashboard_overview(
     ).all()
     this_month_revenue = sum(o.total_amount for o in this_month_orders) if this_month_orders else 0
     
+    from app.models.complaint import Complaint
+
+    # Pending complaints
+    try:
+        pending_complaints = db.query(Complaint).filter(
+            Complaint.status == "PENDING"
+        ).count()
+    except Exception:
+        pending_complaints = 0
+
+    # Platform fee tháng này
+    this_month_platform_fee = sum(o.platform_fee_amount for o in this_month_orders) if this_month_orders else 0
+
+    # Đơn hàng gần đây (10 đơn mới nhất)
+    recent_orders_raw = db.query(Order).order_by(Order.created_at.desc()).limit(10).all()
+    recent_orders_list = [
+        {
+            "id": o.id,
+            "order_number": o.order_number,
+            "customer_name": o.customer_name,
+            "total_amount": _to_vnd_int(o.total_amount),
+            "status": o.status.value if hasattr(o.status, "value") else str(o.status),
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        }
+        for o in recent_orders_raw
+    ]
+
     return {
         "success": True,
         "data": {
+            # ── Flat fields — Web đọc trực tiếp ──────────────────────────────
+            "total_users": total_users,
+            "total_products": total_products,
+            "total_orders": total_orders,
+            "total_revenue": _to_vnd_int(total_revenue),
+            "platform_fee_total": _to_vnd_int(total_platform_fee),
+            "platform_fee_this_month": _to_vnd_int(this_month_platform_fee),
+            "pending_products": pending_products,
+            "pending_orders": pending_orders,
+            "pending_complaints": pending_complaints,
+            "recent_orders": recent_orders_list,
+            # ── Nested structure — giữ lại để tương thích ────────────────────
             "users": {
                 "total": total_users,
                 "producers": total_producers,
@@ -123,6 +162,7 @@ async def get_dashboard_overview(
             "revenue": {
                 "total": _to_vnd_int(total_revenue),
                 "platform_fee": _to_vnd_int(total_platform_fee),
+                "platform_fee_10pct": _to_vnd_int(total_platform_fee),
                 "this_month": _to_vnd_int(this_month_revenue)
             }
         }
@@ -298,7 +338,7 @@ async def get_finance_overview(
                 "shipping_fee":     _to_vnd_int(total_shipping),
                 "discount":         _to_vnd_int(total_discount),
                 "vat_collected":    _to_vnd_int(total_vat),      # VAT nền tảng thu
-                "platform_fee":     _to_vnd_int(total_fee),      # Phí 5% nền tảng thu
+                "platform_fee":     _to_vnd_int(total_fee),      # Phí 10% nền tảng thu
                 "seller_payout":    _to_vnd_int(total_seller_out),# Tổng trả về seller
                 "order_count":      order_count,
             },

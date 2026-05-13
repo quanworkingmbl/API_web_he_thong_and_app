@@ -1788,7 +1788,7 @@ async def create_order(
         applied_promo = best_promo
 
     # ── Bước 2: Tạo 1 đơn hàng duy nhất cho 1 seller (Kiểu A) ───────────────
-    platform_fee_percentage = Decimal("5.0")
+    platform_fee_percentage = Decimal("10.0")  # Phí nền tảng 10% trên subtotal
     subtotal = sum(i["total_price"] for i in items_of_seller)
     shipping_fee = Decimal("30000")
     discount_amount = coupon_discount
