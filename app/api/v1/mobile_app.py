@@ -1438,42 +1438,42 @@ async def apply_promotion(
     ).first()
 
     if not promo:
-        return {"success": False, "data": {"valid": False, "message": "Mã khuyến mãi không tồn tại hoặc đã hết hạn"}}
+        return {"success": True, "data": {"valid": False, "message": "Mã khuyến mãi không tồn tại hoặc đã hết hạn"}}
 
     can_use, reason = _can_user_use_promotion(db, promo, current_user.id)
     if not can_use:
-        return {"success": False, "data": {"valid": False, "message": reason}}
+        return {"success": True, "data": {"valid": False, "message": reason}}
 
     scope = _promotion_scope(promo)
     if scope == "SELLER":
         if promo_data.seller_id is None:
-            return {"success": False, "data": {"valid": False, "message": "Mã này cần thông tin seller để kiểm tra"}}
+            return {"success": True, "data": {"valid": False, "message": "Mã này cần thông tin seller để kiểm tra"}}
         if not promo.seller_id or promo_data.seller_id != promo.seller_id:
-            return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho cửa hàng này"}}
+            return {"success": True, "data": {"valid": False, "message": "Mã không áp dụng cho cửa hàng này"}}
 
     if scope == "PRODUCT":
         if not promo_data.product_ids:
-            return {"success": False, "data": {"valid": False, "message": "Mã này cần danh sách sản phẩm để kiểm tra"}}
+            return {"success": True, "data": {"valid": False, "message": "Mã này cần danh sách sản phẩm để kiểm tra"}}
         scoped_product_ids = _parse_scope_ids(promo.applicable_product_ids)
         request_product_ids = {int(pid) for pid in promo_data.product_ids}
         if not scoped_product_ids.intersection(request_product_ids):
-            return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho sản phẩm đã chọn"}}
+            return {"success": True, "data": {"valid": False, "message": "Mã không áp dụng cho sản phẩm đã chọn"}}
 
     if scope == "CATEGORY":
         if not promo_data.category_ids:
-            return {"success": False, "data": {"valid": False, "message": "Mã này cần danh mục sản phẩm để kiểm tra"}}
+            return {"success": True, "data": {"valid": False, "message": "Mã này cần danh mục sản phẩm để kiểm tra"}}
         scoped_category_ids = _parse_scope_ids(promo.applicable_category_ids)
         request_category_ids = {int(cid) for cid in promo_data.category_ids}
         if not scoped_category_ids.intersection(request_category_ids):
-            return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho danh mục đã chọn"}}
+            return {"success": True, "data": {"valid": False, "message": "Mã không áp dụng cho danh mục đã chọn"}}
 
     if promo.seller_id and promo_data.seller_id and promo_data.seller_id != promo.seller_id:
-        return {"success": False, "data": {"valid": False, "message": "Mã không áp dụng cho cửa hàng này"}}
+        return {"success": True, "data": {"valid": False, "message": "Mã không áp dụng cho cửa hàng này"}}
 
     # Check min order
     if promo_data.subtotal < promo.min_order_amount:
         return {
-            "success": False,
+            "success": True,
             "data": {
                 "valid": False,
                 "message": f"Đơn hàng tối thiểu {promo.min_order_amount:,.0f}đ để áp mã này",
