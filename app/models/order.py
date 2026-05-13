@@ -56,7 +56,7 @@ class Order(Base):
     vat_amount = Column(Numeric(10, 2), nullable=False, default=0)
 
     # Platform commission
-    platform_fee_percentage = Column(Numeric(5, 2), nullable=False, default=5.0)
+    platform_fee_percentage = Column(Numeric(5, 2), nullable=False, default=10.0)
     platform_fee_amount = Column(Numeric(10, 2), nullable=False, default=0)
     seller_amount = Column(Numeric(15, 2), nullable=False, default=0)
     
