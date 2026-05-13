@@ -18,7 +18,7 @@ router = APIRouter()
 # ==============================================================================
 
 class CategoryResponse(BaseModel):
-    id: int
+    id: int 
     name: str
     slug: str
     description: Optional[str] = None
