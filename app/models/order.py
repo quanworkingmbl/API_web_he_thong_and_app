@@ -84,6 +84,9 @@ class Order(Base):
     # Đã cộng tiền vào ví seller chưa (chống double-credit)
     wallet_credited = Column(Boolean, default=False, nullable=False, index=True)
 
+    # Reserve – thời điểm giải phóng 20% reserve về available (delivered_at + 30 ngày)
+    reserve_release_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    reserve_released   = Column(Boolean, default=False, nullable=False)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
