@@ -2,12 +2,18 @@
 Settlement API – Đối soát & Chi trả cho Seller
 
 Endpoints:
-- GET  /settlement/wallet           – Seller xem ví
-- GET  /settlement/history          – Lịch sử đối soát
-- POST /settlement/create           – Admin tạo kỳ đối soát
-- POST /settlement/{id}/approve     – Admin duyệt
-- POST /settlement/{id}/payout      – Admin chi trả
-- GET  /settlement/payouts          – Lịch sử payout
+- GET  /settlement/wallet                    – Seller xem ví (kèm max_withdrawable)
+- GET  /settlement/history                   – Lịch sử đối soát
+- POST /settlement/create                    – Admin tạo kỳ đối soát
+- POST /settlement/{id}/approve              – Admin duyệt kỳ đối soát
+- POST /settlement/{id}/payout               – Admin chi trả kỳ đối soát
+- GET  /settlement/payouts                   – Lịch sử payout
+- POST /settlement/withdrawal/request        – Seller tạo yêu cầu rút tiền
+- GET  /settlement/withdrawal/my             – Seller xem yêu cầu của mình
+- GET  /settlement/withdrawal/admin          – Admin xem tất cả yêu cầu
+- POST /settlement/withdrawal/{id}/approve   – Admin duyệt yêu cầu rút
+- POST /settlement/withdrawal/{id}/reject    – Admin từ chối yêu cầu rút
+- POST /settlement/release-reserves          – Admin/system giải phóng reserve đã đủ 30 ngày
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,7 +23,11 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 from decimal import Decimal
 from app.core.database import get_db
-from app.models.settlement import SellerWallet, Settlement, SettlementStatus, Payout, PayoutStatus
+from app.models.settlement import (
+    SellerWallet, Settlement, SettlementStatus,
+    Payout, PayoutStatus,
+    WithdrawalRequest, WithdrawalStatus,
+)
 from app.models.order import Order, OrderStatus
 from app.models.user import User
 from app.models.seller_profile import SellerProfile
@@ -82,6 +92,7 @@ async def get_seller_wallet(
 
     from sqlalchemy import func as sf
     from app.models.order import Order, OrderStatus
+    from app.services.wallet import calc_min_reserve, calc_max_withdrawable
 
     # Tổng tất cả đơn DELIVERED đã credited cho seller
     total_stats = db.query(
@@ -107,13 +118,19 @@ async def get_seller_wallet(
         Order.delivered_at >= month_start,
     ).first()
 
+    min_reserve    = calc_min_reserve(current_user.id, db)
+    max_withdraw   = calc_max_withdrawable(current_user.id, db)
+
     return {
         "success": True,
         "data": {
             "seller_id": current_user.id,
             "pending_balance": str(wallet.pending_balance or 0),
             "available_balance": str(wallet.available_balance or 0),
+            "reserve_balance": str(wallet.reserve_balance or 0),
             "total_withdrawn": str(wallet.total_withdrawn or 0),
+            "min_reserve": str(min_reserve),
+            "max_withdrawable": str(max_withdraw),
             "total_earned": str(total_stats.total_earned if total_stats else 0),
             "total_delivered_orders": total_stats.total_orders if total_stats else 0,
             "this_month_earned": str(month_stats.month_earned if month_stats else 0),
@@ -375,3 +392,255 @@ async def get_payout_history(
         ],
         "meta": {"total": total, "page": page, "limit": limit}
     }
+
+
+# ==============================================================================
+# WITHDRAWAL REQUEST – Seller rút tiền (luồng mới)
+# ==============================================================================
+
+class WithdrawalRequestCreate(BaseModel):
+    amount: Decimal = Field(..., gt=0, description="Số tiền muốn rút (> 0)")
+    note: Optional[str] = None
+
+
+class WithdrawalReviewRequest(BaseModel):
+    admin_note: Optional[str] = None
+    transaction_ref: Optional[str] = None
+
+
+@router.post("/withdrawal/request", summary="Seller tạo yêu cầu rút tiền")
+async def create_withdrawal_request(
+    data: WithdrawalRequestCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Seller tạo yêu cầu rút tiền.
+    Chỉ rút được: available_balance - min_reserve.
+    Không được có yêu cầu PENDING khác đang chờ duyệt.
+    """
+    _require_seller(current_user)
+    from app.services.wallet import calc_min_reserve, calc_max_withdrawable
+
+    wallet = _get_or_create_wallet(current_user.id, db)
+    max_withdraw = calc_max_withdrawable(current_user.id, db)
+    min_reserve  = calc_min_reserve(current_user.id, db)
+
+    if data.amount > max_withdraw:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Số tiền vượt quá giới hạn. Tối đa có thể rút: {max_withdraw:,.0f} VND "
+                   f"(available={wallet.available_balance:,.0f}, min_reserve={min_reserve:,.0f})"
+        )
+
+    # Kiểm tra không có yêu cầu PENDING nào đang chờ
+    pending_exists = db.query(WithdrawalRequest).filter(
+        WithdrawalRequest.seller_id == current_user.id,
+        WithdrawalRequest.status == WithdrawalStatus.PENDING,
+    ).first()
+    if pending_exists:
+        raise HTTPException(status_code=400, detail="Bạn đang có yêu cầu rút tiền chờ duyệt. Vui lòng chờ admin xử lý.")
+
+    # Snapshot thông tin ngân hàng
+    profile = db.query(SellerProfile).filter(SellerProfile.user_id == current_user.id).first()
+
+    wr = WithdrawalRequest(
+        seller_id=current_user.id,
+        amount=data.amount,
+        available_snapshot=wallet.available_balance,
+        min_reserve_snapshot=min_reserve,
+        bank_name=profile.bank_name if profile else None,
+        bank_account_number=profile.bank_account_number if profile else None,
+        bank_account_name=profile.bank_account_name if profile else None,
+        note=data.note,
+        status=WithdrawalStatus.PENDING,
+    )
+    db.add(wr)
+    db.commit()
+    db.refresh(wr)
+
+    return {
+        "success": True,
+        "message": "Đã tạo yêu cầu rút tiền, chờ admin duyệt.",
+        "data": {
+            "id": wr.id,
+            "amount": str(wr.amount),
+            "status": wr.status.value,
+            "bank_account_number": wr.bank_account_number,
+            "created_at": wr.created_at.isoformat() if wr.created_at else None,
+        }
+    }
+
+
+@router.get("/withdrawal/my", summary="Seller xem danh sách yêu cầu rút của mình")
+async def get_my_withdrawal_requests(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_seller(current_user)
+    query = db.query(WithdrawalRequest).filter(WithdrawalRequest.seller_id == current_user.id)
+    total = query.count()
+    items = query.order_by(WithdrawalRequest.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": w.id,
+                "amount": str(w.amount),
+                "status": w.status.value,
+                "note": w.note,
+                "admin_note": w.admin_note,
+                "bank_account_number": w.bank_account_number,
+                "transaction_ref": w.transaction_ref,
+                "created_at": w.created_at.isoformat() if w.created_at else None,
+                "reviewed_at": w.reviewed_at.isoformat() if w.reviewed_at else None,
+            } for w in items
+        ],
+        "meta": {"total": total, "page": page, "limit": limit}
+    }
+
+
+@router.get("/withdrawal/admin", summary="Admin xem tất cả yêu cầu rút")
+async def admin_list_withdrawal_requests(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    seller_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    query = db.query(WithdrawalRequest)
+    if seller_id:
+        query = query.filter(WithdrawalRequest.seller_id == seller_id)
+    if status:
+        try:
+            query = query.filter(WithdrawalRequest.status == WithdrawalStatus(status.upper()))
+        except ValueError:
+            pass
+    total = query.count()
+    items = query.order_by(WithdrawalRequest.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+
+    # Lấy tên seller
+    seller_ids = list({w.seller_id for w in items})
+    sellers = {u.id: u.name for u in db.query(User).filter(User.id.in_(seller_ids)).all()}
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": w.id,
+                "seller_id": w.seller_id,
+                "seller_name": sellers.get(w.seller_id, f"Seller #{w.seller_id}"),
+                "amount": str(w.amount),
+                "available_snapshot": str(w.available_snapshot or 0),
+                "min_reserve_snapshot": str(w.min_reserve_snapshot or 0),
+                "status": w.status.value,
+                "note": w.note,
+                "admin_note": w.admin_note,
+                "bank_name": w.bank_name,
+                "bank_account_number": w.bank_account_number,
+                "bank_account_name": w.bank_account_name,
+                "transaction_ref": w.transaction_ref,
+                "created_at": w.created_at.isoformat() if w.created_at else None,
+                "reviewed_at": w.reviewed_at.isoformat() if w.reviewed_at else None,
+            } for w in items
+        ],
+        "meta": {"total": total, "page": page, "limit": limit}
+    }
+
+
+@router.post("/withdrawal/{wr_id}/approve", summary="Admin duyệt yêu cầu rút tiền")
+async def approve_withdrawal(
+    wr_id: int,
+    data: WithdrawalReviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin duyệt → trừ available_balance, cộng total_withdrawn.
+    """
+    _require_admin(current_user)
+    wr = db.query(WithdrawalRequest).filter(WithdrawalRequest.id == wr_id).first()
+    if not wr:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại")
+    if wr.status != WithdrawalStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Yêu cầu đang ở trạng thái {wr.status.value}, không thể duyệt")
+
+    wallet = _get_or_create_wallet(wr.seller_id, db)
+    if wallet.available_balance < wr.amount:
+        raise HTTPException(status_code=400, detail="Số dư khả dụng của seller không đủ")
+
+    wallet.available_balance -= wr.amount
+    wallet.total_withdrawn   += wr.amount
+
+    wr.status          = WithdrawalStatus.COMPLETED
+    wr.admin_note      = data.admin_note
+    wr.transaction_ref = data.transaction_ref
+    wr.reviewed_by     = current_user.id
+    wr.reviewed_at     = datetime.utcnow()
+
+    db.commit()
+    return {"success": True, "message": "Đã duyệt và ghi nhận chi trả.", "withdrawal_id": wr_id}
+
+
+@router.post("/withdrawal/{wr_id}/reject", summary="Admin từ chối yêu cầu rút tiền")
+async def reject_withdrawal(
+    wr_id: int,
+    data: WithdrawalReviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    wr = db.query(WithdrawalRequest).filter(WithdrawalRequest.id == wr_id).first()
+    if not wr:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại")
+    if wr.status != WithdrawalStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Yêu cầu đang ở trạng thái {wr.status.value}")
+
+    wr.status      = WithdrawalStatus.REJECTED
+    wr.admin_note  = data.admin_note
+    wr.reviewed_by = current_user.id
+    wr.reviewed_at = datetime.utcnow()
+    db.commit()
+    return {"success": True, "message": "Đã từ chối yêu cầu rút tiền.", "withdrawal_id": wr_id}
+
+
+@router.post("/release-reserves", summary="Admin giải phóng reserve đã đủ 30 ngày")
+async def release_seller_reserves(
+    seller_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Giải phóng phần reserve 20% của các đơn đã quá 30 ngày về available_balance.
+    - Nếu truyền seller_id → chỉ xử lý seller đó.
+    - Nếu không truyền → xử lý tất cả sellers.
+    """
+    _require_admin(current_user)
+    from app.services.wallet import release_matured_reserves
+
+    if seller_id:
+        total_released = release_matured_reserves(seller_id, db)
+        db.commit()
+        return {"success": True, "seller_id": seller_id, "released": str(total_released)}
+
+    # Tất cả sellers có reserve chờ giải phóng
+    from app.models.order import Order, OrderStatus
+    now = datetime.utcnow()
+    seller_ids = db.query(Order.seller_id).filter(
+        Order.status == OrderStatus.DELIVERED,
+        Order.wallet_credited == True,
+        Order.reserve_released == False,
+        Order.reserve_release_at <= now,
+    ).distinct().all()
+
+    results = []
+    for (sid,) in seller_ids:
+        released = release_matured_reserves(sid, db)
+        results.append({"seller_id": sid, "released": str(released)})
+
+    db.commit()
+    return {"success": True, "processed": len(results), "details": results}
