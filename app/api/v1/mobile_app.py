@@ -3085,3 +3085,72 @@ async def get_product_reviews_mobile(
             "total_pages": (total_filtered + limit - 1) // limit if total_filtered > 0 else 1,
         },
     }
+
+
+# ==============================================================================
+# REVIEWS – Xem đánh giá của tôi cho đơn hàng
+# ==============================================================================
+
+@router.get("/reviews/my/order/{order_id}", summary="Xem đánh giá của tôi cho đơn hàng")
+async def get_my_order_reviews(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lấy danh sách đánh giá mà user hiện tại đã gửi
+    cho các sản phẩm trong đơn hàng order_id.
+    """
+    from app.models.order import OrderItem  # tránh circular import ở top-level
+
+    # Xác nhận đơn hàng thuộc user
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.customer_id == current_user.id,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    # Lấy product_id từ các items của đơn
+    order_items = db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
+    product_ids = [item.product_id for item in order_items if item.product_id]
+
+    if not product_ids:
+        return {"success": True, "data": []}
+
+    # Lấy review của user cho các sản phẩm trong đơn
+    reviews = db.query(Review).filter(
+        Review.user_id == current_user.id,
+        Review.product_id.in_(product_ids),
+    ).order_by(Review.created_at.desc()).all()
+
+    review_list = []
+    for r in reviews:
+        product = db.query(Product).filter(Product.id == r.product_id).first()
+        # Tìm product_image từ order item
+        order_item = next(
+            (oi for oi in order_items if oi.product_id == r.product_id), None
+        )
+        product_image = order_item.product_image if order_item else (
+            product.images if product else None
+        )
+
+        review_images = [
+            img.image_url
+            for img in sorted(r.images, key=lambda x: x.sort_order)
+        ] if r.images else []
+
+        review_list.append({
+            "id": r.id,
+            "product_id": r.product_id,
+            "product_name": product.name if product else (
+                order_item.product_name if order_item else "Sản phẩm"
+            ),
+            "product_image": product_image,
+            "rating": r.rating,
+            "comment": r.comment,
+            "images": review_images,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {"success": True, "data": review_list}
