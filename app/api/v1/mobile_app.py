@@ -1976,14 +1976,15 @@ async def get_my_orders(
 
     order_list = []
 
-    # Batch query: lấy TẤT CẢ product_id user đã review 1 lần (tránh N+1 query)
-    reviewed_product_ids = {
-        r.product_id
-        for r in db.query(Review.product_id).filter(
-            Review.user_id == current_user.id,
-        ).all()
-        if r.product_id is not None
-    }
+    # Lấy tất cả review của user một lần (dùng full Review object, chắc chắn hơn)
+    all_user_reviews = db.query(Review).filter(
+        Review.user_id == current_user.id
+    ).all()
+    reviewed_product_ids = {r.product_id for r in all_user_reviews if r.product_id is not None}
+
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    _log.info(f"[has_reviewed] user={current_user.id}, reviewed_product_ids={reviewed_product_ids}")
 
     for o in orders:
         items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
@@ -1993,12 +1994,13 @@ async def get_my_orders(
         # Kiểm tra đơn này đã có ít nhất 1 sản phẩm được review chưa
         raw_status = o.status.value if hasattr(o.status, 'value') else str(o.status)
         is_delivered = raw_status.upper() == "DELIVERED"
-        product_ids_in_order = [i.product_id for i in items if i.product_id]
+        product_ids_in_order = [i.product_id for i in items if i.product_id is not None]
         has_reviewed = (
             is_delivered
             and len(product_ids_in_order) > 0
-            and any(pid in reviewed_product_ids for pid in product_ids_in_order)
+            and bool(set(product_ids_in_order) & reviewed_product_ids)
         )
+        _log.info(f"  order={o.id} status={raw_status} product_ids={product_ids_in_order} has_reviewed={has_reviewed}")
 
         order_list.append({
             "id": o.id,
