@@ -1977,30 +1977,33 @@ async def get_my_orders(
     order_list = []
 
     # Dùng raw SQL để tránh SQLAlchemy Enum load lỗi khi DB có giá trị enum không hợp lệ
-    # (ví dụ moderation_status = NULL hoặc '' sẽ khiến db.query(Review).all() raise error)
     from sqlalchemy import text as _sql_text
     _rev_result = db.execute(
         _sql_text(
-            "SELECT DISTINCT product_id FROM reviews "
-            "WHERE user_id = :uid AND product_id IS NOT NULL"
+            "SELECT DISTINCT order_item_id FROM reviews "
+            "WHERE user_id = :uid AND order_item_id IS NOT NULL"
         ),
         {"uid": current_user.id}
     )
-    reviewed_product_ids = {row[0] for row in _rev_result.fetchall()}
+    # Dùng order_item_id thay vì product_id để tránh false positive:
+    # nếu user đã review SP X từ đơn cũ, đơn mới cũng chứa SP X
+    # → product_id match → has_reviewed sai.
+    # order_item_id gắn với đơn cụ thể nên chính xác hơn.
+    reviewed_order_item_ids = {row[0] for row in _rev_result.fetchall()}
 
     for o in orders:
         items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
         seller = db.query(User).filter(User.id == o.seller_id).first()
         first_image = _extract_first_media_url(items[0].product_image) if items else None
 
-        # Kiểm tra đơn này đã có ít nhất 1 sản phẩm được review chưa
+        # Kiểm tra đơn này đã có ít nhất 1 order_item được review chưa
         raw_status = o.status.value if hasattr(o.status, 'value') else str(o.status)
         is_delivered = raw_status.upper() == "DELIVERED"
-        product_ids_in_order = [i.product_id for i in items if i.product_id is not None]
+        order_item_ids_in_order = [i.id for i in items if i.id is not None]
         has_reviewed = (
             is_delivered
-            and len(product_ids_in_order) > 0
-            and bool(set(product_ids_in_order) & reviewed_product_ids)
+            and len(order_item_ids_in_order) > 0
+            and bool(set(order_item_ids_in_order) & reviewed_order_item_ids)
         )
 
         order_list.append({
