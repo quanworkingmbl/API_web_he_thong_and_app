@@ -211,6 +211,66 @@ async def cancel_return_request(
 
 
 # ==============================================================================
+# ENDPOINTS – SELLER
+# ==============================================================================
+
+@router.get("/seller", summary="[Seller] Xem yêu cầu đổi/trả liên quan đến đơn hàng của mình")
+async def get_seller_return_requests(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    return_type: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Seller xem các yêu cầu đổi/trả liên quan đến đơn hàng do mình bán.
+    Chỉ trả về những đơn hàng có seller_id = current_user.id.
+    """
+    if current_user.type not in ("seller", "producer", "admin"):
+        raise HTTPException(status_code=403, detail="Chỉ seller mới có quyền truy cập endpoint này")
+
+    # Lấy danh sách order_id của seller hiện tại
+    seller_order_ids = [
+        o.id for o in db.query(Order.id).filter(Order.seller_id == current_user.id).all()
+    ]
+
+    query = db.query(ReturnRequest).filter(ReturnRequest.order_id.in_(seller_order_ids))
+    if status:
+        query = query.filter(ReturnRequest.status == status)
+    if return_type:
+        query = query.filter(ReturnRequest.return_type == return_type)
+
+    total = query.count()
+    skip = (page - 1) * limit
+    requests = query.order_by(ReturnRequest.created_at.desc()).offset(skip).limit(limit).all()
+
+    result = []
+    for r in requests:
+        customer = db.query(User).filter(User.id == r.user_id).first()
+        order = db.query(Order).filter(Order.id == r.order_id).first()
+        result.append({
+            "id": r.id,
+            "order_id": r.order_id,
+            "order_number": order.order_number if order else None,
+            "customer_name": customer.name if customer else None,
+            "return_type": r.return_type.value if hasattr(r.return_type, "value") else r.return_type,
+            "reason": r.reason,
+            "status": r.status.value if hasattr(r.status, "value") else r.status,
+            "admin_note": r.admin_note,
+            "refund_amount": r.refund_amount,
+            "created_at": r.created_at.isoformat(),
+            "handled_at": r.handled_at.isoformat() if r.handled_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": result,
+        "meta": {"total": total, "page": page, "limit": limit, "total_pages": (total + limit - 1) // limit}
+    }
+
+
+# ==============================================================================
 # ENDPOINTS – ADMIN
 # ==============================================================================
 
