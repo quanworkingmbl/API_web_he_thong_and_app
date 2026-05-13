@@ -2002,7 +2002,6 @@ async def get_my_orders(
             and len(product_ids_in_order) > 0
             and bool(set(product_ids_in_order) & reviewed_product_ids)
         )
-        _log.info(f"  order={o.id} status={raw_status} product_ids={product_ids_in_order} has_reviewed={has_reviewed}")
 
         order_list.append({
             "id": o.id,
