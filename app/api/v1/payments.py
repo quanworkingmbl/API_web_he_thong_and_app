@@ -21,6 +21,7 @@ Bao gồm:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from decimal import Decimal
@@ -231,9 +232,9 @@ async def vnpay_return(
     bank_code      = result.get("bank_code", "")
     is_success     = vnpay_service.is_payment_success(response_code, result.get("transaction_status", ""))
 
-    # VNPAY trả amount * 100 → chia 100 để lấy VND thực
+    # verify_return_url đã chia 100 rồi → dùng trực tiếp (không chia thêm)
     try:
-        amount_from_gw = Decimal(str(result.get("amount", "0"))) / 100
+        amount_from_gw = Decimal(str(result.get("amount", "0")))
     except Exception:
         amount_from_gw = Decimal("0")
 
@@ -289,17 +290,34 @@ async def vnpay_return(
             _audit(db, "VNPAY_RETURN_FAILED", None, note=f"code={response_code}")
         db.commit()
 
-    return {
-        "success": is_success,
-        "message": "Thanh toán thành công" if is_success else "Thanh toán thất bại",
-        "data": {
-            "order_id": order_id,
-            "response_code": response_code,
-            "transaction_no": transaction_no,
-            "amount": str(amount_from_gw),
-            "bank_code": bank_code
-        }
-    }
+    # ── Build deep link để redirect về Flutter App (Option B) ──────────────────
+    deep_link = vnpay_service.build_deep_link(
+        success=is_success,
+        order_id=order_id,
+        payment_id=payment.id if is_success and 'payment' in dir() else None,
+        response_code=response_code,
+    )
+
+    # Trả HTML tự redirect sang deep link agrarian://...
+    # Nếu WebView detect URL change bắt đầu bằng "agrarian://" →0 đóng WebView
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Agrarian Payment</title></head>
+<body>
+<script>
+  window.location.href = "{deep_link}";
+  setTimeout(function() {{
+    document.body.innerHTML = '<p style="font-family:sans-serif;text-align:center;margin-top:60px">' +
+      ({'\u2705 Thanh toán thành công!' if is_success else '\u274c Thanh toán thất bại.'}) +
+      '</p>';
+  }}, 2000);
+</script>
+<p style="font-family:sans-serif;text-align:center;margin-top:60px">
+  {'\u2705 Thanh toán thành công! Đang quay lại ứng dụng...' if is_success else '\u274c Thanh toán thất bại. Đang quay lại ứng dụng...'}
+</p>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
 
 
 @router.post("/vnpay/ipn", summary="VNPAY IPN Webhook")
@@ -326,7 +344,7 @@ async def vnpay_ipn(
     is_success     = vnpay_service.is_payment_success(response_code, result.get("transaction_status", ""))
 
     try:
-        amount_from_gw = Decimal(str(result.get("amount", "0"))) / 100
+        amount_from_gw = Decimal(str(result.get("amount", "0")))
     except Exception:
         amount_from_gw = Decimal("0")
 
@@ -363,6 +381,57 @@ async def vnpay_ipn(
         db.commit()
 
     return {"RspCode": "00", "Message": "Confirm Success"}
+
+
+# ==============================================================================
+# VNPAY PAYMENT STATUS (for App polling)
+# ==============================================================================
+
+@router.get("/vnpay/status/{order_id}", summary="Trạng thái thanh toán VNPAY theo order_id")
+async def get_vnpay_payment_status(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    App dùng endpoint này để polling kết quả sau khi WebView đóng.
+    Ownership: chỉ customer hoặc admin mới xem được.
+    """
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Đơn hàng không tồn tại")
+
+    # Ownership check
+    role = _resolve_role(current_user)
+    if role == "buyer" and order.customer_id != current_user.id:
+        raise HTTPException(403, "Không có quyền xem trạng thái đơn hàng này")
+
+    # Lấy payment mới nhất của đơn
+    payment = (
+        db.query(Payment)
+        .filter(Payment.order_id == order_id)
+        .order_by(Payment.created_at.desc())
+        .first()
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "order_id":         order_id,
+            "order_status":     order.status.value if hasattr(order.status, 'value') else str(order.status),
+            "payment_status":   order.payment_status,
+            "payment_id":       payment.id if payment else None,
+            "payment_method":   order.payment_method.value if hasattr(order.payment_method, 'value') else str(order.payment_method),
+            "transaction_no":   payment.vnpay_transaction_no if payment else None,
+            "amount":           str(payment.amount) if payment else None,
+            "bank_code":        payment.vnpay_bank_code if payment else None,
+            "response_code":    payment.vnpay_response_code if payment else None,
+            "is_paid":          order.payment_status == "PAID",
+            "payment_record":   PaymentResponse.from_orm(payment).dict() if payment else None,
+        }
+    }
+
+
 
 
 # ==============================================================================
