@@ -1,32 +1,60 @@
-# CMS API - FastAPI Backend
+# CMS API — FastAPI Backend
 
-API backend cho hệ thống CMS quản lý sản phẩm địa phương, được xây dựng bằng FastAPI và PostgreSQL (AWS RDS).
+REST API backend cho **Agrarian Platform** — nền tảng thương mại điện tử multi-seller chuyên về nông sản sạch và sản phẩm làng nghề truyền thống Việt Nam. Xây dựng bằng **FastAPI** + **SQLAlchemy** + **PostgreSQL** (Google Cloud SQL).
 
 ## 🚀 Tính năng
 
-- **Authentication & Authorization**: JWT-based authentication với role-based access control
-- **User Management**: Quản lý người dùng (Consumer, Producer, Admin, etc.)
-- **Role & Permission Management**: Quản lý vai trò và quyền truy cập
-- **Product Approval**: Duyệt sản phẩm với kiểm tra mô tả, giá cả, hình ảnh
-- **Payment Management**: Quản lý thanh toán, đối soát, hoàn tiền
-- **Content Management**: Duyệt nội dung từ Producer và Cooperative
-- **Complaint & Review Management**: Quản lý đánh giá và khiếu nại
-- **Partner Contracts**: Quản lý hợp đồng đối tác vận hành
-- **Media Management**: Upload và quản lý media files (AWS S3)
-- **Dashboard**: API cho dashboard với thống kê realtime
+### Core
+- **Authentication & Authorization**: JWT (Argon2/Bcrypt) + Refresh Token + reCAPTCHA v3
+- **RBAC Permission System**: Phân quyền theo role (`admin`, `producer/seller`, `consumer`, `content_manager`)
+- **API Security**: Middleware `X-Quan-Secret` bảo vệ toàn bộ endpoints
+
+### E-Commerce
+- **Product Management**: CRUD sản phẩm, biến thể (variant), SKU, tồn kho
+- **Product Approval**: Queue duyệt sản phẩm với checklist (mô tả, giá, hình, truy xuất nguồn gốc)
+- **Order Management**: Đơn hàng multi-seller, state machine chuyển trạng thái theo role
+- **Cart**: Giỏ hàng + checkout
+- **Payment**: VNPay gateway integration (sandbox)
+- **Shipping**: GHN (Giao Hàng Nhanh) API — tính phí, tracking
+- **Promotions**: Mã giảm giá, khuyến mãi
+
+### Seller Ecosystem
+- **Seller Onboarding (KYC)**: Đăng ký seller, upload CCCD, giấy phép kinh doanh
+- **Seller Wallet**: Ví seller — tỷ lệ 80/20 reserve, rút tiền, min_reserve
+- **Settlement**: Kỳ đối soát, chi trả, yêu cầu rút tiền
+- **Store**: Quản lý cửa hàng
+
+### Truy Xuất Nguồn Gốc
+- **ProductOrigin**: Nguồn gốc sản phẩm (làng nghề, cơ sở SX, lô SX)
+- **ProductCertificate**: Chứng nhận (VietGAP, OCOP, ISO 22000)
+
+### AI Services
+- **Content Moderation**: Kiểm duyệt nội dung tự động (Google Vertex AI — Gemini 2.5 Flash)
+- **Auto-Generate Description**: AI viết mô tả sản phẩm
+- **Product Embedding**: Vector embedding cho tìm kiếm ngữ nghĩa
+- **Cost Tracking**: Theo dõi chi phí AI, budget guardrail $5/ngày
+
+### Others
+- **Content Management**: Blog, bài viết, duyệt nội dung
+- **Complaint & Review**: Đánh giá sản phẩm, khiếu nại
+- **Return/Refund**: Yêu cầu trả hàng, hoàn tiền
+- **Notification**: In-app + Firebase Cloud Messaging push
+- **Media Upload**: Google Cloud Storage
+- **Dashboard Analytics**: Thống kê doanh thu, đơn hàng, người dùng
+- **Partner Contracts**: Quản lý hợp đồng đối tác
 
 ## 📋 Yêu cầu
 
 - Python 3.11+
-- PostgreSQL (AWS RDS)
-- pip hoặc poetry
+- PostgreSQL 14+ (local hoặc Google Cloud SQL)
+- pip
 
 ## 🔧 Cài đặt Local
 
 ### 1. Clone repository
 
 ```bash
-git clone https://github.com/quanworkingmbl/API_web_he_thong_and_app.git
+git clone <repo-url>
 cd Du_an_cms_API
 ```
 
@@ -34,7 +62,12 @@ cd Du_an_cms_API
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # Trên Windows: venv\Scripts\activate
+
+# Windows
+venv\Scripts\activate
+
+# Linux/macOS
+source venv/bin/activate
 ```
 
 ### 3. Cài đặt dependencies
@@ -45,35 +78,61 @@ pip install -r requirements.txt
 
 ### 4. Cấu hình environment variables
 
-Tạo file `.env` và điền các giá trị:
+Tạo file `.env` (copy từ template bên dưới):
 
 ```env
-# Database (AWS RDS PostgreSQL)
-DATABASE_URL=postgresql://user:password@your-rds.amazonaws.com:5432/postgres?sslmode=require
-DIRECT_URL=postgresql://user:password@your-rds.amazonaws.com:5432/postgres?sslmode=require
-DB_SSL_CERT=/path/to/us-east-1-bundle.pem
+# ─── Database (PostgreSQL) ───
+DATABASE_URL=postgresql://user:password@localhost:5432/cms_db
+DIRECT_URL=postgresql://user:password@localhost:5432/cms_db
 
-# JWT
+# ─── JWT / Auth ───
 SECRET_KEY=your-super-secret-key-at-least-32-chars
+REFRESH_TOKEN_SECRET_KEY=your-refresh-secret-key
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# App
+# ─── App ───
 APP_NAME=CMS API
 APP_VERSION=1.0.0
-DEBUG=False
+DEBUG=True
+SHOW_DOCS=True
 
-# API Secret Header
+# ─── API Secret Header ───
 API_SECRET_KEY=VLU15122004
 
-# CORS
-CORS_ORIGINS=https://your-frontend-domain.com,http://localhost:3000
+# ─── CORS ───
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 
-# AWS S3
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_REGION=us-east-1
-AWS_S3_BUCKET=your-bucket-name
+# ─── Google Cloud Storage ───
+GCS_BUCKET_NAME=your-bucket-name
+
+# ─── VNPay (sandbox) ───
+VNPAY_TMN_CODE=
+VNPAY_HASH_SECRET=
+VNPAY_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+VNPAY_RETURN_URL=http://localhost:8000/api/payments/vnpay/return
+VNPAY_IPN_URL=http://localhost:8000/api/payments/vnpay/ipn
+
+# ─── GHN Shipping ───
+GHN_TOKEN=
+GHN_SHOP_ID=
+GHN_URL=https://dev-online-gateway.ghn.vn/shiip/public-api
+
+# ─── Google Vertex AI (Gemini) ───
+VERTEX_PROJECT_ID=
+VERTEX_LOCATION=asia-southeast1
+VERTEX_MODERATION_MODEL_ID=gemini-2.5-flash
+VERTEX_CREATIVE_MODEL_ID=gemini-2.5-flash
+VERTEX_EMBEDDING_MODEL_ID=text-embedding-005
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+
+# ─── Google reCAPTCHA v3 ───
+RECAPTCHA_ENABLED=False
+RECAPTCHA_SECRET_KEY=
+RECAPTCHA_BYPASS_ENABLED=True
+RECAPTCHA_BYPASS_SECRET_KEY=VLU15122004
+RECAPTCHA_BYPASS_CLIENTS=mobile,postman
 ```
 
 ### 5. Chạy database migrations
@@ -82,13 +141,17 @@ AWS_S3_BUCKET=your-bucket-name
 alembic upgrade head
 ```
 
-### 6. Chạy ứng dụng local
+### 6. Chạy ứng dụng
 
 ```bash
+# Cách 1: Dùng run.py (recommended)
+python run.py
+
+# Cách 2: Dùng uvicorn trực tiếp
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-API sẽ chạy tại: `http://localhost:8000`
+API chạy tại: `http://localhost:8000`
 
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
@@ -98,148 +161,238 @@ API sẽ chạy tại: `http://localhost:8000`
 ```
 Du_an_cms_API/
 ├── app/
+│   ├── main.py                    ★ Entry point — FastAPI app, middleware, router
 │   ├── api/
 │   │   └── v1/
-│   │       ├── auth.py           # Authentication endpoints
-│   │       ├── users.py          # User management
-│   │       ├── roles.py          # Role management
-│   │       ├── organizations.py  # Organization management
-│   │       ├── dashboard.py      # Dashboard endpoints
-│   │       ├── media.py          # Media upload/management (S3)
-│   │       ├── products.py       # Product approval
-│   │       ├── payments.py       # Payment management
-│   │       ├── content.py        # Content management
-│   │       ├── complaints.py     # Complaint & review
-│   │       └── contracts.py      # Partner contracts
+│   │       ├── __init__.py        ★ API router registry (28 modules)
+│   │       ├── auth.py              Login, Register, Refresh, Logout
+│   │       ├── users.py             User CRUD
+│   │       ├── roles.py             Role management (admin)
+│   │       ├── organizations.py     Organization management
+│   │       ├── dashboard.py         Dashboard analytics
+│   │       ├── media.py             Media upload (GCS)
+│   │       ├── products.py          Product CRUD, approval
+│   │       ├── payments.py          VNPay integration
+│   │       ├── content.py           Blog, content management
+│   │       ├── complaints.py        Complaint handling
+│   │       ├── contracts.py         Partner contracts
+│   │       ├── stats.py             System stats
+│   │       ├── orders.py            Order management (admin/seller)
+│   │       ├── categories.py        Product categories
+│   │       ├── regions.py           Regions management
+│   │       ├── cart.py              Shopping cart
+│   │       ├── seller.py            Seller dashboard, products, orders
+│   │       ├── seller_onboarding.py KYC verification
+│   │       ├── shipping.py          GHN shipping
+│   │       ├── reviews.py           Product reviews
+│   │       ├── returns.py           Return/refund requests
+│   │       ├── settlement.py        Wallet, settlement, withdrawals
+│   │       ├── traceability.py      Origin & certificates
+│   │       ├── promotions.py        Promotions, coupons
+│   │       ├── mobile_app.py        ★ Mobile App API (all-in-one)
+│   │       ├── ai.py                AI moderation & generation
+│   │       ├── settings.py          System settings
+│   │       └── notifications.py     Push notifications
 │   ├── core/
-│   │   ├── config.py             # Configuration (pydantic settings)
-│   │   ├── database.py           # Database setup (SQLAlchemy)
-│   │   ├── middleware.py         # Custom middleware (ApiSecretMiddleware, LoggingMiddleware)
-│   │   └── security.py           # JWT utilities
-│   ├── models/                   # SQLAlchemy models
-│   └── main.py                   # FastAPI app entry point
-├── alembic/                      # Database migrations
-├── global-bundle.pem             # AWS RDS SSL certificate
-├── requirements.txt              # Python dependencies
-├── runtime.txt                   # Python version
-└── README.md                     # This file
+│   │   ├── config.py              ★ Pydantic Settings (.env)
+│   │   ├── database.py            ★ SQLAlchemy engine + session
+│   │   ├── security.py            ★ JWT + Argon2 password hash
+│   │   ├── permissions.py         ★ Centralized RBAC functions
+│   │   ├── middleware.py            ApiSecret + Logging middleware
+│   │   ├── exceptions.py           Global exception handlers
+│   │   ├── logging_config.py       Logging setup
+│   │   └── url_utils.py            DB URL builder
+│   ├── models/                    34+ SQLAlchemy ORM models
+│   │   ├── __init__.py            ★ All models registry
+│   │   ├── user.py                  User, UserRole, UserOrganization
+│   │   ├── product.py               Product, ProductApproval, PriceLog
+│   │   ├── order.py                 Order, OrderItem, OrderStatusLog
+│   │   ├── seller_profile.py        SellerProfile (KYC)
+│   │   ├── settlement.py            SellerWallet, Settlement, Payout, Withdrawal
+│   │   ├── traceability.py          ProductCertificate, ProductOrigin
+│   │   ├── product_variant.py       Variant, Option, Inventory
+│   │   ├── payment.py               Payment, Transaction, AuditLog
+│   │   └── ...                      (34 model files)
+│   └── services/
+│       ├── order_state.py         ★ Order state machine (role-based transitions)
+│       ├── wallet.py              ★ Wallet logic (80/20 reserve)
+│       ├── inventory.py             Stock management
+│       ├── notification.py          Notification logic
+│       ├── fcm_push.py              Firebase Cloud Messaging
+│       ├── vnpay.py                 VNPay payment gateway
+│       ├── ghn.py                   GHN shipping API
+│       └── ai/                      AI moderation & generation
+├── alembic/                       Database migrations
+├── scripts/                       Utility scripts
+├── Dockerfile                     Multi-stage Docker build
+├── cloudbuild.yaml                ★ Google Cloud Build CI/CD
+├── entrypoint.sh                  Gunicorn + Uvicorn startup
+├── requirements.txt               Python dependencies
+├── run.py                         Local dev runner
+└── .env                           Environment variables
 ```
 
 ## 🔐 API Security
 
-Tất cả API request (trừ `/`, `/health`, `/docs`, `/redoc`) đều **yêu cầu header**:
+Tất cả API requests (trừ `/`, `/health`, `/docs`, `/redoc`) yêu cầu:
 
 ```
-X-Quan-Secret: VLU15122004
-Authorization: Bearer <jwt_token>
+X-Quan-Secret: <API_SECRET_KEY>
+Authorization: Bearer <jwt_token>    (cho endpoints cần auth)
 ```
 
-## 🔐 API Endpoints
+### Middleware Stack (thứ tự xử lý):
 
-### Authentication
-
-- `POST /api/auth/register` - Đăng ký tài khoản
-- `POST /api/auth/login` - Đăng nhập, trả về JWT token
-- `GET /api/auth/me` - Lấy thông tin user hiện tại
-- `POST /api/auth/logout` - Đăng xuất
-- `POST /api/auth/refresh` - Refresh token
-- `PUT /api/auth/profile` - Cập nhật profile
-
-### Users
-
-- `GET /api/users` - Danh sách users
-- `POST /api/users` - Tạo user mới
-- `PUT /api/users/{id}` - Cập nhật user
-
-### Media (AWS S3)
-
-- `GET /api/media` - Danh sách media
-- `POST /api/media/upload` - Upload file lên S3
-
-### Dashboard
-
-- `GET /api/dashboard/stats` - Thống kê tổng quan
-
-## ☁️ Deploy lên AWS EC2
-
-### 1. Kết nối SSH vào EC2
-
-```bash
-ssh -i your-key.pem ubuntu@your-ec2-ip
+```
+Request → CORS → Logging → ApiSecret → Router → Handler → Response
 ```
 
-### 2. Cập nhật `.env` trên server
+## 📡 API Endpoints (28 Modules)
 
-```bash
-nano /home/ubuntu/Du_an_cms_API/.env
+### Authentication (`/api/auth`)
+
+| Method | Path | Mô tả |
+|---|---|---|
+| POST | `/api/auth/register` | Đăng ký tài khoản |
+| POST | `/api/auth/login` | Đăng nhập (JWT + reCAPTCHA) |
+| POST | `/api/auth/refresh` | Refresh token |
+| POST | `/api/auth/logout` | Đăng xuất |
+| GET | `/api/auth/me` | Thông tin user hiện tại |
+| PUT | `/api/auth/profile` | Cập nhật profile |
+
+### Orders (`/api/orders`)
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/orders` | Danh sách đơn hàng |
+| GET | `/api/orders/{id}` | Chi tiết đơn hàng |
+| PUT | `/api/orders/{id}/status` | Cập nhật trạng thái |
+
+### Seller (`/api/seller`)
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/seller/products` | Sản phẩm của seller |
+| GET | `/api/seller/orders` | Đơn hàng của seller |
+| POST | `/api/seller/onboarding/register` | Đăng ký seller |
+
+### Settlement (`/api/settlement`)
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/settlement/wallet/me` | Xem ví seller |
+| POST | `/api/settlement/withdrawals` | Yêu cầu rút tiền |
+
+### Mobile App (`/api/mobile`)
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/mobile/home` | Trang chủ app |
+| GET | `/api/mobile/products` | Danh sách sản phẩm |
+| POST | `/api/mobile/orders` | Tạo đơn hàng |
+| GET | `/api/mobile/orders/my` | Đơn hàng của tôi |
+
+> 📖 Xem đầy đủ tại `/docs` (Swagger UI)
+
+## ☁️ Deployment (Google Cloud)
+
+### CI/CD Pipeline (Cloud Build)
+
+```
+Git push → Cloud Build → Docker Build → Alembic Migrate → Cloud Run Deploy
 ```
 
-### 3. Cài đặt dependencies & chạy
+| Bước | Chi tiết |
+|---|---|
+| Build | Docker multi-stage (python:3.11-slim) |
+| Registry | Artifact Registry (asia-southeast1) |
+| Migrate | `alembic upgrade head` (trong Cloud Build) |
+| Deploy | Cloud Run (512Mi, 1 CPU, 0-3 instances) |
+| Database | Cloud SQL via Cloud SQL Proxy |
+| Secrets | Google Secret Manager |
 
-```bash
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+### Cloud Run Config
+
+```yaml
+Region: asia-southeast1
+Memory: 512Mi
+CPU: 1
+Min instances: 0 (scale-to-zero)
+Max instances: 3
+Timeout: 300s
 ```
 
-### 4. Chạy dưới dạng service (systemd)
+### Production Domains
 
-```bash
-sudo systemctl restart cms-api
-sudo systemctl status cms-api
-```
-
-## 🔒 Security Notes
-
-1. **SECRET_KEY**: Luôn dùng secret key mạnh (min 32 ký tự) trong production
-2. **API_SECRET_KEY**: Header `X-Quan-Secret` bảo vệ toàn bộ API
-3. **CORS**: Cấu hình đúng `CORS_ORIGINS` cho production domain
-4. **Database**: Không commit credentials vào git
-5. **HTTPS**: Cấu hình HTTPS qua AWS ALB/Nginx
-6. **Rate Limiting**: Cân nhắc thêm rate limiting cho production
+| Domain | Service |
+|---|---|
+| `api.quancmsbe.site` | Backend API |
+| `quancmsbe.site` | Backend (root) |
 
 ## 📝 Database Migrations
 
 ```bash
-# Tạo migration mới
-alembic revision --autogenerate -m "Description"
+# Tạo migration mới (auto-detect thay đổi model)
+alembic revision --autogenerate -m "add new_table"
 
-# Chạy migrations
+# Chạy migration
 alembic upgrade head
 
-# Rollback migration
+# Rollback 1 bước
 alembic downgrade -1
+
+# Xem migration hiện tại
+alembic current
+```
+
+## 🔍 Order State Machine
+
+```
+PENDING → CONFIRMED → PROCESSING → SHIPPING → DELIVERED
+    ↓          ↓
+ CANCELLED  CANCELLED                          REFUNDED
+```
+
+| Role | Transitions |
+|---|---|
+| Consumer | PENDING/CONFIRMED → CANCELLED |
+| Seller | PENDING → CONFIRMED/CANCELLED → PROCESSING → SHIPPING → DELIVERED |
+| Admin | Không hạn chế |
+
+## 💰 Wallet Logic (80/20 Reserve)
+
+```
+Order DELIVERED → seller_amount tách:
+  80% → available_balance (rút ngay, trừ min_reserve)
+  20% → reserve_balance   (giữ 30 ngày)
+
+max_withdrawable = available_balance - (active_products × 50,000 VND)
 ```
 
 ## 🐛 Troubleshooting
 
-### Lỗi kết nối database
-- Kiểm tra `DATABASE_URL` trong `.env`
-- Đảm bảo Security Group của RDS cho phép kết nối từ EC2
-- Kiểm tra SSL cert: `DB_SSL_CERT` trỏ đúng đường dẫn
+| Lỗi | Nguyên nhân | Fix |
+|---|---|---|
+| 403 Forbidden | Thiếu `X-Quan-Secret` header | Thêm header |
+| 401 Unauthorized | JWT hết hạn hoặc sai | Refresh token hoặc login lại |
+| 500 DB Error | Schema chưa sync | Chạy `alembic upgrade head` |
+| CORS Error | Origin chưa whitelist | Thêm vào `CORS_ORIGINS` trong `.env` |
 
-### Lỗi 403 Forbidden
-- Request thiếu header `X-Quan-Secret: VLU15122004`
+## 📚 Dependencies Chính
 
-### Lỗi 401 Unauthorized
-- Token JWT hết hạn hoặc không đúng format `Bearer <token>`
-
-## 📚 Tài liệu tham khảo
-
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [SQLAlchemy Documentation](https://docs.sqlalchemy.org/)
-- [Alembic Documentation](https://alembic.sqlalchemy.org/)
-- [AWS EC2 Documentation](https://docs.aws.amazon.com/ec2/)
-- [AWS RDS Documentation](https://docs.aws.amazon.com/rds/)
-- [AWS S3 Documentation](https://docs.aws.amazon.com/s3/)
-
-## 📄 License
-
-[Your License Here]
-
-## 👥 Contributors
-
-[Your Name/Team]
+| Package | Version | Mục đích |
+|---|---|---|
+| fastapi | 0.109.0 | Web framework |
+| uvicorn | 0.27.0 | ASGI server |
+| gunicorn | 21.2.0 | Production WSGI server |
+| sqlalchemy | 2.0.25 | ORM |
+| alembic | 1.13.1 | Migration |
+| psycopg2-binary | 2.9.9 | PostgreSQL driver |
+| python-jose | 3.3.0 | JWT |
+| argon2-cffi | 23.1.0 | Password hashing |
+| google-genai | ≥1.66.0 | Vertex AI Gemini |
+| google-cloud-storage | ≥2.14.0 | GCS upload |
+| httpx | ≥0.28.1 | HTTP client |
 
 ---
 
