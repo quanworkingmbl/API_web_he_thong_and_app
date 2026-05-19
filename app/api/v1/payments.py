@@ -299,7 +299,9 @@ async def vnpay_return(
     )
 
     # Trả HTML tự redirect sang deep link agrarian://...
-    # Nếu WebView detect URL change bắt đầu bằng "agrarian://" →0 đóng WebView
+    # Nếu WebView detect URL change bắt đầu bằng "agrarian://" → đóng WebView
+    _inline_msg = "\u2705 Thanh to\u00e1n th\u00e0nh c\u00f4ng!" if is_success else "\u274c Thanh to\u00e1n th\u1ea5t b\u1ea1i."
+    _body_msg   = "\u2705 Thanh to\u00e1n th\u00e0nh c\u00f4ng! \u0110ang quay l\u1ea1i \u1ee9ng d\u1ee5ng..." if is_success else "\u274c Thanh to\u00e1n th\u1ea5t b\u1ea1i. \u0110ang quay l\u1ea1i \u1ee9ng d\u1ee5ng..."
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><title>Agrarian Payment</title></head>
@@ -308,12 +310,12 @@ async def vnpay_return(
   window.location.href = "{deep_link}";
   setTimeout(function() {{
     document.body.innerHTML = '<p style="font-family:sans-serif;text-align:center;margin-top:60px">' +
-      ({'\u2705 Thanh toán thành công!' if is_success else '\u274c Thanh toán thất bại.'}) +
+      '{_inline_msg}' +
       '</p>';
   }}, 2000);
 </script>
 <p style="font-family:sans-serif;text-align:center;margin-top:60px">
-  {'\u2705 Thanh toán thành công! Đang quay lại ứng dụng...' if is_success else '\u274c Thanh toán thất bại. Đang quay lại ứng dụng...'}
+  {_body_msg}
 </p>
 </body>
 </html>"""
