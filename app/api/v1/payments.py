@@ -254,6 +254,10 @@ async def vnpay_return(
             "data": {"order_id": order_id, "payment_id": existing.id, "status": existing.status.value}
         }
 
+    # Khởi tạo payment = None – đảm bảo biến luôn được định nghĩa
+    # dù thanh toán thành công hay thất bại, tránh NameError ở bước build deep link
+    payment = None
+
     if is_success and order.payment_status != "PAID":
         payment = _create_payment_record(db, order, transaction_no, response_code,
                                          bank_code, amount_from_gw, params)
@@ -294,7 +298,7 @@ async def vnpay_return(
     deep_link = vnpay_service.build_deep_link(
         success=is_success,
         order_id=order_id,
-        payment_id=payment.id if is_success and 'payment' in dir() else None,
+        payment_id=payment.id if payment is not None else None,
         response_code=response_code,
     )
 
