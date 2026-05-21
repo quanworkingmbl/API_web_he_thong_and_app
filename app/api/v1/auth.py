@@ -569,8 +569,19 @@ def get_current_user_allow_inactive(
 
 
 def _can_access_inactive_onboarding(user: User, db: Session) -> bool:
-    """Allow inactive access only for true seller onboarding accounts."""
+    """Allow inactive access for accounts in onboarding/pending state.
+
+    Rules:
+    - admin / superadmin: always allowed (admin account may have activated=0 in legacy data)
+    - seller / producer: always allowed (waiting for KYC approval)
+    - consumer / other: allowed if recently registered (within 7 days) to see status
+    - Any type: NOT allowed if account was explicitly deactivated long ago
+    """
     normalized_type = (user.type or "").strip().lower()
+
+    # Admin luôn được phép — dữ liệu legacy có thể có activated=0
+    if normalized_type in ("admin", "superadmin", "super_admin", "staff"):
+        return True
 
     if normalized_type in ("producer", "seller"):
         return True
@@ -581,9 +592,21 @@ def _can_access_inactive_onboarding(user: User, db: Session) -> bool:
         has_seller_profile = db.query(SellerProfile.id).filter(
             SellerProfile.user_id == user.id
         ).first()
-        return has_seller_profile is not None
+        if has_seller_profile is not None:
+            return True
+
+        # Consumer mới đăng ký (trong 7 ngày) — cho phép truy cập /me
+        # để xem trạng thái tài khoản, tránh bị kẹt ở màn hình login.
+        if user.created_at:
+            created_utc = user.created_at
+            if created_utc.tzinfo is None:
+                created_utc = created_utc.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - created_utc
+            if age < timedelta(days=7):
+                return True
 
     return False
+
 
 def get_current_user_optional(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
@@ -701,18 +724,14 @@ async def login(login_data: LoginRequest, request: Request, db: Session = Depend
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
-    
-    allow_inactive_for_onboarding = _can_access_inactive_onboarding(user, db)
-    if user.activated != 1 and not allow_inactive_for_onboarding:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is not activated. Please contact administrator."
-        )
-    
-    # Check user status (BANNED/SUSPENDED)
+
+    # Chỉ chặn tài khoản bị BAN/SUSPEND — không chặn activated=0
+    # vì user cần login để xem trạng thái duyệt hồ sơ (pending seller).
+    # Các endpoint có quyền đã được bảo vệ bởi get_current_user (check activated).
     check_user_status(user)
-    
+
     token_pair = _create_token_pair(user=user, request=request, db=db)
+
     db.commit()
     
     return StandardResponse(
