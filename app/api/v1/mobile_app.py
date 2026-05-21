@@ -3167,3 +3167,55 @@ async def get_my_order_reviews(
         })
 
     return {"success": True, "data": review_list}
+
+
+# ==============================================================================
+# REVIEWS – Kiểm tra & lấy đánh giá của tôi cho sản phẩm cụ thể
+# ==============================================================================
+
+@router.get("/reviews/my/product/{product_id}", summary="Đánh giá của tôi cho sản phẩm")
+async def get_my_product_review(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Kiểm tra user hiện tại đã đánh giá sản phẩm product_id chưa.
+    Trả về:
+      - has_reviewed: bool
+      - review: object (id, rating, comment, images, created_at) nếu đã review, null nếu chưa
+    Dùng để Flutter hiển thị bình luận của mình lên đầu danh sách đánh giá sản phẩm.
+    """
+    review = db.query(Review).filter(
+        Review.user_id == current_user.id,
+        Review.product_id == product_id,
+    ).order_by(Review.created_at.desc()).first()
+
+    if not review:
+        return {
+            "success": True,
+            "data": {
+                "has_reviewed": False,
+                "review": None,
+            }
+        }
+
+    review_images = [
+        img.image_url
+        for img in sorted(review.images, key=lambda x: x.sort_order)
+    ] if review.images else []
+
+    return {
+        "success": True,
+        "data": {
+            "has_reviewed": True,
+            "review": {
+                "id": review.id,
+                "product_id": review.product_id,
+                "rating": review.rating,
+                "comment": review.comment,
+                "images": review_images,
+                "created_at": review.created_at.isoformat() if review.created_at else None,
+            }
+        }
+    }

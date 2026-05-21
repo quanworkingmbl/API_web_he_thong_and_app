@@ -11,7 +11,8 @@ Endpoints:
 - GET  /seller/products               – Danh sách sản phẩm của seller
 - POST /seller/products               – Tạo sản phẩm mới (auto seller_id)
 - PUT  /seller/products/{id}          – Chỉnh sửa sản phẩm đầy đủ (ownership check)
-- DELETE /seller/products/{id}        – Xóa sản phẩm (ownership check)
+- DELETE /seller/products/{id}        – Ẩn sản phẩm (soft-delete)
+- DELETE /seller/products/{id}/permanent – Xóa vĩnh viễn sản phẩm đã ẩn
 - PUT  /seller/products/{id}/stock    – Cập nhật tồn kho nhanh
 - GET  /seller/profile                – Thông tin shop / profile
 - PUT  /seller/profile                – Cập nhật thông tin cá nhân
@@ -1278,6 +1279,89 @@ async def delete_seller_product(
     db.commit()
 
     return {"success": True, "message": "Sản phẩm đã được ẩn. Dữ liệu lịch sử được giữ lại."}
+
+
+@router.delete("/products/{product_id}/permanent", summary="Seller xóa vĩnh viễn sản phẩm đã ẩn")
+async def permanent_delete_seller_product(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Seller xóa vĩnh viễn sản phẩm **đã ẩn** (is_active=False).
+
+    Logic:
+    - Sản phẩm phải thuộc seller và phải đang ẩn (is_active=False).
+    - Nếu KHÔNG có bất kỳ lịch sử đơn hàng nào → **hard-delete** toàn bộ.
+    - Nếu CÓ lịch sử đơn hàng (đã hoàn tất) → giữ nguyên soft-delete để bảo toàn
+      dữ liệu lịch sử, trả về `is_active=false` để UI hiểu đây là soft-delete.
+
+    Trả về:
+    - Hard-delete: { "success": true, "message": "Đã xóa vĩnh viễn" }
+    - Soft-delete kept: { "success": true, "data": { "product_id": X, "is_active": false } }
+    """
+    _require_seller(current_user)
+
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.seller_id == current_user.id,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không có quyền xóa")
+
+    # Chỉ cho phép xóa vĩnh viễn sản phẩm đã ẩn
+    if product.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ có thể xóa vĩnh viễn sản phẩm đã ẩn. Hãy ẩn sản phẩm trước."
+        )
+
+    # Kiểm tra xem có bất kỳ đơn hàng nào liên quan không (kể cả đã hoàn tất)
+    from sqlalchemy import text as sql_text
+    has_any_order = db.execute(
+        sql_text("SELECT 1 FROM order_items WHERE product_id = :pid LIMIT 1"),
+        {"pid": product_id},
+    ).fetchone() is not None
+
+    if has_any_order:
+        # Có lịch sử đơn hàng → không thể hard-delete, giữ soft-delete
+        return {
+            "success": True,
+            "message": "Sản phẩm có lịch sử đơn hàng – hệ thống giữ lại dữ liệu nhưng tiếp tục ẩn.",
+            "data": {"product_id": product_id, "is_active": False},
+        }
+
+    # Không có đơn hàng nào → Hard-delete an toàn
+    _child_tables = [
+        "product_option_values",
+        "product_media",
+        "cart_items",
+        "inventory_movements",
+        "stock_reservations",
+        "product_options",
+        "product_variants",
+        "product_certificates",
+        "product_origins",
+        "product_approvals",
+        "product_price_logs",
+        "ai_moderation_logs",
+        "product_embeddings",
+        "wishlist_items",
+        "reviews",
+        "complaints",
+    ]
+    for table in _child_tables:
+        try:
+            db.execute(
+                sql_text(f"DELETE FROM {table} WHERE product_id = :pid"),
+                {"pid": product_id},
+            )
+        except Exception:
+            pass  # Bỏ qua nếu bảng không tồn tại
+
+    db.delete(product)
+    db.commit()
+    return {"success": True, "message": "Đã xóa vĩnh viễn sản phẩm."}
 
 
 # ==============================================================================
