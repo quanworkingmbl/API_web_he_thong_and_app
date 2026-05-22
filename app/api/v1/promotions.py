@@ -62,10 +62,9 @@ class PromotionResponse(BaseModel):
 
 
 class PaginatedPromotionResponse(BaseModel):
-    total: int
-    page: int
-    limit: int
+    success: bool = True
     data: List[PromotionResponse]
+    meta: dict
 
 
 class CreatePromotionRequest(BaseModel):
@@ -217,20 +216,33 @@ async def get_promotions(
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None, description="Tìm theo code hoặc tên"),
+    seller_id: Optional[int] = Query(None, description="Admin lọc theo seller (seller_id)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Admin hoặc seller xem danh sách mã khuyến mãi của mình."""
+    """Admin hoặc seller xem danh sách mã khuyến mãi."""
     _ensure_manage_permission(current_user)
+    is_admin = _is_admin_user(current_user)
 
     query = db.query(Promotion)
-    if not _is_admin_user(current_user):
+
+    # Seller chỉ thấy mã của mình
+    if not is_admin:
         query = query.filter(
             or_(
                 Promotion.seller_id == current_user.id,
                 Promotion.created_by == current_user.id,
             )
         )
+    else:
+        # Admin có thể lọc theo seller_id cụ thể
+        if seller_id is not None:
+            query = query.filter(
+                or_(
+                    Promotion.seller_id == seller_id,
+                    Promotion.created_by == seller_id,
+                )
+            )
 
     if status:
         query = query.filter(Promotion.status == status)
@@ -244,10 +256,9 @@ async def get_promotions(
     items = query.order_by(Promotion.created_at.desc()).offset(skip).limit(limit).all()
 
     return PaginatedPromotionResponse(
-        total=total,
-        page=page,
-        limit=limit,
-        data=[_build_promotion_response(p) for p in items]
+        success=True,
+        data=[_build_promotion_response(p) for p in items],
+        meta={"total": total, "page": page, "limit": limit}
     )
 
 
