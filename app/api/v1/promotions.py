@@ -46,6 +46,8 @@ class PromotionResponse(BaseModel):
     usage_limit_per_user: Optional[int]
     applicable_to: str
     seller_id: Optional[int]
+    seller_name: Optional[str] = None        # Tên hiển thị của seller
+    creator_username: Optional[str] = None   # Tên đăng nhập (email/username) của người tạo
     applicable_product_ids: List[int]
     applicable_category_ids: List[int]
     used_count: int
@@ -179,7 +181,21 @@ def _validate_scope_payload(
                 raise HTTPException(status_code=400, detail="Có sản phẩm không thuộc quyền sở hữu của seller")
 
 
-def _build_promotion_response(p: Promotion) -> dict:
+def _build_promotion_response(p: Promotion, db: Session) -> dict:
+    # Lấy thông tin seller
+    seller_name: Optional[str] = None
+    if p.seller_id:
+        seller = db.query(User).filter(User.id == p.seller_id).first()
+        if seller:
+            seller_name = seller.name or seller.email
+
+    # Lấy username người tạo
+    creator_username: Optional[str] = None
+    if p.created_by:
+        creator = db.query(User).filter(User.id == p.created_by).first()
+        if creator:
+            creator_username = creator.email or creator.name
+
     return PromotionResponse(
         id=p.id,
         code=p.code,
@@ -193,6 +209,8 @@ def _build_promotion_response(p: Promotion) -> dict:
         usage_limit_per_user=p.usage_limit_per_user,
         applicable_to=(p.applicable_to or "ALL"),
         seller_id=p.seller_id,
+        seller_name=seller_name,
+        creator_username=creator_username,
         applicable_product_ids=_parse_json_id_list(p.applicable_product_ids),
         applicable_category_ids=_parse_json_id_list(p.applicable_category_ids),
         used_count=p.used_count,
@@ -257,7 +275,7 @@ async def get_promotions(
 
     return PaginatedPromotionResponse(
         success=True,
-        data=[_build_promotion_response(p) for p in items],
+        data=[_build_promotion_response(p, db) for p in items],
         meta={"total": total, "page": page, "limit": limit}
     )
 
@@ -325,7 +343,7 @@ async def get_promotion_by_id(
         if promo.seller_id != current_user.id and promo.created_by != current_user.id:
             raise HTTPException(status_code=403, detail="Bạn không có quyền xem khuyến mãi này")
 
-    return _build_promotion_response(promo)
+    return _build_promotion_response(promo, db)
 
 
 @router.post("", response_model=PromotionResponse)
@@ -389,7 +407,7 @@ async def create_promotion(
     db.commit()
     db.refresh(new_promo)
 
-    return _build_promotion_response(new_promo)
+    return _build_promotion_response(new_promo, db)
 
 
 @router.put("/{promotion_id}", response_model=PromotionResponse)
@@ -470,7 +488,7 @@ async def update_promotion(
     db.commit()
     db.refresh(promo)
 
-    return _build_promotion_response(promo)
+    return _build_promotion_response(promo, db)
 
 
 @router.delete("/{promotion_id}")
