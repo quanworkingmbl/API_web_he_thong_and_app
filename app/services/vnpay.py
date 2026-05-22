@@ -87,7 +87,7 @@ class VNPayService:
         order_info: str,
         client_ip: str,
         locale: str = "vn",
-        expire_minutes: int = 15,
+        expire_minutes: int = 20,
     ) -> str:
         """
         Tạo URL thanh toán VNPAY.
@@ -98,12 +98,13 @@ class VNPayService:
             order_info:     Mô tả đơn hàng (ASCII, ≤ 255 ký tự)
             client_ip:      IP của khách hàng (bắt buộc theo VNPAY)
             locale:         "vn" hoặc "en"
-            expire_minutes: Thời gian hết hạn URL (mặc định 15 phút)
+            expire_minutes: Thời gian hết hạn URL (mặc định 20 phút)
 
         Returns:
             URL redirect đến cổng thanh toán VNPAY
         """
-        now = datetime.now()
+        # ✅ Dùng UTC để tránh lệch múi giờ với VNPay Sandbox (server VNPay chạy UTC+7 nhưng API nhận UTC)
+        now = datetime.utcnow()
         create_date  = now.strftime("%Y%m%d%H%M%S")
         # ✅ FIX: dùng timedelta thay vì replace() để tránh crash khi minute ≥ 45
         expire_dt    = now + timedelta(minutes=expire_minutes)
