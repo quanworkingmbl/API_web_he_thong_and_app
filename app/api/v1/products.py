@@ -437,10 +437,14 @@ async def delete_product(
         product.is_active = False
         product.updated_at = datetime.utcnow()
         db.commit()
+        # NOTE: Do NOT wrap in nested "data" key – apiClient interceptor strips it,
+        # causing the frontend to lose the message and misdetect as hard-delete.
         return {
             "success": True,
+            "soft_deleted": True,
             "message": "San pham da duoc an (co don hang lien quan)",
-            "data": {"product_id": product_id, "is_active": False},
+            "product_id": product_id,
+            "is_active": False,
         }
 
     # Hard-delete: xoa toan bo ban ghi con truoc de tranh loi FK constraint
