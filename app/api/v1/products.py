@@ -455,45 +455,57 @@ async def delete_product(
     # Moi bang su dung SAVEPOINT rieng nen neu mot bang khong ton tai hoac cot sai,
     # chi savepoint do bi rollback, transaction chinh van tiep tuc.
     _delete_steps = [
-        # --- BUOC 1: Grandchild – phu thuoc vao child tables ---
-        # review_images.review_id -> reviews.id  (phai xoa truoc reviews)
-        ("review_images",       "SELECT ri.id FROM review_images ri "
-                                "JOIN reviews r ON ri.review_id = r.id "
-                                "WHERE r.product_id = :pid",
+        # =================================================================
+        # BUOC 1: Great-grandchild / Grandchild
+        # Phai xoa truoc bang con de tranh FK violation
+        # =================================================================
+
+        # review_images.review_id -> reviews.id
+        ("review_images",
          "DELETE FROM review_images WHERE review_id IN "
          "(SELECT id FROM reviews WHERE product_id = :pid)"),
 
-        # content_audit_logs.content_id -> contents.id  (phai xoa truoc contents)
-        ("content_audit_logs",  None,
+        # content_audit_logs.content_id -> contents.id
+        ("content_audit_logs",
          "DELETE FROM content_audit_logs WHERE content_id IN "
          "(SELECT id FROM contents WHERE product_id = :pid)"),
 
-        # product_option_values.option_id -> product_options.id  (phai xoa truoc product_options)
-        # product_option_values khong co cot product_id nen dung subquery
-        ("product_option_values", None,
+        # ai_moderation_logs.content_id -> contents.id
+        # (ai_moderation_logs co 2 FK: product_id va content_id)
+        # Phai xoa theo content_id TRUOC khi xoa contents
+        ("ai_moderation_logs_by_content_id",
+         "DELETE FROM ai_moderation_logs WHERE content_id IN "
+         "(SELECT id FROM contents WHERE product_id = :pid)"),
+
+        # product_option_values.option_id -> product_options.id
+        # (bang nay khong co cot product_id truc tiep)
+        ("product_option_values",
          "DELETE FROM product_option_values WHERE option_id IN "
          "(SELECT id FROM product_options WHERE product_id = :pid)"),
 
-        # --- BUOC 2: Child – tham chieu truc tiep vao products.id ---
-        ("product_media",         None, "DELETE FROM product_media WHERE product_id = :pid"),
-        ("cart_items",            None, "DELETE FROM cart_items WHERE product_id = :pid"),
-        ("inventory_movements",   None, "DELETE FROM inventory_movements WHERE product_id = :pid"),
-        ("stock_reservations",    None, "DELETE FROM stock_reservations WHERE product_id = :pid"),
-        ("product_options",       None, "DELETE FROM product_options WHERE product_id = :pid"),
-        ("product_variants",      None, "DELETE FROM product_variants WHERE product_id = :pid"),
-        ("product_certificates",  None, "DELETE FROM product_certificates WHERE product_id = :pid"),
-        ("product_origins",       None, "DELETE FROM product_origins WHERE product_id = :pid"),
-        ("product_approvals",     None, "DELETE FROM product_approvals WHERE product_id = :pid"),
-        ("product_price_logs",    None, "DELETE FROM product_price_logs WHERE product_id = :pid"),
-        ("ai_moderation_logs",    None, "DELETE FROM ai_moderation_logs WHERE product_id = :pid"),
-        ("product_embeddings",    None, "DELETE FROM product_embeddings WHERE product_id = :pid"),
-        ("wishlist_items",        None, "DELETE FROM wishlist_items WHERE product_id = :pid"),
-        ("reviews",               None, "DELETE FROM reviews WHERE product_id = :pid"),
-        ("complaints",            None, "DELETE FROM complaints WHERE product_id = :pid"),
-        ("contents",              None, "DELETE FROM contents WHERE product_id = :pid"),
+        # =================================================================
+        # BUOC 2: Child – tham chieu truc tiep vao products.id
+        # =================================================================
+        ("product_media",        "DELETE FROM product_media WHERE product_id = :pid"),
+        ("cart_items",           "DELETE FROM cart_items WHERE product_id = :pid"),
+        ("inventory_movements",  "DELETE FROM inventory_movements WHERE product_id = :pid"),
+        ("stock_reservations",   "DELETE FROM stock_reservations WHERE product_id = :pid"),
+        ("product_options",      "DELETE FROM product_options WHERE product_id = :pid"),
+        ("product_variants",     "DELETE FROM product_variants WHERE product_id = :pid"),
+        ("product_certificates", "DELETE FROM product_certificates WHERE product_id = :pid"),
+        ("product_origins",      "DELETE FROM product_origins WHERE product_id = :pid"),
+        ("product_approvals",    "DELETE FROM product_approvals WHERE product_id = :pid"),
+        ("product_price_logs",   "DELETE FROM product_price_logs WHERE product_id = :pid"),
+        # ai_moderation_logs theo product_id (phan con lai sau khi da xoa theo content_id)
+        ("ai_moderation_logs",   "DELETE FROM ai_moderation_logs WHERE product_id = :pid"),
+        ("product_embeddings",   "DELETE FROM product_embeddings WHERE product_id = :pid"),
+        ("wishlist_items",       "DELETE FROM wishlist_items WHERE product_id = :pid"),
+        ("reviews",              "DELETE FROM reviews WHERE product_id = :pid"),
+        ("complaints",           "DELETE FROM complaints WHERE product_id = :pid"),
+        ("contents",             "DELETE FROM contents WHERE product_id = :pid"),
     ]
 
-    for (table_label, _check_sql, delete_sql) in _delete_steps:
+    for (table_label, delete_sql) in _delete_steps:
         sp = db.begin_nested()  # CREATE SAVEPOINT
         try:
             db.execute(text(delete_sql), {"pid": product_id})
