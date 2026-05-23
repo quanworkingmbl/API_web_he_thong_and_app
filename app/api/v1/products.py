@@ -450,50 +450,60 @@ async def delete_product(
     # Hard-delete: xoa toan bo ban ghi con truoc de tranh loi FK constraint
     from sqlalchemy import text
 
-    # Thu tu xoa quan trong: bang con cua product_variants truoc, sau do product_variants, cuoi cung la product
-    _child_tables = [
-        # 1. Xoa cac ban ghi phu thuoc vao product_variants truoc
-        "product_option_values",   # FK -> product_options.id & product_variants.id
-        "product_media",            # FK -> products.id & product_variants.id
-        "cart_items",               # FK -> products.id & product_variants.id
-        "inventory_movements",      # FK -> products.id & product_variants.id
-        "stock_reservations",       # FK -> products.id & product_variants.id
-        # 2. Xoa cac bang tham chieu truc tiep vao products.id
-        "product_options",          # FK -> products.id
-        "product_variants",         # FK -> products.id
-        "product_certificates",     # FK -> products.id
-        "product_origins",          # FK -> products.id
-        "product_approvals",        # FK -> products.id
-        "product_price_logs",       # FK -> products.id
-        "ai_moderation_logs",       # FK -> products.id (nullable)
-        "product_embeddings",       # FK -> products.id
-        "wishlist_items",           # FK -> products.id (neu co)
-        "reviews",                  # FK -> products.id (neu co)
-        "complaints",               # FK -> products.id (nullable)
+    # Thu tu xoa QUAN TRONG – bang chau (grandchild) phai xoa truoc bang con (child),
+    # bang con phai xoa truoc bang cha (products).
+    # Moi bang su dung SAVEPOINT rieng nen neu mot bang khong ton tai hoac cot sai,
+    # chi savepoint do bi rollback, transaction chinh van tiep tuc.
+    _delete_steps = [
+        # --- BUOC 1: Grandchild – phu thuoc vao child tables ---
+        # review_images.review_id -> reviews.id  (phai xoa truoc reviews)
+        ("review_images",       "SELECT ri.id FROM review_images ri "
+                                "JOIN reviews r ON ri.review_id = r.id "
+                                "WHERE r.product_id = :pid",
+         "DELETE FROM review_images WHERE review_id IN "
+         "(SELECT id FROM reviews WHERE product_id = :pid)"),
+
+        # content_audit_logs.content_id -> contents.id  (phai xoa truoc contents)
+        ("content_audit_logs",  None,
+         "DELETE FROM content_audit_logs WHERE content_id IN "
+         "(SELECT id FROM contents WHERE product_id = :pid)"),
+
+        # product_option_values.option_id -> product_options.id  (phai xoa truoc product_options)
+        # product_option_values khong co cot product_id nen dung subquery
+        ("product_option_values", None,
+         "DELETE FROM product_option_values WHERE option_id IN "
+         "(SELECT id FROM product_options WHERE product_id = :pid)"),
+
+        # --- BUOC 2: Child – tham chieu truc tiep vao products.id ---
+        ("product_media",         None, "DELETE FROM product_media WHERE product_id = :pid"),
+        ("cart_items",            None, "DELETE FROM cart_items WHERE product_id = :pid"),
+        ("inventory_movements",   None, "DELETE FROM inventory_movements WHERE product_id = :pid"),
+        ("stock_reservations",    None, "DELETE FROM stock_reservations WHERE product_id = :pid"),
+        ("product_options",       None, "DELETE FROM product_options WHERE product_id = :pid"),
+        ("product_variants",      None, "DELETE FROM product_variants WHERE product_id = :pid"),
+        ("product_certificates",  None, "DELETE FROM product_certificates WHERE product_id = :pid"),
+        ("product_origins",       None, "DELETE FROM product_origins WHERE product_id = :pid"),
+        ("product_approvals",     None, "DELETE FROM product_approvals WHERE product_id = :pid"),
+        ("product_price_logs",    None, "DELETE FROM product_price_logs WHERE product_id = :pid"),
+        ("ai_moderation_logs",    None, "DELETE FROM ai_moderation_logs WHERE product_id = :pid"),
+        ("product_embeddings",    None, "DELETE FROM product_embeddings WHERE product_id = :pid"),
+        ("wishlist_items",        None, "DELETE FROM wishlist_items WHERE product_id = :pid"),
+        ("reviews",               None, "DELETE FROM reviews WHERE product_id = :pid"),
+        ("complaints",            None, "DELETE FROM complaints WHERE product_id = :pid"),
+        ("contents",              None, "DELETE FROM contents WHERE product_id = :pid"),
     ]
 
-    # QUAN TRONG: Phai dung SAVEPOINT (begin_nested) cho tung bang con.
-    # Neu dung bare try/except thuan, khi db.execute() that bai (bang khong ton tai,
-    # cot sai ten, v.v.), PostgreSQL danh dau TOAN BO transaction la "aborted"
-    # (InFailedSqlTransaction). Moi lenh sau – ke ca db.delete() va db.commit() –
-    # deu that bai theo, dan den HTTP 500.
-    # begin_nested() tao SAVEPOINT: khi rollback chi quay ve diem luu do,
-    # transaction chinh van hop le de tiep tuc.
-    for table in _child_tables:
+    for (table_label, _check_sql, delete_sql) in _delete_steps:
         sp = db.begin_nested()  # CREATE SAVEPOINT
         try:
-            db.execute(
-                text(f"DELETE FROM {table} WHERE product_id = :pid"),
-                {"pid": product_id},
-            )
+            db.execute(text(delete_sql), {"pid": product_id})
             sp.commit()  # RELEASE SAVEPOINT
         except Exception:
             sp.rollback()  # ROLLBACK TO SAVEPOINT – transaction chinh van hop le
-            # Bo qua: bang khong ton tai, cot khong khop ten, hoac FK bi chặn
+            # Bo qua: bang khong ton tai, cot sai, hoac FK khong khop
 
-    # SQLAlchemy ORM co the lazy-load relationship (vd: product_variants) luc db.delete().
-    # Sau khi da xoa thu cong qua raw SQL, goi db.expire() de ORM khong query lai
-    # cac bang con da bi xoa (tranh InFailedSqlTransaction o buoc nay).
+    # db.expire() de ORM khong lazy-load cac relationship da bi xoa thu cong
+    # (tranh InFailedSqlTransaction khi db.delete() trigger lazy-load)
     db.expire(product)
     db.delete(product)
     db.commit()
