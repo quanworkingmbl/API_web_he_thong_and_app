@@ -472,16 +472,29 @@ async def delete_product(
         "complaints",               # FK -> products.id (nullable)
     ]
 
+    # QUAN TRONG: Phai dung SAVEPOINT (begin_nested) cho tung bang con.
+    # Neu dung bare try/except thuan, khi db.execute() that bai (bang khong ton tai,
+    # cot sai ten, v.v.), PostgreSQL danh dau TOAN BO transaction la "aborted"
+    # (InFailedSqlTransaction). Moi lenh sau – ke ca db.delete() va db.commit() –
+    # deu that bai theo, dan den HTTP 500.
+    # begin_nested() tao SAVEPOINT: khi rollback chi quay ve diem luu do,
+    # transaction chinh van hop le de tiep tuc.
     for table in _child_tables:
+        sp = db.begin_nested()  # CREATE SAVEPOINT
         try:
             db.execute(
                 text(f"DELETE FROM {table} WHERE product_id = :pid"),
                 {"pid": product_id},
             )
+            sp.commit()  # RELEASE SAVEPOINT
         except Exception:
-            # Bo qua neu bang khong ton tai hoac cot khong khop ten
-            pass
+            sp.rollback()  # ROLLBACK TO SAVEPOINT – transaction chinh van hop le
+            # Bo qua: bang khong ton tai, cot khong khop ten, hoac FK bi chặn
 
+    # SQLAlchemy ORM co the lazy-load relationship (vd: product_variants) luc db.delete().
+    # Sau khi da xoa thu cong qua raw SQL, goi db.expire() de ORM khong query lai
+    # cac bang con da bi xoa (tranh InFailedSqlTransaction o buoc nay).
+    db.expire(product)
     db.delete(product)
     db.commit()
     return {"success": True, "message": "Da xoa san pham"}
