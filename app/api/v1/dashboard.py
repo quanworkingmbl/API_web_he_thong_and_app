@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.database import get_db
 from app.models.user import User
 from app.api.v1.auth import get_current_user
@@ -11,6 +11,15 @@ from pydantic import BaseModel
 from decimal import Decimal, ROUND_HALF_UP
 
 router = APIRouter()
+
+
+def _naive_dt(dt) -> datetime | None:
+    """Strip timezone info (nếu có) để so sánh đồng nhất với naive datetime."""
+    if dt is None:
+        return None
+    if hasattr(dt, "tzinfo") and dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
 
 
 def _to_vnd_int(value: Optional[Decimal]) -> int:
@@ -255,14 +264,14 @@ async def get_finance_overview(
     order_count      = len(all_delivered)
 
     # ── 2. Tháng này ────────────────────────────────────────────────────────
-    this_month = [o for o in all_delivered if (o.delivered_at or o.created_at) and (o.delivered_at or o.created_at) >= month_start]
+    this_month = [o for o in all_delivered if _naive_dt(o.delivered_at or o.created_at) and _naive_dt(o.delivered_at or o.created_at) >= month_start]
     month_gmv        = sum(o.subtotal            for o in this_month)
     month_vat        = sum(o.vat_amount or 0     for o in this_month)
     month_fee        = sum(o.platform_fee_amount  for o in this_month)
     month_seller_out = sum(o.seller_amount        for o in this_month)
 
     # ── 3. Năm này ──────────────────────────────────────────────────────────
-    this_year = [o for o in all_delivered if (o.delivered_at or o.created_at) and (o.delivered_at or o.created_at) >= year_start]
+    this_year = [o for o in all_delivered if _naive_dt(o.delivered_at or o.created_at) and _naive_dt(o.delivered_at or o.created_at) >= year_start]
     year_gmv         = sum(o.subtotal            for o in this_year)
     year_vat         = sum(o.vat_amount or 0     for o in this_year)
     year_fee         = sum(o.platform_fee_amount  for o in this_year)
@@ -281,7 +290,7 @@ async def get_finance_overview(
         m_end   = datetime(y, m+1, 1) if m < 12 else datetime(y+1, 1, 1)
         m_orders = [
             o for o in all_delivered
-            if (o.delivered_at or o.created_at) and m_start <= (o.delivered_at or o.created_at) < m_end
+            if _naive_dt(o.delivered_at or o.created_at) and m_start <= _naive_dt(o.delivered_at or o.created_at) < m_end
         ]
         monthly.append({
             "month":      f"{y}-{m:02d}",

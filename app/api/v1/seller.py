@@ -1157,6 +1157,123 @@ async def update_seller_product(
     }
 
 
+@router.delete("/products/{product_id}", summary="Ẩn sản phẩm (soft-delete)")
+async def seller_delete_product(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Seller ẩn sản phẩm của mình (soft-delete: is_active=False).
+    Sản phẩm vẫn lưu trong DB để giữ lịch sử đơn hàng.
+    """
+    _require_seller(current_user)
+
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.seller_id == current_user.id,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không có quyền")
+
+    product.is_active = False
+    product.updated_at = datetime.utcnow()
+    db.commit()
+    return {
+        "success": True,
+        "soft_deleted": True,
+        "message": "Sản phẩm đã được ẩn",
+        "product_id": product_id,
+        "is_active": False,
+    }
+
+
+@router.delete("/products/{product_id}/permanent", summary="Xóa vĩnh viễn sản phẩm đã ẩn")
+async def seller_delete_product_permanent(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Xóa vĩnh viễn sản phẩm của seller:
+    - Nếu có đơn hàng liên quan → chỉ soft-delete (is_active=False), giữ lịch sử.
+    - Nếu không có đơn hàng → hard-delete hoàn toàn.
+    Chỉ áp dụng với sản phẩm đã ẩn (is_active=False).
+    """
+    _require_seller(current_user)
+
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.seller_id == current_user.id,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không có quyền")
+
+    if product.is_active:
+        raise HTTPException(status_code=400, detail="Hãy ẩn sản phẩm trước khi xóa vĩnh viễn")
+
+    # Kiểm tra có đơn hàng chưa
+    from sqlalchemy import text as _text
+    try:
+        has_orders = db.execute(
+            _text("SELECT 1 FROM order_items WHERE product_id = :pid LIMIT 1"),
+            {"pid": product_id},
+        ).fetchone() is not None
+    except Exception:
+        has_orders = False
+
+    if has_orders:
+        # Giữ soft-delete – không thể xóa khi có lịch sử đơn
+        return {
+            "success": True,
+            "soft_deleted": True,
+            "message": "Sản phẩm có lịch sử đơn hàng – không thể xóa hoàn toàn, đã giữ ở trạng thái ẩn",
+            "product_id": product_id,
+            "is_active": False,
+        }
+
+    # Hard-delete: xóa các bảng liên quan (dùng SAVEPOINT để tránh FK lỗi)
+    from sqlalchemy import text as _sql_text
+    _delete_steps = [
+        ("review_images",
+         "DELETE FROM review_images WHERE review_id IN (SELECT id FROM reviews WHERE product_id = :pid)"),
+        ("content_audit_logs",
+         "DELETE FROM content_audit_logs WHERE content_id IN (SELECT id FROM contents WHERE product_id = :pid)"),
+        ("ai_moderation_logs_by_content",
+         "DELETE FROM ai_moderation_logs WHERE content_id IN (SELECT id FROM contents WHERE product_id = :pid)"),
+        ("product_option_values",
+         "DELETE FROM product_option_values WHERE option_id IN (SELECT id FROM product_options WHERE product_id = :pid)"),
+        ("product_media",        "DELETE FROM product_media WHERE product_id = :pid"),
+        ("cart_items",           "DELETE FROM cart_items WHERE product_id = :pid"),
+        ("inventory_movements",  "DELETE FROM inventory_movements WHERE product_id = :pid"),
+        ("stock_reservations",   "DELETE FROM stock_reservations WHERE product_id = :pid"),
+        ("product_options",      "DELETE FROM product_options WHERE product_id = :pid"),
+        ("product_variants",     "DELETE FROM product_variants WHERE product_id = :pid"),
+        ("product_certificates", "DELETE FROM product_certificates WHERE product_id = :pid"),
+        ("product_origins",      "DELETE FROM product_origins WHERE product_id = :pid"),
+        ("product_approvals",    "DELETE FROM product_approvals WHERE product_id = :pid"),
+        ("product_price_logs",   "DELETE FROM product_price_logs WHERE product_id = :pid"),
+        ("ai_moderation_logs",   "DELETE FROM ai_moderation_logs WHERE product_id = :pid"),
+        ("product_embeddings",   "DELETE FROM product_embeddings WHERE product_id = :pid"),
+        ("wishlist_items",       "DELETE FROM wishlist_items WHERE product_id = :pid"),
+        ("reviews",              "DELETE FROM reviews WHERE product_id = :pid"),
+        ("complaints",           "DELETE FROM complaints WHERE product_id = :pid"),
+        ("contents",             "DELETE FROM contents WHERE product_id = :pid"),
+    ]
+    for (_label, sql) in _delete_steps:
+        sp = db.begin_nested()
+        try:
+            db.execute(_sql_text(sql), {"pid": product_id})
+            sp.commit()
+        except Exception:
+            sp.rollback()
+
+    db.expire(product)
+    db.delete(product)
+    db.commit()
+    return {"success": True, "message": "Đã xóa sản phẩm vĩnh viễn", "product_id": product_id}
+
+
 @router.put("/products/{product_id}/stock", summary="Cập nhật tồn kho sản phẩm")
 async def update_product_stock(
     product_id: int,
