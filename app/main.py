@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.api.v1 import api_router
 from app.core.exceptions import (
@@ -11,9 +12,21 @@ from app.core.exceptions import (
 )
 from app.core.middleware import LoggingMiddleware, ApiSecretMiddleware
 from app.core.logging_config import setup_logging
+from app.core.scheduler import start_scheduler, stop_scheduler
 
 # Setup logging
 setup_logging()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: khởi động và dừng các background services."""
+    # ── Startup ────────────────────────────────────────────────────────────
+    start_scheduler()
+    yield
+    # ── Shutdown ───────────────────────────────────────────────────────────
+    stop_scheduler()
+
 
 app = FastAPI(
     # title, version information API
@@ -23,6 +36,7 @@ app = FastAPI(
     docs_url="/docs" if settings.SHOW_DOCS else None,       # Dùng SHOW_DOCS, độc lập với DEBUG
     redoc_url="/redoc" if settings.SHOW_DOCS else None,     # Dùng SHOW_DOCS, độc lập với DEBUG
     openapi_url="/openapi.json" if settings.SHOW_DOCS else None,  # Dùng SHOW_DOCS, độc lập với DEBUG
+    lifespan=lifespan,
 )
 
 # Exception handlers

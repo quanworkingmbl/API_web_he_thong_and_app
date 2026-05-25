@@ -27,7 +27,10 @@ from app.services.notification import (
     notify_return_received_to_buyer,
 )
 
+import logging
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
@@ -114,8 +117,8 @@ async def create_return_request(
                 reason=return_data.reason,
             )
             db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Return] Không gửi được notification yêu cầu trả hàng mới cho admin: %s", _e)
 
     return {
         "success": True,
@@ -359,8 +362,8 @@ async def approve_return_request(
             note=handle_data.note,
         )
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Return] Không gửi được notification duyệt trả hàng cho buyer: %s", _e)
 
     return {
         "success": True,
@@ -403,8 +406,8 @@ async def reject_return_request(
             note=handle_data.note,
         )
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Return] Không gửi được notification từ chối trả hàng cho buyer: %s", _e)
 
     return {
         "success": True,
@@ -443,8 +446,8 @@ async def mark_return_received(
             return_type=return_type_val,
         )
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Return] Không gửi được notification nhận hàng trả cho buyer: %s", _e)
 
     return {
         "success": True,

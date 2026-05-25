@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from typing import Optional
 from datetime import datetime
+import logging
 from app.core.database import get_db
 from app.models.seller_profile import SellerProfile, VerificationStatus
 from app.models.user import User, UserRole
@@ -26,6 +27,7 @@ from app.services.notification import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
@@ -256,8 +258,8 @@ async def register_seller_profile(
                 business_name=profile.business_name or "Chưa có tên",
             )
             db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[KYC] Không gửi được notification KYC pending cho admin: %s", _e)
 
     return {
         "success": True,
@@ -370,8 +372,8 @@ async def verify_seller(
                 rejection_reason=data.rejection_reason or "Không đáp ứng yêu cầu",
             )
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[KYC] Không gửi được notification KYC verify/reject cho seller: %s", _e)
 
     return {
         "success": True,
