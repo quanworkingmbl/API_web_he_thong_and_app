@@ -18,8 +18,11 @@ import hashlib
 import hmac
 import urllib.parse
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
+
+# Múi giờ Việt Nam UTC+7
+_TZ_VN = timezone(timedelta(hours=7))
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +106,9 @@ class VNPayService:
         Returns:
             URL redirect đến cổng thanh toán VNPAY
         """
-        # ✅ Dùng UTC để tránh lệch múi giờ với VNPay Sandbox (server VNPay chạy UTC+7 nhưng API nhận UTC)
-        now = datetime.utcnow()
+        # ✅ VNPAY Sandbox yêu cầu thời gian UTC+7 (giờ Việt Nam)
+        #    Nếu gửi UTC (kém 7 tiếng) → VNPAY thấy giao dịch đã "hết hạn" → timeout ngay lập tức
+        now = datetime.now(_TZ_VN)
         create_date  = now.strftime("%Y%m%d%H%M%S")
         # ✅ FIX: dùng timedelta thay vì replace() để tránh crash khi minute ≥ 45
         expire_dt    = now + timedelta(minutes=expire_minutes)
