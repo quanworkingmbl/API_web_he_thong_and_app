@@ -1752,6 +1752,9 @@ async def create_order(
         if not promo:
             raise HTTPException(status_code=400, detail="Mã khuyến mãi không tồn tại hoặc đã hết hạn")
 
+        # FOR UPDATE: khóa row promotion để tránh concurrent overuse
+        promo = db.query(Promotion).filter(Promotion.id == promo.id).with_for_update().first()
+
         can_use, reason = _can_user_use_promotion(db, promo, current_user.id)
         if not can_use:
             raise HTTPException(status_code=400, detail=reason)
@@ -1899,7 +1902,7 @@ async def create_order(
         )
         decrement_stock(db, p, item_data["quantity"], item_data["variant_id"])
 
-    # Ghi promo usage
+    # Ghi promo usage — dùng atomic SQL UPDATE để tránh race condition used_count
     if applied_promo:
         db.add(PromotionUsage(
             promotion_id=applied_promo.id,
@@ -1907,7 +1910,11 @@ async def create_order(
             order_id=new_order.id,
             discount_amount=discount_amount,
         ))
-        applied_promo.used_count += 1
+        # Atomic increment — an toàn với concurrent requests
+        db.query(Promotion).filter(Promotion.id == applied_promo.id).update(
+            {"used_count": Promotion.used_count + 1},
+            synchronize_session=False,
+        )
 
     log_status_change(
         db=db,
