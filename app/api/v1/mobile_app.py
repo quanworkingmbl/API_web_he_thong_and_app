@@ -80,7 +80,20 @@ def _upload_to_supabase(content: bytes, filename: str, mime: str) -> str:
     blob.upload_from_string(content, content_type=mime)
     return _PUBLIC_BASE + key
 
+import logging
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_search(term: str) -> str:
+    """Escape wildcard chars trong LIKE/ILIKE để tránh unintended full-scan.
+
+    '%' và '_' là ký tự đặc biệt trong SQL LIKE.
+    Nếu user gõ '%' thì khớp toàn bộ DB — không phải SQL injection
+    nhưng là logic bypass. Ta escape chúng trước khi truyền vào ilike().
+    """
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 # ==============================================================================
@@ -1090,7 +1103,8 @@ async def get_public_products(
     if label:
         query = query.filter(Product.label == label)
     if search:
-        query = query.filter(Product.name.ilike(f"%{search}%"))
+        _s = _sanitize_search(search)
+        query = query.filter(Product.name.ilike(f"%{_s}%"))
     if min_price:
         query = query.filter(Product.price >= min_price)
     if max_price:
@@ -1376,7 +1390,8 @@ async def get_shop_page(
         Product.is_active == True,
     )
     if search:
-        product_q = product_q.filter(Product.name.ilike(f"%{search}%"))
+        _s = _sanitize_search(search)
+        product_q = product_q.filter(Product.name.ilike(f"%{_s}%"))
 
     total = product_q.count()
     skip = (page - 1) * limit
@@ -1822,7 +1837,7 @@ async def create_order(
         })
     total_vat_amount = total_vat_amount.quantize(Decimal("0.01"))
 
-    # Seller nhận = subtotal − phí nền tảng 5% − VAT đã tách ra
+    # Seller nhận = subtotal − phí nền tảng 10% − VAT đã tách ra
     seller_amount = subtotal - platform_fee_amount - total_vat_amount
 
     import json as _json
@@ -1924,6 +1939,27 @@ async def create_order(
         order_number=order_number,
         total_amount=total_amount,
     )
+
+    # ── Bước 4: Xóa các cart items đã checkout thành công ──────────────────
+    # Chỉ xóa đúng các items user vừa đặt (theo product_id + variant_id)
+    # để không ảnh hưởng các sản phẩm còn lại trong giỏ (nếu có)
+    try:
+        cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
+        if cart:
+            checked_out_product_ids = {item.product_id for item in checkout_data.items}
+            checked_out_variant_ids = {
+                (item.product_id, item.variant_id) for item in checkout_data.items
+            }
+            cart_items_to_remove = db.query(CartItem).filter(
+                CartItem.cart_id == cart.id,
+                CartItem.product_id.in_(checked_out_product_ids),
+            ).all()
+            for cart_item in cart_items_to_remove:
+                if (cart_item.product_id, cart_item.variant_id) in checked_out_variant_ids:
+                    db.delete(cart_item)
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("[Checkout] Không thể clear cart: %s", e)
 
     db.commit()
 
@@ -2040,47 +2076,6 @@ async def get_my_orders(
 
 REVIEW_DEADLINE_DAYS = 5  # Số ngày được phép đánh giá sau khi nhận hàng
 
-# ==============================================================================
-# DEBUG ENDPOINT — XEM DATA THỰC TẾ TRONG DB (XÓA SAU KHI FIX)
-# ==============================================================================
-
-@router.get("/debug/review-status", summary="[DEBUG] Kiểm tra review & order data")
-async def debug_review_status(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Debug: xem review và order item data của user hiện tại để tìm bug has_reviewed"""
-    # Lấy tất cả review của user
-    reviews = db.query(Review).filter(Review.user_id == current_user.id).all()
-    reviewed_pids = {r.product_id for r in reviews if r.product_id is not None}
-
-    # Lấy tất cả đơn DELIVERED của user
-    delivered_orders = db.query(Order).filter(
-        Order.customer_id == current_user.id,
-        Order.status == "DELIVERED",
-    ).all()
-
-    result = []
-    for o in delivered_orders:
-        items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
-        pids_in_order = [i.product_id for i in items]
-        matched = [p for p in pids_in_order if p in reviewed_pids]
-        result.append({
-            "order_id": o.id,
-            "order_number": o.order_number,
-            "order_status_raw": str(o.status),
-            "product_ids_in_order": pids_in_order,
-            "reviewed_product_ids": list(reviewed_pids),
-            "matched_pids": matched,
-            "has_reviewed_expected": len(matched) > 0,
-        })
-
-    return {
-        "user_id": current_user.id,
-        "total_reviews_in_db": len(reviews),
-        "reviews": [{"id": r.id, "product_id": r.product_id, "user_id": r.user_id} for r in reviews],
-        "delivered_orders": result,
-    }
 
 # ==============================================================================
 # PENDING REVIEWS — phải đặt TRƯỚC route /orders/my/{order_id} để tránh conflict
@@ -2520,6 +2515,19 @@ async def cancel_my_order(
         note=cancel_data.cancel_reason or "Consumer tự hủy đơn",
         auto_flush=True,
     )
+
+    # [NOTIFICATION O8] Thông báo cho Seller khi buyer hủy đơn
+    try:
+        notify_order_cancelled_to_seller(
+            db=db,
+            seller_id=order.seller_id,
+            order_id=order_id,
+            order_number=order.order_number,
+            reason=cancel_data.cancel_reason or "Khách hàng tự hủy đơn",
+        )
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("[Cancel] Không thể gửi notification cho seller: %s", e)
 
     db.commit()
 

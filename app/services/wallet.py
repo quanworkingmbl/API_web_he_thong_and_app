@@ -96,20 +96,55 @@ def credit_seller_wallet(db: Session, order: Order) -> bool:
         logger.warning("[Wallet] Order #%s seller_amount=%s, không cộng.", order.id, seller_amount)
         return False
 
+    # ── Khóa row Order (FOR UPDATE) để chống concurrent double-credit ───────
+    # Tình huống race: 2 request confirm-received cùng lúc, cả 2 đọc
+    # wallet_credited=False trước khi cái nào ghi xong → double-credit.
+    # SELECT FOR UPDATE đảm bảo chỉ 1 transaction xử lý tại một thời điểm.
+    locked_order = (
+        db.query(Order)
+        .filter(Order.id == order.id)
+        .with_for_update()
+        .first()
+    )
+    if not locked_order or locked_order.wallet_credited:
+        logger.warning("[Wallet] Order #%s đã credited (after lock), bỏ qua.", order.id)
+        return False
+
+    # Cập nhật flag ngay để các transaction khác thấy sau khi commit
+    locked_order.wallet_credited = True
+
     available_credit = (seller_amount * AVAILABLE_RATIO).quantize(Decimal("0.01"))
     reserve_credit   = (seller_amount * RESERVE_RATIO).quantize(Decimal("0.01"))
     # Tránh lệch do làm tròn
     available_credit = seller_amount - reserve_credit
 
-    wallet = _get_or_create_wallet(order.seller_id, db)
+    # Khóa ví seller (FOR UPDATE) để ghi số dư an toàn
+    wallet = (
+        db.query(SellerWallet)
+        .filter(SellerWallet.seller_id == locked_order.seller_id)
+        .with_for_update()
+        .first()
+    )
+    if not wallet:
+        wallet = SellerWallet(
+            seller_id=locked_order.seller_id,
+            pending_balance=Decimal("0"),
+            available_balance=Decimal("0"),
+            reserve_balance=Decimal("0"),
+            total_withdrawn=Decimal("0"),
+        )
+        db.add(wallet)
+        db.flush()
+
     wallet.available_balance = Decimal(str(wallet.available_balance or 0)) + available_credit
     wallet.reserve_balance   = Decimal(str(wallet.reserve_balance   or 0)) + reserve_credit
 
-    # Đánh dấu đã credited + lưu thời điểm giải phóng reserve
+    # Lưu thời điểm giải phóng reserve
+    if hasattr(locked_order, "reserve_release_at"):
+        locked_order.reserve_release_at = datetime.utcnow() + timedelta(days=RESERVE_HOLD_DAYS)
+
+    # Đồng bộ lại object order được truyền vào (tránh stale data)
     order.wallet_credited = True
-    if hasattr(order, "reserve_release_at"):
-        released_at = datetime.utcnow() + timedelta(days=RESERVE_HOLD_DAYS)
-        order.reserve_release_at = released_at
 
     logger.info(
         "[Wallet] Order #%s → available +%s | reserve +%s (seller #%s)",

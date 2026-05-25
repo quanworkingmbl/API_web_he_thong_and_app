@@ -19,7 +19,10 @@ from app.services.notification import (
     notify_product_rejected_to_seller,
 )
 
+import logging
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # CONSTANTS
@@ -363,8 +366,8 @@ async def create_product(
                 seller_name=seller_name,
             )
             db.commit()
-    except Exception:
-        pass  # Không để lỗi notification chặn flow chính
+    except Exception as _e:
+        logger.warning("[Product] Không gửi được notification sản phẩm chờ duyệt cho admin: %s", _e)
 
     return _build_product_response(p, db)
 
@@ -595,8 +598,8 @@ async def approve_product(
                 notes=approval_data.notes,
             )
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Product] Không gửi được notification duyệt/từ chối sản phẩm cho seller: %s", _e)
 
     return {"success": True, "message": f"Product {approval_data.status.lower()} successfully"}
 

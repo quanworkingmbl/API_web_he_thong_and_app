@@ -36,7 +36,10 @@ from app.services.notification import (
     notify_complaint_resolved_to_buyer,
 )
 
+import logging
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
@@ -426,8 +429,8 @@ async def create_complaint(
                 )
 
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Complaint] Không gửi được notification khiuếu nại mới: %s", _e)
 
     return {
         "success": True,
@@ -544,8 +547,8 @@ async def add_comment(
                     role=role,
                 )
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Complaint] Không gửi được notification comment khiuếu nại: %s", _e)
 
     return {
         "success": True,
@@ -639,8 +642,8 @@ async def update_complaint_status(
                 resolution=status_data.resolution,
             )
             db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Complaint] Không gửi được notification resolved cho buyer: %s", _e)
 
     response = {
         "success": True,
@@ -704,8 +707,8 @@ async def assign_complaint(
             assigned_by_name=current_user.name or "Admin",
         )
         db.commit()
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[Complaint] Không gửi được notification assign cho CS: %s", _e)
 
     return {
         "success": True,
