@@ -37,14 +37,13 @@ COPY . .
 # Cloud Run yêu cầu lắng nghe trên cổng $PORT (mặc định 8080)
 ENV PORT=8080
 
-# Tạo user không phải root + cấp quyền execute cho entrypoint
+# Tạo user không phải root + cấp quyền
 RUN adduser --disabled-password --gecos "" appuser && \
-    chmod +x /app/entrypoint.sh && \
     chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
 EXPOSE 8080
 
-# Dùng entrypoint.sh để start (alembic đã chạy trong Cloud Build Step 3)
-CMD ["/app/entrypoint.sh"]
+# Chạy Gunicorn trực tiếp (tránh vấn đề CRLF/BOM của shell script trên Windows)
+CMD ["sh", "-c", "exec gunicorn app.main:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --keepalive 5 --access-logfile - --error-logfile -"]
