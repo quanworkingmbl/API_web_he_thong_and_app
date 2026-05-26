@@ -14,7 +14,7 @@ Cách tích hợp: gọi start_scheduler() trong lifespan của FastAPI (app/mai
 """
 
 import logging
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.core.database import SessionLocal
@@ -24,7 +24,7 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 # Singleton scheduler instance
-_scheduler: AsyncIOScheduler | None = None
+_scheduler: BackgroundScheduler | None = None
 
 
 # ==============================================================================
@@ -91,9 +91,10 @@ def _release_reserves_all_sellers() -> None:
 # SCHEDULER LIFECYCLE
 # ==============================================================================
 
-def start_scheduler() -> AsyncIOScheduler:
+def start_scheduler() -> BackgroundScheduler:
     """
     Khởi động scheduler và đăng ký tất cả cron jobs.
+    Dùng BackgroundScheduler (thread-based) — tương thích Gunicorn UvicornWorker.
     Gọi trong FastAPI lifespan startup.
     """
     global _scheduler
@@ -101,7 +102,7 @@ def start_scheduler() -> AsyncIOScheduler:
         logger.warning("[Scheduler] Scheduler đã chạy, bỏ qua start.")
         return _scheduler
 
-    _scheduler = AsyncIOScheduler(timezone="Asia/Ho_Chi_Minh")
+    _scheduler = BackgroundScheduler(timezone="Asia/Ho_Chi_Minh")
 
     # ── Job 1: Release reserve mỗi ngày 2:00 SA (giờ VN) ──────────────────
     _scheduler.add_job(

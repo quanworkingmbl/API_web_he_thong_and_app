@@ -7,8 +7,10 @@ set -e
 echo "=== Starting Gunicorn ==="
 exec gunicorn app.main:app \
     --bind 0.0.0.0:$PORT \
-    --workers 2 \
+    --workers 1 \
     --worker-class uvicorn.workers.UvicornWorker \
     --timeout 120 \
+    --graceful-timeout 30 \
+    --keepalive 5 \
     --access-logfile - \
     --error-logfile -
