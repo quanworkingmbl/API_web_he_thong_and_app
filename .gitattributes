@@ -1,0 +1,16 @@
+# Normalize line endings
+* text=auto
+
+# Shell scripts MUST be LF (bash on Linux fails with CRLF)
+*.sh text eol=lf
+
+# Python files: LF
+*.py text eol=lf
+
+# Docker files: LF
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# YAML: LF
+*.yaml text eol=lf
+*.yml text eol=lf

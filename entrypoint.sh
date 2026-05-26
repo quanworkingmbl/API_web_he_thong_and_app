@@ -1,8 +1,8 @@
-#!/bin/bash
+﻿#!/bin/bash
 set -e
 
-# NOTE: alembic upgrade head đã được chạy trong Cloud Build Step 3.
-# KHÔNG chạy lại ở đây để tránh lỗi kết nối DB khi container cold start.
+# NOTE: alembic upgrade head Ä‘Ã£ Ä‘Æ°á»£c cháº¡y trong Cloud Build Step 3.
+# KHÃ”NG cháº¡y láº¡i á»Ÿ Ä‘Ã¢y Ä‘á»ƒ trÃ¡nh lá»—i káº¿t ná»‘i DB khi container cold start.
 
 echo "=== Starting Gunicorn ==="
 exec gunicorn app.main:app \
