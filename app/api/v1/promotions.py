@@ -3,13 +3,19 @@ Promotions API – Quản lý mã khuyến mãi / Coupon
 
 Admin:
 - GET    /promotions              – Xem danh sách
-- POST   /promotions              – Tạo mã khuyến mãi
+- POST   /promotions              – Tạo mã khuyến mãi (mặc định ACTIVE)
 - GET    /promotions/{id}         – Xem chi tiết
 - PUT    /promotions/{id}         – Cập nhật
 - DELETE /promotions/{id}         – Xóa
+- POST   /promotions/{id}/approve – Admin duyệt mã (PENDING → ACTIVE)
+- POST   /promotions/{id}/reject  – Admin từ chối mã (PENDING → INACTIVE)
+
+Seller:
+- Tạo mã → mặc định PENDING, chờ Admin duyệt
 
 Public/Consumer:
-- GET    /promotions/public       – Xem mã KM công khai (is_public=True, ACTIVE)
+- GET    /promotions/public        – Xem mã KM công khai (ACTIVE)
+- GET    /promotions/flash-sales   – Xem Flash Sale đang diễn ra
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -46,8 +52,8 @@ class PromotionResponse(BaseModel):
     usage_limit_per_user: Optional[int]
     applicable_to: str
     seller_id: Optional[int]
-    seller_name: Optional[str] = None        # Tên hiển thị của seller
-    creator_username: Optional[str] = None   # Tên đăng nhập (email/username) của người tạo
+    seller_name: Optional[str] = None
+    creator_username: Optional[str] = None
     applicable_product_ids: List[int]
     applicable_category_ids: List[int]
     used_count: int
@@ -55,6 +61,11 @@ class PromotionResponse(BaseModel):
     end_date: datetime
     status: str
     is_public: bool
+    is_flash_sale: bool = False
+    # Approval info
+    approved_by: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
     created_by: Optional[int]
     created_at: datetime
     updated_at: Optional[datetime]
@@ -83,10 +94,11 @@ class CreatePromotionRequest(BaseModel):
     seller_id: Optional[int] = None
     applicable_product_ids: Optional[List[int]] = None
     applicable_category_ids: Optional[List[int]] = None
-    status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|EXPIRED)$")
+    status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|EXPIRED|PENDING)$")
     start_date: datetime
     end_date: datetime
     is_public: bool = True
+    is_flash_sale: bool = False
 
 
 class UpdatePromotionRequest(BaseModel):
@@ -104,8 +116,13 @@ class UpdatePromotionRequest(BaseModel):
     applicable_category_ids: Optional[List[int]] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|EXPIRED)$")
+    status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|EXPIRED|PENDING)$")
     is_public: Optional[bool] = None
+    is_flash_sale: Optional[bool] = None
+
+
+class RejectPromotionRequest(BaseModel):
+    reason: str = Field(..., min_length=5, max_length=500)
 
 
 def _parse_json_id_list(raw: Optional[str]) -> List[int]:
@@ -182,14 +199,12 @@ def _validate_scope_payload(
 
 
 def _build_promotion_response(p: Promotion, db: Session) -> dict:
-    # Lấy thông tin seller
     seller_name: Optional[str] = None
     if p.seller_id:
         seller = db.query(User).filter(User.id == p.seller_id).first()
         if seller:
             seller_name = seller.name or seller.email
 
-    # Lấy username người tạo
     creator_username: Optional[str] = None
     if p.created_by:
         creator = db.query(User).filter(User.id == p.created_by).first()
@@ -218,6 +233,10 @@ def _build_promotion_response(p: Promotion, db: Session) -> dict:
         end_date=p.end_date,
         status=p.status.value if hasattr(p.status, 'value') else str(p.status),
         is_public=p.is_public,
+        is_flash_sale=bool(p.is_flash_sale),
+        approved_by=p.approved_by,
+        approved_at=p.approved_at,
+        rejection_reason=p.rejection_reason,
         created_by=p.created_by,
         created_at=p.created_at,
         updated_at=p.updated_at,
@@ -225,7 +244,7 @@ def _build_promotion_response(p: Promotion, db: Session) -> dict:
 
 
 # ==============================================================================
-# ADMIN ENDPOINTS
+# ADMIN / SELLER ENDPOINTS
 # ==============================================================================
 
 @router.get("", response_model=PaginatedPromotionResponse)
@@ -244,7 +263,6 @@ async def get_promotions(
 
     query = db.query(Promotion)
 
-    # Seller chỉ thấy mã của mình
     if not is_admin:
         query = query.filter(
             or_(
@@ -253,7 +271,6 @@ async def get_promotions(
             )
         )
     else:
-        # Admin có thể lọc theo seller_id cụ thể
         if seller_id is not None:
             query = query.filter(
                 or_(
@@ -317,12 +334,51 @@ async def get_public_promotions(
                 "discount_value": str(p.discount_value),
                 "min_order_amount": str(p.min_order_amount),
                 "max_discount_amount": str(p.max_discount_amount) if p.max_discount_amount else None,
+                "is_flash_sale": bool(p.is_flash_sale),
                 "start_date": p.start_date.isoformat(),
                 "end_date": p.end_date.isoformat(),
+                # Countdown: số giây còn lại đến khi kết thúc
+                "ends_in_seconds": max(0, int((p.end_date.replace(tzinfo=None) - now).total_seconds())),
             }
             for p in items
         ],
         "meta": {"total": total, "page": page, "limit": limit}
+    }
+
+
+@router.get("/flash-sales")
+async def get_flash_sales(
+    db: Session = Depends(get_db)
+):
+    """[Public] Lấy danh sách Flash Sale đang diễn ra (để hiển thị countdown trong App)"""
+    now = datetime.utcnow()
+    items = db.query(Promotion).filter(
+        Promotion.is_flash_sale == True,
+        Promotion.is_public == True,
+        Promotion.status == PromotionStatus.ACTIVE,
+        Promotion.start_date <= now,
+        Promotion.end_date >= now,
+    ).order_by(Promotion.end_date.asc()).limit(20).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": p.id,
+                "code": p.code,
+                "name": p.name,
+                "promotion_type": p.promotion_type.value if hasattr(p.promotion_type, 'value') else str(p.promotion_type),
+                "discount_value": str(p.discount_value),
+                "max_discount_amount": str(p.max_discount_amount) if p.max_discount_amount else None,
+                "applicable_to": p.applicable_to or "ALL",
+                "seller_id": p.seller_id,
+                "start_date": p.start_date.isoformat(),
+                "end_date": p.end_date.isoformat(),
+                # Countdown quan trọng nhất
+                "ends_in_seconds": max(0, int((p.end_date.replace(tzinfo=None) - now).total_seconds())),
+            }
+            for p in items
+        ]
     }
 
 
@@ -352,7 +408,11 @@ async def create_promotion(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Admin hoặc seller tạo mã khuyến mãi."""
+    """
+    Admin hoặc seller tạo mã khuyến mãi.
+    - Admin: mặc định ACTIVE (không cần tự duyệt).
+    - Seller: mặc định PENDING, cần Admin duyệt trước khi dùng.
+    """
     _ensure_manage_permission(current_user)
     is_admin = _is_admin_user(current_user)
 
@@ -381,7 +441,15 @@ async def create_promotion(
         category_ids=category_ids,
     )
 
-    status_value = (promo_data.status or "ACTIVE").upper()
+    # Admin tạo → ACTIVE ngay; Seller tạo → PENDING chờ duyệt
+    if promo_data.status:
+        if is_admin:
+            status_value = promo_data.status.upper()
+        else:
+            # Seller không được tự set ACTIVE
+            status_value = "PENDING"
+    else:
+        status_value = "ACTIVE" if is_admin else "PENDING"
 
     new_promo = Promotion(
         code=promo_data.code.upper(),
@@ -401,6 +469,7 @@ async def create_promotion(
         end_date=promo_data.end_date,
         status=PromotionStatus(status_value),
         is_public=promo_data.is_public,
+        is_flash_sale=promo_data.is_flash_sale,
         created_by=current_user.id,
     )
     db.add(new_promo)
@@ -410,6 +479,73 @@ async def create_promotion(
     return _build_promotion_response(new_promo, db)
 
 
+@router.post("/{promotion_id}/approve", response_model=PromotionResponse)
+async def approve_promotion(
+    promotion_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    [Admin only] Duyệt mã khuyến mãi PENDING → ACTIVE.
+    Sau khi duyệt, mã sẽ hoạt động theo start_date/end_date.
+    """
+    if not _is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Chỉ Admin mới có thể duyệt mã khuyến mãi")
+
+    promo = db.query(Promotion).filter(Promotion.id == promotion_id).first()
+    if not promo:
+        raise HTTPException(status_code=404, detail="Mã khuyến mãi không tồn tại")
+
+    if promo.status != PromotionStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ duyệt được mã đang PENDING. Trạng thái hiện tại: {promo.status.value}"
+        )
+
+    promo.status = PromotionStatus.ACTIVE
+    promo.approved_by = current_user.id
+    promo.approved_at = datetime.utcnow()
+    promo.rejection_reason = None  # Xóa lý do từ chối cũ nếu có
+    db.commit()
+    db.refresh(promo)
+
+    return _build_promotion_response(promo, db)
+
+
+@router.post("/{promotion_id}/reject", response_model=PromotionResponse)
+async def reject_promotion(
+    promotion_id: int,
+    body: RejectPromotionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    [Admin only] Từ chối mã khuyến mãi PENDING → INACTIVE.
+    Seller sẽ thấy lý do từ chối và có thể chỉnh sửa rồi gửi lại.
+    """
+    if not _is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Chỉ Admin mới có thể từ chối mã khuyến mãi")
+
+    promo = db.query(Promotion).filter(Promotion.id == promotion_id).first()
+    if not promo:
+        raise HTTPException(status_code=404, detail="Mã khuyến mãi không tồn tại")
+
+    if promo.status != PromotionStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ từ chối được mã đang PENDING. Trạng thái hiện tại: {promo.status.value}"
+        )
+
+    promo.status = PromotionStatus.INACTIVE
+    promo.rejection_reason = body.reason
+    promo.approved_by = None
+    promo.approved_at = None
+    db.commit()
+    db.refresh(promo)
+
+    return _build_promotion_response(promo, db)
+
+
 @router.put("/{promotion_id}", response_model=PromotionResponse)
 async def update_promotion(
     promotion_id: int,
@@ -417,7 +553,10 @@ async def update_promotion(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Admin hoặc seller cập nhật mã khuyến mãi thuộc quyền của mình."""
+    """
+    Admin hoặc seller cập nhật mã khuyến mãi.
+    Nếu Seller sửa mã đã bị từ chối (INACTIVE) → tự động reset về PENDING để Admin duyệt lại.
+    """
     _ensure_manage_permission(current_user)
     is_admin = _is_admin_user(current_user)
 
@@ -440,6 +579,12 @@ async def update_promotion(
         update_data.pop("seller_id", None)
         if update_data.get("applicable_to") == "ALL":
             update_data["applicable_to"] = "SELLER"
+        # Seller không được tự set ACTIVE
+        if update_data.get("status") == "ACTIVE":
+            update_data["status"] = "PENDING"
+        # Nếu Seller sửa mã INACTIVE (bị từ chối) → reset về PENDING để duyệt lại
+        if promo.status == PromotionStatus.INACTIVE and "status" not in update_data:
+            update_data["status"] = "PENDING"
 
     new_scope = (update_data.get("applicable_to") or promo.applicable_to or "ALL").upper()
     new_seller_id = update_data.get("seller_id", promo.seller_id)
@@ -476,7 +621,15 @@ async def update_promotion(
     for key, value in update_data.items():
         if key in {"applicable_product_ids", "applicable_category_ids", "applicable_to", "seller_id"}:
             continue
-        setattr(promo, key, value)
+        if key == "status":
+            setattr(promo, key, PromotionStatus(value.upper()))
+            # Nếu reset về PENDING → xóa approval info
+            if value.upper() == "PENDING":
+                promo.approved_by = None
+                promo.approved_at = None
+                promo.rejection_reason = None
+        else:
+            setattr(promo, key, value)
 
     promo.applicable_to = new_scope
     promo.seller_id = new_seller_id
