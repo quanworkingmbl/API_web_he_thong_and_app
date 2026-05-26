@@ -46,4 +46,4 @@ USER appuser
 EXPOSE 8080
 
 # Chạy Gunicorn trực tiếp (tránh vấn đề CRLF/BOM của shell script trên Windows)
-CMD ["sh", "-c", "exec gunicorn app.main:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --keepalive 5 --access-logfile - --error-logfile -"]
+CMD ["sh", "-c", "exec gunicorn app.main:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --keep-alive 5 --access-logfile - --error-logfile -"]
