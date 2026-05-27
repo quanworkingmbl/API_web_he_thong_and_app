@@ -81,6 +81,18 @@ class Settings(BaseSettings):
     RECAPTCHA_BYPASS_SECRET_KEY: str = ""
     RECAPTCHA_BYPASS_CLIENTS: str = "mobile,postman"
 
+    # --- Email OTP (Resend - resend.com) ---
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "onboarding@resend.dev"   # Đổi thành domain thật khi production
+    EMAIL_FROM_NAME: str = "MBL CMS"
+
+    # --- Redis / Upstash (OTP Cache) ---
+    REDIS_URL: str = "redis://localhost:6379/0"  # Upstash: rediss://default:TOKEN@host:6379
+
+    # --- OTP Settings ---
+    OTP_EXPIRE_SECONDS: int = 300   # 5 phút
+    OTP_MAX_ATTEMPTS: int = 3       # Số lần nhập sai tối đa
+
     
     @field_validator('DEBUG', 'SHOW_DOCS', 'RECAPTCHA_ENABLED', 'RECAPTCHA_BYPASS_ENABLED', mode='before')
     @classmethod

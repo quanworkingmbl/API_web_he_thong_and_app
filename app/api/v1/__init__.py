@@ -28,6 +28,7 @@ from app.api.v1 import (
     ai,
     settings,
     notifications,
+    otp,
 )
 
 api_router = APIRouter()
@@ -87,3 +88,6 @@ api_router.include_router(settings.router, prefix="/admin/settings", tags=["⚙�
 
 # Notifications
 api_router.include_router(notifications.router, prefix="/notifications", tags=["🔔 Notifications"])
+
+# OTP Email Verification
+api_router.include_router(otp.router, prefix="/v1", tags=["📧 OTP Verification"])
