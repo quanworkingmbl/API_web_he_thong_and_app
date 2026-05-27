@@ -27,6 +27,7 @@ from decimal import Decimal
 import json
 from app.core.database import get_db
 from app.models.promotion import Promotion, PromotionType, PromotionStatus
+from app.models.promotion_usage import PromotionUsage, OrderPromotion
 from app.models.product import Product
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
@@ -666,6 +667,10 @@ async def delete_promotion(
     promo = promo_query.first()
     if not promo:
         raise HTTPException(status_code=404, detail="Mã khuyến mãi không tồn tại")
+
+    # Xóa các bản ghi liên quan trước (tránh ForeignKeyViolation)
+    db.query(PromotionUsage).filter(PromotionUsage.promotion_id == promotion_id).delete(synchronize_session=False)
+    db.query(OrderPromotion).filter(OrderPromotion.promotion_id == promotion_id).delete(synchronize_session=False)
 
     db.delete(promo)
     db.commit()
