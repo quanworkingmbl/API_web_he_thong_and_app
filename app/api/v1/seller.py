@@ -37,7 +37,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import secrets
 from app.core.database import get_db
 from app.models.order import Order, OrderItem, OrderStatus, PaymentMethod
-from app.models.product import Product, ProductStatus
+from app.models.product import Product, ProductStatus, ProductPriceLog
 from app.models.traceability import ProductOrigin, OriginStatus
 from app.models.content import Content, ContentStatus
 from app.models.partner_contract import PartnerContract, ContractStatus
@@ -1051,6 +1051,14 @@ async def update_seller_product(
     # Các field nội dung khi thay đổi cần duyệt lại
     content_fields = {"name", "description", "price", "images", "videos", "label"}
     needs_reapproval = bool(content_fields & update_data.keys())
+
+    # Ghi lịch sử thay đổi TRƯỚC khi setattr (cần giá trị cũ còn trong product)
+    from app.api.v1.products import log_product_changes, log_price_change
+    log_product_changes(db, product, update_data, current_user.id, change_type="UPDATE")
+    # Backward-compatible: giữ ghi vào bảng product_price_logs nếu giá thay đổi
+    new_price = update_data.get("price")
+    if new_price is not None and new_price != product.price:
+        log_price_change(db, product.id, product.price, new_price, current_user.id)
 
     for key, value in update_data.items():
         setattr(product, key, value)

@@ -5,6 +5,7 @@ from typing import Optional, List
 from datetime import datetime
 from app.core.database import get_db
 from app.models.product import Product, ProductApproval, ProductStatus, ProductLabel, ProductPriceLog
+from app.models.product_change_log import ProductChangeLog
 from app.models.category import Category
 from app.models.complaint import Review
 from app.api.v1.auth import get_current_user, get_current_user_optional
@@ -173,6 +174,76 @@ def log_price_change(db, product_id, old_price, new_price, changed_by, reason=No
         product_id=product_id, old_price=old_price,
         new_price=new_price, changed_by=changed_by, reason=reason,
     ))
+
+
+# Các field được theo dõi lịch sử thay đổi và nhãn tiếng Việt hiển thị
+_TRACKED_FIELDS: dict = {
+    "price":          "Giá sản phẩm",
+    "name":           "Tên sản phẩm",
+    "description":    "Mô tả sản phẩm",
+    "stock_quantity": "Tồn kho",
+    "is_active":      "Hiển thị",
+    "status":         "Trạng thái duyệt",
+    "images":         "Ảnh sản phẩm",
+    "videos":         "Video sản phẩm",
+    "category_id":    "Danh mục",
+    "unit":           "Đơn vị",
+    "weight":         "Cân nặng (g)",
+    "packaging_type": "Kiểu đóng gói",
+    "label":          "Nhãn sản phẩm",
+    "vat_rate":        "VAT (%)",
+}
+
+
+def _serialize_value(field: str, value) -> str:
+    """Chuyển giá trị thành chuỗi để lưu vào change log."""
+    if value is None:
+        return ""
+    if field in ("price", "vat_rate") and hasattr(value, "__float__"):
+        return str(float(value))
+    if field == "is_active":
+        return "Đang bán" if value else "Tạm ẩn"
+    if field == "status" and hasattr(value, "value"):
+        return value.value
+    if field in ("images", "videos", "description"):
+        # Không lưu toàn bộ nội dung dài – chỉ đánh dấu đã thay đổi
+        if value:
+            return "[Đã cập nhật]"
+        return ""
+    return str(value)
+
+
+def log_product_changes(
+    db,
+    product,
+    update_data: dict,
+    changed_by: int,
+    change_type: str = "UPDATE",
+    reason: str = None,
+) -> None:
+    """
+    So sánh update_data với giá trị hiện tại của product, tạo ProductChangeLog
+    cho mỗi field thực sự thay đổi. Gọi TRƯỚC khi setattr vào product.
+    """
+    for field, label in _TRACKED_FIELDS.items():
+        if field not in update_data:
+            continue
+        new_val = update_data[field]
+        old_val = getattr(product, field, None)
+        # Chuẩn hoá để so sánh
+        old_str = _serialize_value(field, old_val)
+        new_str = _serialize_value(field, new_val)
+        if old_str == new_str:
+            continue  # Không thay đổi – bỏ qua
+        db.add(ProductChangeLog(
+            product_id=product.id,
+            changed_by=changed_by,
+            change_type=change_type,
+            field_name=label,
+            old_value=old_str or None,
+            new_value=new_str or None,
+            reason=reason,
+        ))
 
 
 def _build_product_response(p, db):
@@ -401,6 +472,8 @@ async def update_product(
         raise HTTPException(status_code=400, detail="; ".join(errs))
     if "price" in update_data and update_data["price"] != product.price:
         log_price_change(db, product.id, product.price, update_data["price"], current_user.id)
+    # Ghi lịch sử thay đổi cho tất cả các field (gọi TRƯỚC khi cập nhật)
+    log_product_changes(db, product, update_data, current_user.id, change_type="UPDATE")
     for k, v in update_data.items():
         setattr(product, k, v)
     db.commit()
@@ -726,5 +799,83 @@ async def get_product_reviews_cms(
             "page": page,
             "limit": limit,
             "total_pages": (total_filtered + limit - 1) // limit if total_filtered > 0 else 1,
+        },
+    }
+
+
+# ==============================================================================
+# CHANGE LOGS – Lịch sử thay đổi sản phẩm (Admin + Seller)
+# ==============================================================================
+
+@router.get("/{product_id}/change-logs", summary="Lịch sử thay đổi sản phẩm")
+async def get_product_change_logs(
+    product_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Trả về lịch sử thay đổi của sản phẩm.
+    - Admin/content_manager: xem mọi sản phẩm.
+    - Seller/producer: chỉ xem sản phẩm của mình.
+    """
+    is_admin = current_user.type in ("admin", "content_manager")
+    is_seller = current_user.type in ("seller", "producer")
+
+    if not is_admin and not is_seller:
+        raise HTTPException(status_code=403, detail="Không có quyền truy cập")
+
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
+
+    # Seller chỉ xem sản phẩm của mình
+    if is_seller and not is_admin:
+        if product.seller_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Không có quyền xem lịch sử sản phẩm này")
+
+    total = db.query(ProductChangeLog).filter(
+        ProductChangeLog.product_id == product_id
+    ).count()
+
+    skip = (page - 1) * limit
+    logs = (
+        db.query(ProductChangeLog)
+        .filter(ProductChangeLog.product_id == product_id)
+        .order_by(ProductChangeLog.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    log_list = []
+    for log in logs:
+        changer = db.query(User).filter(User.id == log.changed_by).first()
+        log_list.append({
+            "id": log.id,
+            "change_type": log.change_type,
+            "field_name": log.field_name,
+            "old_value": log.old_value,
+            "new_value": log.new_value,
+            "reason": log.reason,
+            "changed_by_id": log.changed_by,
+            "changed_by_name": changer.name if changer else "—",
+            "changed_by_type": changer.type if changer else "—",
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "product_id": product_id,
+            "product_name": product.name,
+            "logs": log_list,
+        },
+        "meta": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 1,
         },
     }

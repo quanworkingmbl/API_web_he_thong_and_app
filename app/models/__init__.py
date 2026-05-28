@@ -4,6 +4,7 @@ from app.models.role import Role
 from app.models.organization import Organization
 from app.models.media import Media
 from app.models.product import Product, ProductApproval
+from app.models.product_change_log import ProductChangeLog
 from app.models.payment import Payment, PaymentTransaction, PaymentAuditLog, PaymentStatus, PaymentCycle
 from app.models.content import Content
 from app.models.complaint import (
@@ -50,6 +51,7 @@ __all__ = [
     "Media",
     "Product",
     "ProductApproval",
+    "ProductChangeLog",
     "Payment",
     "PaymentTransaction",
     "PaymentAuditLog",
