@@ -567,6 +567,15 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
     items_data = []
     subtotal = Decimal("0")
 
+    # Lấy tất cả promotions đang active (flash sale + thường) để tránh query N+1
+    from datetime import datetime, timezone as dt_timezone
+    now_utc = datetime.now(dt_timezone.utc)
+    active_promos = db.query(Promotion).filter(
+        Promotion.status == "ACTIVE",
+        Promotion.start_date <= now_utc,
+        Promotion.end_date >= now_utc,
+    ).all()
+
     # Sắp xếp theo item.id để đảm bảo thứ tự ổn định, không đổi vị trí sau mỗi update
     for item in sorted(cart.items, key=lambda x: x.id):
         product = db.query(Product).filter(Product.id == item.product_id).first()
@@ -580,6 +589,24 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
         line_subtotal = item.unit_price * item.quantity
         subtotal += line_subtotal
 
+        # ── Xác định Flash Sale áp dụng cho sản phẩm này ─────────────────────
+        flash_promo = None
+        for promo in active_promos:
+            if promo.is_flash_sale and _promotion_matches_product_scope(promo, product):
+                flash_promo = promo
+                break
+
+        is_flash_sale = flash_promo is not None
+        flash_sale_code = flash_promo.code if flash_promo else None
+        flash_sale_ends_in_seconds: Optional[int] = None
+        if flash_promo and flash_promo.end_date:
+            end_aware = flash_promo.end_date
+            if end_aware.tzinfo is None:
+                from datetime import timezone as tz
+                end_aware = end_aware.replace(tzinfo=tz.utc)
+            delta = end_aware - now_utc
+            flash_sale_ends_in_seconds = max(0, int(delta.total_seconds()))
+
         items_data.append(
             {
                 "id": item.id,
@@ -592,10 +619,15 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
                 "unit_label": product.unit if hasattr(product, "unit") and product.unit else "1 sản phẩm",
                 "location_label": category.name if category else "Nông trại Việt",
                 "unit_price": str(item.unit_price),
+                "original_price": str(product.price),  # Giá gốc trước khuyến mãi
                 "quantity": item.quantity,
                 "subtotal": str(line_subtotal),
                 "stock_quantity": stock_quantity,
                 "is_active": bool(product.is_active),
+                # ── Flash Sale fields ──────────────────────────────────────────
+                "is_flash_sale": is_flash_sale,
+                "flash_sale_code": flash_sale_code,
+                "flash_sale_ends_in_seconds": flash_sale_ends_in_seconds,
             }
         )
 
@@ -612,6 +644,7 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
         "total_amount": str(total_amount),
         "updated_at": cart.updated_at.isoformat() if cart.updated_at else None,
     }
+
 
 
 def _order_status_label(status: str) -> str:
@@ -2246,6 +2279,9 @@ async def get_my_order_detail(
             "order_number": order.order_number,
             "seller_id": order.seller_id,
             "seller_name": seller.name if seller else None,
+            # ✅ Thêm customer_name và customer_phone để app hiển thị đúng
+            "customer_name": order.customer_name,
+            "customer_phone": order.customer_phone,
             "subtotal": str(order.subtotal),
             "shipping_fee": str(order.shipping_fee),
             "discount_amount": str(order.discount_amount),

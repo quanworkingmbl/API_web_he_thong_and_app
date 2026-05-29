@@ -4,18 +4,43 @@ from sqlalchemy import or_
 from typing import Optional, List
 from app.core.database import get_db
 from app.models.user import User, UserStatus
+from app.models.seller_profile import SellerProfile
 from app.api.v1.auth import get_current_user
 from app.core.permissions import check_user_manage_access
 from pydantic import BaseModel, EmailStr, Field
-from datetime import datetime
+from datetime import datetime, date
 
 router = APIRouter()
+
+class SellerProfileResponse(BaseModel):
+    id: int
+    business_name: Optional[str] = None
+    business_type: Optional[str] = None
+    description: Optional[str] = None
+    address: Optional[str] = None
+    shop_phone: Optional[str] = None
+    shop_email: Optional[str] = None
+    id_card_number: Optional[str] = None
+    tax_id: Optional[str] = None
+    business_registration_number: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    verification_status: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 class UserResponse(BaseModel):
     id: int
     email: str
     name: str
     gender: Optional[str]
+    date_of_birth: Optional[date] = None
+    avatar_url: Optional[str] = None
     activated: int
     status: str
     status_reason: Optional[str]
@@ -27,6 +52,7 @@ class UserResponse(BaseModel):
     deleted_by: Optional[str]
     deleted_at: Optional[datetime]
     type: Optional[str]
+    seller_profile: Optional[SellerProfileResponse] = None
 
     class Config:
         from_attributes = True
@@ -160,13 +186,13 @@ async def update_user(
 # NEW ENDPOINTS
 # ==============================================================================
 
-@router.get("/{user_id}", response_model=UserResponse)
+@router.get("/{user_id}")
 async def get_user_by_id(
     user_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get user by ID"""
+    """Get user by ID with seller profile if applicable"""
     check_user_manage_access(current_user)
 
     user = db.query(User).filter(
@@ -177,7 +203,54 @@ async def get_user_by_id(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    return UserResponse.from_orm(user)
+    # Load seller profile nếu user là seller
+    seller_profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == user_id
+    ).first()
+    
+    user_dict = {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "gender": user.gender,
+        "date_of_birth": user.date_of_birth,
+        "avatar_url": user.avatar_url,
+        "activated": user.activated,
+        "status": user.status.value if hasattr(user.status, 'value') else str(user.status),
+        "status_reason": user.status_reason,
+        "status_expire_at": user.status_expire_at,
+        "created_by": user.created_by,
+        "updated_by": user.updated_by,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+        "deleted_by": user.deleted_by,
+        "deleted_at": user.deleted_at,
+        "type": user.type,
+        "seller_profile": None,
+    }
+    
+    if seller_profile:
+        user_dict["seller_profile"] = {
+            "id": seller_profile.id,
+            "business_name": seller_profile.business_name,
+            "business_type": seller_profile.business_type.value if hasattr(seller_profile.business_type, 'value') else str(seller_profile.business_type) if seller_profile.business_type else None,
+            "description": seller_profile.description,
+            "address": seller_profile.address,
+            "shop_phone": seller_profile.shop_phone,
+            "shop_email": seller_profile.shop_email,
+            "id_card_number": seller_profile.id_card_number,
+            "tax_id": seller_profile.tax_id,
+            "business_registration_number": seller_profile.business_registration_number,
+            "bank_name": seller_profile.bank_name,
+            "bank_account_number": seller_profile.bank_account_number,
+            "bank_account_name": seller_profile.bank_account_name,
+            "verification_status": seller_profile.verification_status.value if hasattr(seller_profile.verification_status, 'value') else str(seller_profile.verification_status) if seller_profile.verification_status else None,
+            "verified_at": seller_profile.verified_at,
+            "rejection_reason": seller_profile.rejection_reason,
+            "created_at": seller_profile.created_at,
+        }
+    
+    return {"success": True, "data": user_dict}
 
 
 @router.delete("/{user_id}")
