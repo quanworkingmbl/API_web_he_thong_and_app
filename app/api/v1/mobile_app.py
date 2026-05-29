@@ -628,6 +628,8 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
                 "is_flash_sale": is_flash_sale,
                 "flash_sale_code": flash_sale_code,
                 "flash_sale_ends_in_seconds": flash_sale_ends_in_seconds,
+                # ── Category (dùng validate coupon scope CATEGORY) ─────────────
+                "category_id": product.category_id,
             }
         )
 
