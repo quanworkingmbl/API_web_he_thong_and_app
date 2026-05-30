@@ -76,7 +76,9 @@ class VNPayService:
             query_string.encode("utf-8"),
             hashlib.sha512
         ).hexdigest()
-        logger.debug("[VNPAY] hash_input=%s | hash=%s", query_string[:120] + "...", hash_value[:16] + "...")
+        # LOG INFO để thấy trong Cloud Run (thay vì debug)
+        logger.info("[VNPAY] hash_input_full=%s", query_string)
+        logger.info("[VNPAY] hash_value=%s", hash_value)
         return hash_value
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -147,12 +149,14 @@ class VNPayService:
         # Tạo secure hash và gắn vào params
         params["vnp_SecureHash"] = self._build_secure_hash(params)
 
-        query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+        # FIX: Dùng cùng quote_plus để URL nhất quán với hash
+        # VNPay server sẽ decode URL → re-encode bằng PHP urlencode (=quote_plus) → so khớp hash
+        query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote_plus)
         payment_url  = f"{self.payment_url}?{query_string}"
 
         logger.info(
-            "[VNPAY] create_payment_url | order_id=%s | txn_ref=%s | amount=%s VND | expire=%s",
-            order_id, txn_ref, amount, expire_date
+            "[VNPAY] payment_url=%s",
+            payment_url
         )
         return payment_url
 
