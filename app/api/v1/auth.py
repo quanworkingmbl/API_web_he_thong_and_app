@@ -23,10 +23,12 @@ from app.models.refresh_token import RefreshToken
 from app.models.seller_profile import SellerProfile
 from app.models.role import Role
 from pydantic import BaseModel, EmailStr, Field
+from app.services.email_otp import send_otp, verify_otp, _get_redis
 import httpx
 import re
 import logging
 import secrets
+import json
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -1162,3 +1164,100 @@ async def update_profile(
         data=_build_user_info_payload(current_user, db, roles_data)
     )
 
+
+
+# ==============================================================================
+# FORGOT PASSWORD — Luồng 3 bước qua OTP + reset_token
+# ==============================================================================
+
+_OTP_RATE_LIMIT = 3
+_OTP_RATE_WINDOW = 3600
+_RESET_TOKEN_TTL = 600
+
+
+def _fp_rate_key(email: str) -> str:
+    return f"fp_rate:{email.strip().lower()}"
+
+
+def _fp_token_key(email: str) -> str:
+    return f"fp_token:{email.strip().lower()}"
+
+
+def _check_and_increment_rate_limit(email: str) -> None:
+    r = _get_redis()
+    key = _fp_rate_key(email)
+    current = r.get(key)
+    count = int(current) if current else 0
+    if count >= _OTP_RATE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Da gui qua {_OTP_RATE_LIMIT} lan trong 1 gio. Vui long thu lai sau.",
+        )
+    pipe = r.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, _OTP_RATE_WINDOW)
+    pipe.execute()
+
+
+class ForgotPasswordRequestBody(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordVerifyBody(BaseModel):
+    email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class ForgotPasswordResetBody(BaseModel):
+    email: EmailStr
+    reset_token: str
+    new_password: str = Field(..., min_length=8)
+
+
+@router.post("/forgot-password/request", response_model=StandardResponse, summary="Buoc 1 — Gui OTP dat lai mat khau")
+async def forgot_password_request(body: ForgotPasswordRequestBody, db: Session = Depends(get_db)):
+    """Gui ma OTP 6 so de bat dau dat lai mat khau. Rate limit 3 lan/email/gio."""
+    _check_and_increment_rate_limit(str(body.email))
+    user = db.query(User).filter(User.email == body.email, User.deleted_at.is_(None)).first()
+    if user:
+        try:
+            send_otp(str(body.email), "reset_password")
+        except Exception as exc:
+            logger.error("[ForgotPW] send_otp failed for %s: %s", body.email, exc)
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Khong the gui email luc nay. Vui long thu lai sau.")
+    else:
+        logger.info("[ForgotPW] Email not found (silent): %s", body.email)
+    return StandardResponse(success=True, message="Neu email ton tai trong he thong, ma OTP da duoc gui. Kiem tra hop thu (ke ca Spam).", data={"expires_in": 300})
+
+
+@router.post("/forgot-password/verify", response_model=StandardResponse, summary="Buoc 2 — Xac thuc OTP, nhan reset_token")
+async def forgot_password_verify(body: ForgotPasswordVerifyBody):
+    """Xac thuc OTP. Dung -> tao reset_token UUID luu Redis 10 phut."""
+    result = verify_otp(str(body.email), body.otp, "reset_password")
+    if not result["valid"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["message"])
+    reset_token = str(uuid4())
+    r = _get_redis()
+    r.setex(_fp_token_key(str(body.email)), _RESET_TOKEN_TTL, reset_token)
+    logger.info("[ForgotPW] OTP verified, reset_token issued for %s", body.email)
+    return StandardResponse(success=True, message="Xac thuc OTP thanh cong.", data={"reset_token": reset_token, "expires_in": _RESET_TOKEN_TTL})
+
+
+@router.post("/forgot-password/reset", response_model=StandardResponse, summary="Buoc 3 — Dat lai mat khau moi")
+async def forgot_password_reset(body: ForgotPasswordResetBody, db: Session = Depends(get_db)):
+    """Doi mat khau voi reset_token. Hash Argon2. Revoke tat ca refresh tokens."""
+    r = _get_redis()
+    stored_token = r.get(_fp_token_key(str(body.email)))
+    if not stored_token or stored_token != body.reset_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token dat lai mat khau khong hop le hoac da het han. Vui long bat dau lai tu dau.")
+    user = db.query(User).filter(User.email == body.email, User.deleted_at.is_(None)).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tai khoan khong ton tai.")
+    user.password_hash = get_password_hash(body.new_password)
+    user.updated_at = _utcnow()
+    _revoke_all_active_user_tokens(db, user_id=user.id, reason="password_reset")
+    db.commit()
+    r.delete(_fp_token_key(str(body.email)))
+    r.delete(_fp_rate_key(str(body.email)))
+    logger.info("[ForgotPW] Password reset OK user_id=%s", user.id)
+    return StandardResponse(success=True, message="Dat lai mat khau thanh cong. Vui long dang nhap lai.", data=None)
