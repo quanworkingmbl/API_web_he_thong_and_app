@@ -299,16 +299,34 @@ async def get_verification_status(
             "id": profile.id,
             "business_name": profile.business_name,
             "business_type": profile.business_type.value if hasattr(profile.business_type, "value") else str(profile.business_type),
+            "description": profile.description,
+            "address": profile.address,
             "verification_status": profile.verification_status.value if hasattr(profile.verification_status, "value") else str(profile.verification_status),
             "rejection_reason": profile.rejection_reason,
             "verified_at": profile.verified_at.isoformat() if profile.verified_at else None,
+            # Giấy tờ định danh
+            "id_card_number": profile.id_card_number,
+            "id_card_front_url": profile.id_card_front_url,
+            "id_card_back_url": profile.id_card_back_url,
+            # Giấy tờ kinh doanh
+            "business_license_url": profile.business_license_url,
+            "business_registration_cert_url": profile.business_registration_cert_url,
+            "food_safety_cert_url": profile.food_safety_cert_url,
+            # Thông tin thuế
+            "tax_id": profile.tax_id,
+            "tax_code": profile.tax_id,
+            "business_registration_number": profile.business_registration_number,
+            # Tài khoản ngân hàng
             "bank_name": profile.bank_name,
             "bank_account_number": profile.bank_account_number,
+            "bank_account_name": profile.bank_account_name,
+            # Liên hệ cửa hàng
             "shop_phone": profile.shop_phone,
             "shop_email": profile.shop_email,
-            "tax_id": profile.tax_id,
-            "business_registration_number": profile.business_registration_number,
-            "created_at": profile.created_at.isoformat() if profile.created_at else None
+            "phone": profile.shop_phone,
+            "email": profile.shop_email,
+            "created_at": profile.created_at.isoformat() if profile.created_at else None,
+            "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
         }
     }
 
