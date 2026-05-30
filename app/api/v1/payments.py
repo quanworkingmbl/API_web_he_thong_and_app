@@ -57,7 +57,17 @@ def _resolve_role(user: User) -> str:
 
 
 def _get_client_info(request: Request) -> tuple[str, str]:
-    ip = request.client.host if request.client else "unknown"
+    # FIX: Lấy IP thực khi chạy sau nginx/Cloud Run (X-Forwarded-For)
+    xff = request.headers.get("X-Forwarded-For", "")
+    real_ip = request.headers.get("X-Real-IP", "")
+    if xff:
+        ip = xff.split(",")[0].strip()   # IP đầu tiên = client thực
+    elif real_ip:
+        ip = real_ip.strip()
+    elif request.client:
+        ip = request.client.host
+    else:
+        ip = "127.0.0.1"
     ua = request.headers.get("User-Agent", "")[:490]
     return ip, ua
 

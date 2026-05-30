@@ -62,21 +62,21 @@ class VNPayService:
 
         Quy tắc:
           1. Sắp xếp params theo key tăng dần (A-Z).
-          2. Nối thành query string với urllib.parse.urlencode
-             (safe='' để encode cả ký tự đặc biệt, dấu cách → %20 không phải +).
+          2. Nối thành query string với urllib.parse.quote_plus
+             (VNPAY server dùng PHP urlencode: spaces → '+', không phải '%20').
           3. HMAC-SHA512 với key = hash_secret (UTF-8).
         """
         # Lọc bỏ các params rỗng để tránh ảnh hưởng checksum
         filtered = {k: v for k, v in params.items() if v is not None and v != ""}
         sorted_params = sorted(filtered.items())
-        # VNPAY yêu cầu dấu cách → %20, không dùng quote_plus
-        query_string = urllib.parse.urlencode(sorted_params, quote_via=urllib.parse.quote)
+        # FIX: VNPAY dùng quote_plus (spaces→'+'), không phải quote (spaces→'%20')
+        query_string = urllib.parse.urlencode(sorted_params, quote_via=urllib.parse.quote_plus)
         hash_value = hmac.new(
             self.hash_secret.encode("utf-8"),
             query_string.encode("utf-8"),
             hashlib.sha512
         ).hexdigest()
-        logger.debug("[VNPAY] hash_input=%s | hash=%s", query_string[:80] + "...", hash_value[:16] + "...")
+        logger.debug("[VNPAY] hash_input=%s | hash=%s", query_string[:120] + "...", hash_value[:16] + "...")
         return hash_value
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -117,6 +117,17 @@ class VNPayService:
         # vnp_TxnRef phải unique mỗi giao dịch — dùng order_id + timestamp
         txn_ref = f"{order_id}_{create_date}"
 
+        # FIX: Sanitize order_info — chỉ giữ ASCII để tránh encoding khác biệt
+        safe_order_info = order_info[:255].encode("ascii", errors="replace").decode("ascii")
+
+        # FIX: Đảm bảo IP là IPv4 hợp lệ (không phải IPv6 như ::1 hay ::ffff:x.x.x.x)
+        safe_ip = client_ip
+        if ":" in client_ip:  # IPv6
+            if client_ip.startswith("::ffff:"):
+                safe_ip = client_ip[7:]   # lấy phần IPv4 sau prefix
+            else:
+                safe_ip = "127.0.0.1"    # fallback
+
         params = {
             "vnp_Version":    "2.1.0",
             "vnp_Command":    "pay",
@@ -124,11 +135,11 @@ class VNPayService:
             "vnp_Amount":     str(int(amount * 100)),  # VNPAY: VND × 100
             "vnp_CurrCode":   "VND",
             "vnp_TxnRef":     txn_ref,
-            "vnp_OrderInfo":  order_info[:255],         # giới hạn 255 ký tự
+            "vnp_OrderInfo":  safe_order_info,
             "vnp_OrderType":  "other",
             "vnp_Locale":     locale,
             "vnp_ReturnUrl":  self.return_url,
-            "vnp_IpAddr":     client_ip,
+            "vnp_IpAddr":     safe_ip,
             "vnp_CreateDate": create_date,
             "vnp_ExpireDate": expire_date,
         }
