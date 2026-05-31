@@ -48,9 +48,12 @@ URL_PATTERNS = [
 ]
 
 # Từ cấm — sản phẩm không được bán trên sàn đặc sản
+# LƯU Ý: Dùng từ đầy đủ/cụ thể để tránh false positive
+# Ví dụ: "kiếm" bị đổi thành "dao kiếm"/"gươm kiếm" vì "tìm kiếm" bị detect nhầm
 BANNED_PRODUCT_KEYWORDS = [
     # Vũ khí, chất nổ
-    "súng", "đạn", "dao bấm", "kiếm", "chất nổ", "thuốc nổ", "pháo",
+    "súng đạn", "súng lửa", "súng ống", "dao bấm", "dao kiếm", "gươm kiếm",
+    "chất nổ", "thuốc nổ", "pháo nổ", "vũ khí",
     # Chất cấm
     "ma túy", "cần sa", "thuốc phiện", "heroin", "cocaine", "ecstasy", "ketamine",
     # Thuốc lá, rượu không phép
@@ -114,9 +117,12 @@ class RuleEngine:
                 description=f"Danh mục sản phẩm bị cấm (category_id={category_id})"
             ))
 
-        # 2. Check banned keywords
+        # 2. Check banned keywords — dùng word-boundary để tránh false positive
+        # VD: "kiếm" không được match "tìm kiếm"
         for keyword in BANNED_PRODUCT_KEYWORDS:
-            if keyword.lower() in combined_text:
+            # \b không hoạt động tốt với Unicode Vietnamese → dùng lookaround space/start/end
+            pattern = r'(?<![\wàáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ])' + re.escape(keyword.lower()) + r'(?![\wàáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ])'
+            if re.search(pattern, combined_text):
                 violations.append(RuleViolation(
                     rule_name="banned_keyword",
                     severity="reject",
@@ -211,9 +217,10 @@ class RuleEngine:
         violations: List[RuleViolation] = []
         combined_text = f"{title} {content_text}".lower()
 
-        # Check banned keywords
+        # Check banned keywords — word-boundary match
         for keyword in BANNED_PRODUCT_KEYWORDS:
-            if keyword.lower() in combined_text:
+            pattern = r'(?<![\wàáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ])' + re.escape(keyword.lower()) + r'(?![\wàáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ])'
+            if re.search(pattern, combined_text):
                 violations.append(RuleViolation(
                     rule_name="banned_keyword",
                     severity="reject",
