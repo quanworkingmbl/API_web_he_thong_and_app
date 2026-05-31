@@ -218,6 +218,79 @@ async def create_vnpay_payment(
     }
 
 
+# ==============================================================================
+# MOCK PAYMENT (Sandbox/Test only)
+# ==============================================================================
+
+class MockPaymentRequest(BaseModel):
+    order_id: int
+
+@router.post("/mock/success", summary="[SANDBOX] Giả lập thanh toán thành công")
+async def mock_payment_success(
+    body: MockPaymentRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint chỉ dùng trong môi trường sandbox/test.
+    Giả lập kết quả thanh toán thành công từ VNPAY mà không cần
+    qua cổng thanh toán thực (bypass 'Sai chữ ký' sandbox issue).
+
+    Yêu cầu biến môi trường: VNPAY_MOCK_MODE=true
+    """
+    import os
+    if os.getenv("VNPAY_MOCK_MODE", "false").lower() != "true":
+        raise HTTPException(403, "Mock payment chỉ hoạt động khi VNPAY_MOCK_MODE=true")
+
+    order = db.query(Order).filter(Order.id == body.order_id).first()
+    if not order:
+        raise HTTPException(404, "Đơn hàng không tồn tại")
+
+    if order.customer_id != current_user.id:
+        raise HTTPException(403, "Không có quyền thanh toán đơn hàng này")
+
+    if order.payment_status == "PAID":
+        raise HTTPException(400, "Đơn hàng đã được thanh toán")
+
+    # Tạo mock transaction number
+    from datetime import datetime
+    mock_txn_no = f"MOCK{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{order.id}"
+
+    payment = _create_payment_record(
+        db=db,
+        order=order,
+        gateway_txn_no=mock_txn_no,
+        response_code="00",
+        bank_code="NCB",
+        amount_from_gw=order.total_amount,
+        gateway_response_raw={"mock": True, "order_id": order.id},
+    )
+
+    order.payment_status = "PAID"
+    order.status = OrderStatus.CONFIRMED
+
+    _audit(db, "MOCK_PAYMENT_SUCCESS", payment.id,
+           actor_id=current_user.id,
+           note=f"Mock payment for sandbox testing. txn={mock_txn_no}")
+    db.commit()
+
+    logger.info("[MOCK] Payment success for order_id=%s, txn=%s", order.id, mock_txn_no)
+
+    return {
+        "success": True,
+        "message": "Mock payment thành công (sandbox only)",
+        "data": {
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "payment_id": payment.id,
+            "amount": str(order.total_amount),
+            "transaction_no": mock_txn_no,
+            "status": "PAID",
+        }
+    }
+
+
 @router.get("/vnpay/return", summary="VNPAY return URL")
 async def vnpay_return(
     request: Request,
