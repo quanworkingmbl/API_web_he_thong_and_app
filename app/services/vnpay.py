@@ -14,6 +14,7 @@ Lưu ý:
 
 import hashlib
 import hmac
+import re
 import urllib.parse
 import logging
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,26 @@ from fastapi import Request
 _TZ_VN = timezone(timedelta(hours=7))
 
 logger = logging.getLogger(__name__)
+
+_TXN_REF_TS_LEN = 14  # yyyyMMddHHmmss
+
+
+def _parse_order_id_from_txn_ref(txn_ref: str) -> int | None:
+    """Lấy order/tx id từ TxnRef alphanumeric (14 chữ số cuối = timestamp)."""
+    if not txn_ref or len(txn_ref) <= _TXN_REF_TS_LEN:
+        return None
+    ts_suffix = txn_ref[-_TXN_REF_TS_LEN:]
+    if not ts_suffix.isdigit():
+        return None
+    id_part = txn_ref[:-_TXN_REF_TS_LEN]
+    if id_part.upper().startswith("DEP"):
+        id_part = id_part[3:]
+    if not id_part.isdigit():
+        return None
+    try:
+        return int(id_part)
+    except ValueError:
+        return None
 
 
 def get_client_ip(request: Request) -> str:
@@ -47,8 +68,9 @@ class VNPayService:
     """Helper tích hợp cổng thanh toán VNPAY."""
 
     def __init__(self):
-        self.tmn_code   = os.getenv("VNPAY_TMN_CODE", "")
-        self.hash_secret = os.getenv("VNPAY_HASH_SECRET", "")
+        # Strip whitespace/newline từ Secret Manager (hay gây lỗi 70 Sai chữ ký)
+        self.tmn_code    = (os.getenv("VNPAY_TMN_CODE", "") or "").strip()
+        self.hash_secret = (os.getenv("VNPAY_HASH_SECRET", "") or "").strip()
         self.payment_url = os.getenv(
             "VNPAY_URL",
             "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"
@@ -136,12 +158,16 @@ class VNPayService:
         expire_dt    = now + timedelta(minutes=expire_minutes)
         expire_date  = expire_dt.strftime("%Y%m%d%H%M%S")
 
-        # vnp_TxnRef phải unique mỗi giao dịch
+        # vnp_TxnRef: Alphanumeric only (VNPAY spec) — không dùng _ hay ký tự đặc biệt
         if not txn_ref:
-            txn_ref = f"{order_id}_{create_date}"
+            txn_ref = f"{order_id}{create_date}"
 
-        # FIX: Sanitize order_info — chỉ giữ ASCII để tránh encoding khác biệt
-        safe_order_info = order_info[:255].encode("ascii", errors="replace").decode("ascii")
+        # vnp_OrderInfo: ASCII, không ký tự đặc biệt (#, &, ...) — tránh lỗi format/hash
+        safe_order_info = re.sub(
+            r"[^a-zA-Z0-9\s]",
+            " ",
+            order_info[:255].encode("ascii", errors="replace").decode("ascii"),
+        ).strip() or "Thanh toan"
 
         # FIX: Đảm bảo IP là IPv4 hợp lệ (không phải IPv6 như ::1 hay ::ffff:x.x.x.x)
         safe_ip = client_ip
@@ -224,14 +250,11 @@ class VNPayService:
                 expected_hash[:20], vnp_secure_hash[:20]
             )
 
-        # Parse order_id từ TxnRef (format: "order_id_YYYYMMDDHHMMSS")
+        # Parse order_id từ TxnRef: {order_id}{YYYYMMDDHHMMSS} hoặc DEP{order_id}{YYYYMMDDHHMMSS}
         txn_ref  = params.get("vnp_TxnRef", "")
-        order_id = None
-        if txn_ref and "_" in txn_ref:
-            try:
-                order_id = int(txn_ref.split("_")[0])
-            except (ValueError, IndexError):
-                logger.warning("[VNPAY] Cannot parse order_id from txn_ref: %s", txn_ref)
+        order_id = _parse_order_id_from_txn_ref(txn_ref)
+        if txn_ref and order_id is None:
+            logger.warning("[VNPAY] Cannot parse order_id from txn_ref: %s", txn_ref)
 
         # VNPAY trả amount × 100 → chia 100 để lấy VND thực
         try:
