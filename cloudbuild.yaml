@@ -34,7 +34,8 @@ steps:
     entrypoint: 'sh'
     args:
       - '-c'
-      - 'alembic upgrade head'
+      # Nhiều head: upgrade heads trước merge; sau merge chỉ còn 1 head (w2x3y4z5a6b7)
+      - 'alembic upgrade heads'
     env:
       - 'DATABASE_URL=$$DATABASE_URL'
     secretEnv:
