@@ -608,14 +608,15 @@ async def reject_withdrawal(
     return {"success": True, "message": "Đã từ chối yêu cầu rút tiền.", "withdrawal_id": wr_id}
 
 
-@router.post("/release-reserves", summary="Admin giải phóng reserve đã đủ 30 ngày")
+
+@router.post("/release-reserves", summary="Admin giải phóng reserve đã đủ 14 ngày")
 async def release_seller_reserves(
     seller_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Giải phóng phần reserve 20% của các đơn đã quá 30 ngày về available_balance.
+    Giải phóng phần reserve 20% của các đơn đã quá 14 ngày về available_balance.
     - Nếu truyền seller_id → chỉ xử lý seller đó.
     - Nếu không truyền → xử lý tất cả sellers.
     """
@@ -644,3 +645,103 @@ async def release_seller_reserves(
 
     db.commit()
     return {"success": True, "processed": len(results), "details": results}
+
+
+# ==============================================================================
+# RESERVE SCHEDULE — Seller xem lịch giải phóng reserve sắp tới
+# ==============================================================================
+
+@router.get("/reserve-schedule", summary="Lịch giải phóng reserve sắp tới (Seller)")
+async def get_reserve_schedule(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Seller xem danh sách các khoản reserve đang bị giữ và ngày dự kiến được giải phóng.
+    Sắp xếp theo ngày giải phóng gần nhất.
+    """
+    _require_seller(current_user)
+
+    now = datetime.utcnow()
+    from decimal import Decimal as D
+
+    RESERVE_RATIO = D("0.20")
+
+    upcoming = db.query(Order).filter(
+        Order.seller_id == current_user.id,
+        Order.status == OrderStatus.DELIVERED,
+        Order.wallet_credited == True,
+        Order.reserve_released == False,
+        Order.reserve_release_at != None,
+    ).order_by(Order.reserve_release_at.asc()).limit(30).all()
+
+    items = []
+    total_pending = D("0")
+    for o in upcoming:
+        reserve_amt = (D(str(o.seller_amount or 0)) * RESERVE_RATIO).quantize(D("0.01"))
+        total_pending += reserve_amt
+        release_dt = o.reserve_release_at
+        # Tính số ngày còn lại (có thể âm nếu đã quá hạn nhưng chưa được giải phóng)
+        delta = (release_dt - now).total_seconds()
+        days_left = max(0, int(delta // 86400))
+        items.append({
+            "order_id": o.id,
+            "order_number": o.order_number,
+            "reserve_amount": str(reserve_amt),
+            "release_date": release_dt.isoformat(),
+            "days_left": days_left,
+            "overdue": delta < 0,  # Đã quá hạn nhưng chưa được admin giải phóng
+        })
+
+    return {
+        "success": True,
+        "data": items,
+        "total_pending_reserve": str(total_pending),
+        "meta": {"total": len(items)},
+    }
+
+
+# ==============================================================================
+# AUTO-CONFIRM ORDERS — Admin trigger tự động xác nhận đơn quá 7 ngày
+# ==============================================================================
+
+@router.post("/auto-confirm-orders", summary="Admin: Tự động xác nhận đơn SHIPPING quá 7 ngày")
+async def auto_confirm_orders(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Tự động chuyển đơn SHIPPING sang DELIVERED + credit ví seller
+    nếu buyer không bấm xác nhận sau 7 ngày kể từ ngày giao (shipped_at).
+
+    Gọi thủ công bởi admin, hoặc schedule bằng cron job hàng ngày.
+    """
+    _require_admin(current_user)
+    from app.services.wallet import credit_seller_wallet
+
+    AUTO_CONFIRM_DAYS = 7
+    cutoff = datetime.utcnow() - timedelta(days=AUTO_CONFIRM_DAYS)
+
+    overdue_orders = db.query(Order).filter(
+        Order.status == OrderStatus.SHIPPING,
+        Order.shipped_at <= cutoff,
+        Order.is_active == True,
+        Order.wallet_credited == False,
+    ).all()
+
+    confirmed_ids = []
+    for order in overdue_orders:
+        order.status = OrderStatus.DELIVERED
+        order.delivered_at = datetime.utcnow()
+        order.payment_status = "PAID"
+        credit_seller_wallet(db=db, order=order)
+        confirmed_ids.append(order.id)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Đã tự động xác nhận {len(confirmed_ids)} đơn hàng (shipping > {AUTO_CONFIRM_DAYS} ngày).",
+        "confirmed_count": len(confirmed_ids),
+        "confirmed_order_ids": confirmed_ids,
+    }

@@ -3,10 +3,10 @@ app/services/wallet.py
 ======================
 Xử lý logic ví seller (SellerWallet).
 
-Nguyên tắc mới (80/20 Reserve):
+Nguyên tắc (80/20 Reserve):
 - Khi buyer xác nhận nhận hàng → credit_seller_wallet() tách:
     80% → available_balance  (rút được ngay, trừ min_reserve)
-    20% → reserve_balance    (giữ 30 ngày, tự giải phóng về available)
+    20% → reserve_balance    (giữ 14 ngày, tự giải phóng về available)
 - Dùng wallet_credited để chống double-credit
 - min_reserve = số sản phẩm đang bán × MIN_RESERVE_PER_PRODUCT
 """
@@ -23,9 +23,10 @@ logger = logging.getLogger(__name__)
 
 # ── Hằng số ───────────────────────────────────────────────────────────────────
 AVAILABLE_RATIO   = Decimal("0.80")   # 80% vào available ngay
-RESERVE_RATIO     = Decimal("0.20")   # 20% giữ 30 ngày
-RESERVE_HOLD_DAYS = 30                # Số ngày giữ reserve trước khi giải phóng
+RESERVE_RATIO     = Decimal("0.20")   # 20% giữ 14 ngày
+RESERVE_HOLD_DAYS = 14                # Số ngày giữ reserve trước khi giải phóng
 MIN_RESERVE_PER_PRODUCT = Decimal("50000")  # 50,000 VND / sản phẩm đang bán
+MAX_RESERVE_RATIO = Decimal("0.20")   # Tối đa 20% available_balance — tránh khóa seller hoàn toàn
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -50,10 +51,11 @@ def _get_or_create_wallet(seller_id: int, db: Session) -> SellerWallet:
     return wallet
 
 
-def calc_min_reserve(seller_id: int, db: Session) -> Decimal:
+def calc_min_reserve(seller_id: int, db: Session, available_balance: Decimal = None) -> Decimal:
     """
     Tính min_reserve dựa trên số sản phẩm đang APPROVED của seller.
     Seller chỉ rút được: available_balance - min_reserve
+    Có giới hạn: không vượt quá 20% available_balance (tránh khóa seller hoàn toàn).
     """
     from app.models.product import Product, ProductStatus
     active_count = db.query(Product).filter(
@@ -61,14 +63,20 @@ def calc_min_reserve(seller_id: int, db: Session) -> Decimal:
         Product.status == ProductStatus.APPROVED,
         Product.is_active == True,
     ).count()
-    return MIN_RESERVE_PER_PRODUCT * active_count
+    product_based = MIN_RESERVE_PER_PRODUCT * active_count
+
+    # Cap: nếu biết available_balance, giới hạn tối đa 20%
+    if available_balance is not None and available_balance > 0 and active_count > 0:
+        cap = (available_balance * MAX_RESERVE_RATIO).quantize(Decimal("0.01"))
+        return min(product_based, cap)
+    return product_based
 
 
 def calc_max_withdrawable(seller_id: int, db: Session) -> Decimal:
-    """Số tiền tối đa seller có thể rút = available_balance - min_reserve."""
+    """Số tiền tối đa seller có thể rút = available_balance - min_reserve (có cap 20%)."""
     wallet = _get_or_create_wallet(seller_id, db)
     available = Decimal(str(wallet.available_balance or 0))
-    min_r = calc_min_reserve(seller_id, db)
+    min_r = calc_min_reserve(seller_id, db, available_balance=available)
     return max(Decimal("0"), available - min_r)
 
 

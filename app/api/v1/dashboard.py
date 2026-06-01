@@ -335,23 +335,28 @@ async def get_finance_overview(
     wallet_totals = db.query(
         sf.coalesce(sf.sum(SellerWallet.pending_balance),   0).label("total_pending"),
         sf.coalesce(sf.sum(SellerWallet.available_balance), 0).label("total_available"),
+        sf.coalesce(sf.sum(SellerWallet.reserve_balance),   0).label("total_reserve"),
         sf.coalesce(sf.sum(SellerWallet.total_withdrawn),   0).label("total_withdrawn"),
     ).first()
+
+    from app.models.settlement import WithdrawalRequest, WithdrawalStatus
+    wr_pending = db.query(
+        sf.count(WithdrawalRequest.id).label("count"),
+        sf.coalesce(sf.sum(WithdrawalRequest.amount), 0).label("total"),
+    ).filter(WithdrawalRequest.status == WithdrawalStatus.PENDING).first()
 
     return {
         "success": True,
         "data": {
-            # ── Tổng tích lũy ──────────────────────────────────────────────
             "all_time": {
                 "gmv":              _to_vnd_int(gmv),
                 "shipping_fee":     _to_vnd_int(total_shipping),
                 "discount":         _to_vnd_int(total_discount),
-                "vat_collected":    _to_vnd_int(total_vat),      # VAT nền tảng thu
-                "platform_fee":     _to_vnd_int(total_fee),      # Phí 10% nền tảng thu
-                "seller_payout":    _to_vnd_int(total_seller_out),# Tổng trả về seller
+                "vat_collected":    _to_vnd_int(total_vat),
+                "platform_fee":     _to_vnd_int(total_fee),
+                "seller_payout":    _to_vnd_int(total_seller_out),
                 "order_count":      order_count,
             },
-            # ── Tháng này ──────────────────────────────────────────────────
             "this_month": {
                 "gmv":           _to_vnd_int(month_gmv),
                 "vat_collected": _to_vnd_int(month_vat),
@@ -359,7 +364,6 @@ async def get_finance_overview(
                 "seller_payout": _to_vnd_int(month_seller_out),
                 "order_count":   len(this_month),
             },
-            # ── Năm này ────────────────────────────────────────────────────
             "this_year": {
                 "gmv":           _to_vnd_int(year_gmv),
                 "vat_collected": _to_vnd_int(year_vat),
@@ -367,18 +371,19 @@ async def get_finance_overview(
                 "seller_payout": _to_vnd_int(year_seller_out),
                 "order_count":   len(this_year),
             },
-            # ── 6 tháng theo từng tháng ─────────────────────────────────
             "monthly_chart": monthly,
-            # ── Top 10 sellers ──────────────────────────────────────────
-            "top_sellers":  top_sellers,
-            # ── Tổng số dư ví toàn sellers ─────────────────────────────
+            "top_sellers":   top_sellers,
             "wallet_summary": {
-                "total_pending":   _to_vnd_int(wallet_totals.total_pending),
-                "total_available": _to_vnd_int(wallet_totals.total_available),
-                "total_withdrawn": _to_vnd_int(wallet_totals.total_withdrawn),
+                "total_pending":     _to_vnd_int(wallet_totals.total_pending),
+                "total_available":   _to_vnd_int(wallet_totals.total_available),
+                "total_reserve":     _to_vnd_int(wallet_totals.total_reserve),
+                "total_withdrawn":   _to_vnd_int(wallet_totals.total_withdrawn),
+                "pending_wr_count":  int(wr_pending.count or 0),
+                "pending_wr_amount": _to_vnd_int(wr_pending.total),
             },
         }
     }
+
 
 
 @router.get("/dashboard/products")
