@@ -29,6 +29,7 @@ from app.api.v1 import (
     settings,
     notifications,
     otp,
+    deposit,
 )
 
 api_router = APIRouter()
@@ -70,6 +71,9 @@ api_router.include_router(returns.router, prefix="/returns", tags=["↩️ Retur
 
 # Settlement / Payout
 api_router.include_router(settlement.router, prefix="/settlement", tags=["💰 Settlement"])
+
+# Platform Deposit Wallet (Ví Sàn)
+api_router.include_router(deposit.router, prefix="/deposit", tags=["🏦 Deposit Wallet"])
 
 # Traceability / Certificate
 api_router.include_router(traceability.router, prefix="/traceability", tags=["🔍 Traceability"])

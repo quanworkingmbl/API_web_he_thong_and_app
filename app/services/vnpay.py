@@ -4,9 +4,7 @@ VNPAY Payment Gateway Service
 Tài liệu: https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html
 Sandbox:   https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
 
-Credentials (Sandbox):
-  vnp_TmnCode  = 92AOP4PI
-  vnp_HashSecret = 0D4P1LRI7K1BV36PGJE9UGRBQVKZGIA1
+Credentials (Sandbox): xem VNPAY_TMN_CODE / VNPAY_HASH_SECRET trong .env
 
 Lưu ý:
   - VNPAY Amount = số tiền VND × 100 (không có dấu phẩy/chấm)
@@ -19,12 +17,30 @@ import hmac
 import urllib.parse
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 import os
+
+from fastapi import Request
 
 # Múi giờ Việt Nam UTC+7
 _TZ_VN = timezone(timedelta(hours=7))
 
 logger = logging.getLogger(__name__)
+
+
+def get_client_ip(request: Request) -> str:
+    """IP client thực (Cloud Run / Cloudflare: X-Forwarded-For)."""
+    xff = request.headers.get("X-Forwarded-For", "")
+    real_ip = request.headers.get("X-Real-IP", "")
+    if xff:
+        ip = xff.split(",")[0].strip()
+    elif real_ip:
+        ip = real_ip.strip()
+    elif request.client:
+        ip = request.client.host
+    else:
+        ip = "127.0.0.1"
+    return ip
 
 
 class VNPayService:
@@ -93,6 +109,8 @@ class VNPayService:
         client_ip: str,
         locale: str = "vn",
         expire_minutes: int = 20,
+        return_url: Optional[str] = None,
+        txn_ref: Optional[str] = None,
     ) -> str:
         """
         Tạo URL thanh toán VNPAY.
@@ -104,6 +122,8 @@ class VNPayService:
             client_ip:      IP của khách hàng (bắt buộc theo VNPAY)
             locale:         "vn" hoặc "en"
             expire_minutes: Thời gian hết hạn URL (mặc định 20 phút)
+            return_url:     Override vnp_ReturnUrl (phải set trước khi ký hash)
+            txn_ref:        Override vnp_TxnRef (mặc định: {order_id}_{create_date})
 
         Returns:
             URL redirect đến cổng thanh toán VNPAY
@@ -116,8 +136,9 @@ class VNPayService:
         expire_dt    = now + timedelta(minutes=expire_minutes)
         expire_date  = expire_dt.strftime("%Y%m%d%H%M%S")
 
-        # vnp_TxnRef phải unique mỗi giao dịch — dùng order_id + timestamp
-        txn_ref = f"{order_id}_{create_date}"
+        # vnp_TxnRef phải unique mỗi giao dịch
+        if not txn_ref:
+            txn_ref = f"{order_id}_{create_date}"
 
         # FIX: Sanitize order_info — chỉ giữ ASCII để tránh encoding khác biệt
         safe_order_info = order_info[:255].encode("ascii", errors="replace").decode("ascii")
@@ -140,7 +161,7 @@ class VNPayService:
             "vnp_OrderInfo":  safe_order_info,
             "vnp_OrderType":  "other",
             "vnp_Locale":     locale,
-            "vnp_ReturnUrl":  self.return_url,
+            "vnp_ReturnUrl":  return_url or self.return_url,
             "vnp_IpAddr":     safe_ip,
             "vnp_CreateDate": create_date,
             "vnp_ExpireDate": expire_date,

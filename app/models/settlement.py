@@ -128,3 +128,74 @@ class WithdrawalRequest(Base):
 
     seller = relationship("User", foreign_keys=[seller_id])
     reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+
+# ==============================================================================
+# VÍ SÀN — Ký quỹ seller (Platform Deposit Wallet)
+# ==============================================================================
+
+class DepositTransactionType(str, enum.Enum):
+    TOP_UP = "TOP_UP"    # Seller nạp tiền vào
+    DEDUCT = "DEDUCT"    # Admin khấu trừ (xử lý gian lận / hoàn tiền buyer)
+    REFUND = "REFUND"    # Hoàn lại cho seller khi rời sàn
+
+
+class DepositStatus(str, enum.Enum):
+    PENDING   = "PENDING"    # Chờ admin xác nhận (chuyển khoản) hoặc chờ VNPay callback
+    CONFIRMED = "CONFIRMED"  # Đã xác nhận, cộng vào deposit_balance
+    REJECTED  = "REJECTED"   # Admin từ chối (chuyển khoản lỗi)
+
+
+class SellerDepositWallet(Base):
+    """Ký quỹ của seller — cọc bảo lãnh chống gian lận.
+    
+    Seller phải duy trì deposit_balance >= MIN_DEPOSIT_REQUIRED (500,000đ)
+    để được phép đăng sản phẩm và nhận đơn hàng trên sàn.
+    """
+    __tablename__ = "seller_deposit_wallets"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    seller_id       = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+
+    deposit_balance = Column(Numeric(15, 2), default=0, nullable=False)   # Số dư ký quỹ hiện tại
+    total_deposited = Column(Numeric(15, 2), default=0, nullable=False)   # Tổng đã nạp (lịch sử)
+    total_deducted  = Column(Numeric(15, 2), default=0, nullable=False)   # Tổng bị khấu trừ (lịch sử)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    seller = relationship("User", foreign_keys=[seller_id])
+
+
+class DepositTransaction(Base):
+    """Lịch sử giao dịch ký quỹ — mỗi lần nạp / khấu trừ / hoàn tiền."""
+    __tablename__ = "deposit_transactions"
+
+    id        = Column(Integer, primary_key=True, index=True)
+    seller_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    amount  = Column(Numeric(15, 2), nullable=False)
+    tx_type = Column(SQLEnum(DepositTransactionType), nullable=False, default=DepositTransactionType.TOP_UP)
+    status  = Column(SQLEnum(DepositStatus), nullable=False, default=DepositStatus.PENDING, index=True)
+
+    # Phương thức nạp tiền
+    payment_method = Column(String(50), nullable=True)   # "BANK_TRANSFER" | "VNPAY"
+
+    # Chuyển khoản thủ công
+    bank_ref    = Column(String(255), nullable=True)   # Mã tham chiếu chuyển khoản
+    receipt_url = Column(Text, nullable=True)          # URL ảnh biên lai (upload qua /medias)
+
+    # VNPay
+    vnpay_txn_ref  = Column(String(255), nullable=True, index=True)  # vnp_TxnRef = "DEP_{id}_{ts}"
+    vnpay_response = Column(Text, nullable=True)                      # Raw JSON callback
+
+    # Admin review
+    note        = Column(Text, nullable=True)          # Admin ghi chú khi duyệt / từ chối
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    seller   = relationship("User", foreign_keys=[seller_id])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])

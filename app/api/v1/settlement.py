@@ -695,8 +695,10 @@ async def get_reserve_schedule(
 
     return {
         "success": True,
-        "data": items,
-        "total_pending_reserve": str(total_pending),
+        "data": {
+            "items": items,
+            "total_pending_reserve": str(total_pending),
+        },
         "meta": {"total": len(items)},
     }
 
