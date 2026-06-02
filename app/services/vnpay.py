@@ -289,11 +289,15 @@ class VNPayService:
 
     def is_payment_success(self, response_code: str, transaction_status: str) -> bool:
         """
-        Giao dịch thành công khi:
-          - vnp_ResponseCode == "00"  (VNPAY xác nhận)
-          - vnp_TransactionStatus == "00"  (Merchant xác nhận)
+        Giao dịch thành công khi vnp_ResponseCode == "00".
+        vnp_TransactionStatus có thể thiếu trên Return URL (chỉ có trên IPN) —
+        nếu có thì phải là "00".
         """
-        return response_code == "00" and transaction_status == "00"
+        if response_code != "00":
+            return False
+        if not transaction_status:
+            return True
+        return transaction_status == "00"
 
     def build_deep_link(self, success: bool, order_id: int | None,
                         payment_id: int | None = None,

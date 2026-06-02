@@ -31,9 +31,11 @@ import json
 from app.core.database import get_db
 from app.models.payment import Payment, PaymentTransaction, PaymentAuditLog, PaymentStatus, PaymentCycle
 from app.models.order import Order, OrderStatus
+from app.models.settlement import DepositTransaction, DepositStatus
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.vnpay import vnpay_service
+from app.api.v1.deposit import _confirm_deposit_tx
 from app.core.permissions import check_payment_config_access
 from pydantic import BaseModel, Field
 
@@ -426,17 +428,41 @@ async def vnpay_ipn(
     if not result["is_valid"]:
         return {"RspCode": "97", "Message": "Invalid Signature"}
 
-    order_id       = result["order_id"]
+    txn_ref        = params.get("vnp_TxnRef", "")
     transaction_no = result.get("transaction_no", "")
     response_code  = result.get("response_code", "")
     bank_code      = result.get("bank_code", "")
-    is_success     = vnpay_service.is_payment_success(response_code, result.get("transaction_status", ""))
+    is_success     = vnpay_service.is_payment_success(
+        response_code, result.get("transaction_status", "")
+    )
 
     try:
         amount_from_gw = Decimal(str(result.get("amount", "0")))
     except Exception:
         amount_from_gw = Decimal("0")
 
+    # Nạp ký quỹ: IPN đăng ký trên portal trỏ /payments/vnpay/ipn — xử lý deposit tại đây
+    deposit_tx = (
+        db.query(DepositTransaction)
+        .filter(DepositTransaction.vnpay_txn_ref == txn_ref)
+        .with_for_update()
+        .first()
+    )
+    if deposit_tx:
+        if deposit_tx.status == DepositStatus.CONFIRMED:
+            return {"RspCode": "00", "Message": "Confirm Success"}
+        deposit_tx.vnpay_response = json.dumps(params, ensure_ascii=False)
+        if is_success and abs(amount_from_gw - Decimal(str(deposit_tx.amount))) <= AMOUNT_TOLERANCE:
+            _confirm_deposit_tx(deposit_tx, db)
+        elif is_success:
+            deposit_tx.note = f"IPN amount mismatch: expected {deposit_tx.amount}, got {amount_from_gw}"
+        else:
+            deposit_tx.status = DepositStatus.REJECTED
+            deposit_tx.note = f"IPN fail code={response_code}"
+        db.commit()
+        return {"RspCode": "00", "Message": "Confirm Success"}
+
+    order_id = result["order_id"]
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         return {"RspCode": "01", "Message": "Order Not Found"}

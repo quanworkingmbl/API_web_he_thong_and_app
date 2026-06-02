@@ -47,6 +47,8 @@ class ModerationResponse(AIBaseSchema):
     confidence: float
     reasons: list
     flags: list
+    image_issues: list = []
+    images_analyzed: int = 0
     source: str
     model_used: str
     escalated: bool
@@ -164,6 +166,8 @@ async def moderate_product(
         confidence=result.confidence,
         reasons=result.reasons,
         flags=result.flags,
+        image_issues=result.image_issues or [],
+        images_analyzed=result.images_analyzed,
         source=result.source,
         model_used=result.model_used,
         escalated=result.escalated,
@@ -217,6 +221,8 @@ async def moderate_content(
         confidence=result.confidence,
         reasons=result.reasons,
         flags=result.flags,
+        image_issues=result.image_issues or [],
+        images_analyzed=result.images_analyzed,
         source=result.source,
         model_used=result.model_used,
         escalated=result.escalated,

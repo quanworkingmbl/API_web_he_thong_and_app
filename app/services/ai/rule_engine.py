@@ -76,14 +76,39 @@ HEALTH_CLAIM_PATTERNS = [
     re.compile(r'(?:cam\s*kết|đảm\s*bảo)\s+(?:khỏi|hết\s*bệnh|100%)', re.IGNORECASE),
 ]
 
-# Nội dung phản cảm
+# Nội dung phản cảm / tục tĩu
 OFFENSIVE_PATTERNS = [
     re.compile(r'(?:đéo|đ[ịi]t|c[ặa]c|lồn|đ[ụu]\s*m[ẹe])', re.IGNORECASE),
+]
+
+# Nội dung nguy hiểm / bạo lực / kích động — REJECT ngay khi xuất hiện
+# Rule này chạy trước LLM để bắt trường hợp AI bị "đánh lừa" bởi nội dung dài tích cực
+VIOLENCE_KEYWORDS = [
+    # Bạo lực thân thể
+    "giết người", "giết chết", "sát hại", "thảm sát", "sát nhân",
+    # Tự tử
+    "tự tử", "tự vẫn", "tự sát",
+    # Đe dọa trực tiếp
+    "cho mày chết", "bị giết",
+    # Kích động
+    "khủng bố", "nổi loạn",
+    # Bom, nổ (liên quan đến tấn công)
+    "nổ tung", "phá hoại",
+]
+
+# Pattern bạo lực regex (bắt biến thể viết tắt, cách nhau khoảng trắng)
+VIOLENCE_PATTERNS = [
+    re.compile(r'gi\u1ebft\s*(?:ng\u01b0\u1eddi|ch\u1ebft|h\u1ea1i)', re.IGNORECASE),
+    re.compile(r't\u1ef1\s*(?:t\u1eed|v\u1eaft|s\u00e1t)', re.IGNORECASE),
+    re.compile(r's\u00e1t\s*(?:nh\u00e2n|h\u1ea1i)', re.IGNORECASE),
+    re.compile(r'kh\u1ee7ng\s*b\u1ed1', re.IGNORECASE),
+    re.compile(r'ch\u1ebft\s*(?:\u0111i|m\u1eb9|\u0111\u00e9o)', re.IGNORECASE),
 ]
 
 # Danh mục cấm (category IDs — cần map với DB thực tế)
 # Để rỗng vì phụ thuộc vào data seed, sẽ cấu hình sau
 BANNED_CATEGORY_IDS: List[int] = []
+
 
 
 # ==============================================================================
@@ -170,7 +195,26 @@ class RuleEngine:
                 ))
                 break
 
-        # 7. Price anomaly (flag only)
+        # 7. Check VIOLENCE / dangerous content — ưu tiên cao nhất
+        for keyword in VIOLENCE_KEYWORDS:
+            if keyword in combined_text:
+                violations.append(RuleViolation(
+                    rule_name="violence_content",
+                    severity="reject",
+                    description=f"Chứa nội dung bạo lực / nguy hiểm: '{keyword}'"
+                ))
+                break
+        else:
+            for pattern in VIOLENCE_PATTERNS:
+                if pattern.search(combined_text):
+                    violations.append(RuleViolation(
+                        rule_name="violence_content",
+                        severity="reject",
+                        description="Chứa ngôn từ bạo lực / kích động nguy hiểm"
+                    ))
+                    break
+
+        # 8. Price anomaly (flag only)
         if price > 0:
             if price < 500:
                 violations.append(RuleViolation(
@@ -267,6 +311,25 @@ class RuleEngine:
                     description="Chứa nội dung phản cảm"
                 ))
                 break
+
+        # Check VIOLENCE / dangerous content — quan trọng nhất!
+        for keyword in VIOLENCE_KEYWORDS:
+            if keyword in combined_text:
+                violations.append(RuleViolation(
+                    rule_name="violence_content",
+                    severity="reject",
+                    description=f"Chứa nội dung bạo lực / nguy hiểm: '{keyword}'"
+                ))
+                break
+        else:
+            for pattern in VIOLENCE_PATTERNS:
+                if pattern.search(combined_text):
+                    violations.append(RuleViolation(
+                        rule_name="violence_content",
+                        severity="reject",
+                        description="Chứa ngôn từ bạo lực / kích động nguy hiểm"
+                    ))
+                    break
 
         has_reject = any(v.severity == "reject" for v in violations)
         has_flag = any(v.severity == "flag" for v in violations)

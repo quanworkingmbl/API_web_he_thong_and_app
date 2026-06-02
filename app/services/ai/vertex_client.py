@@ -246,6 +246,170 @@ class VertexAIClient:
         )
         return result
 
+    async def invoke_gemini_multimodal(
+        self,
+        prompt: str,
+        image_urls: list[str],
+        system_prompt: str = "",
+        model_id: Optional[str] = None,
+        max_tokens: int = 300,
+        temperature: float = 0.0,
+        timeout: int = 20,
+        json_mode: bool = False,
+        max_images: int = 5,
+    ) -> dict:
+        """
+        Invoke Gemini với multimodal input (text + images).
+
+        Args:
+            prompt:       Nội dung text prompt
+            image_urls:   Danh sách URL ảnh cần phân tích (tối đa max_images)
+            system_prompt: System instruction
+            model_id:     Model ID (mặc định: VERTEX_MODERATION_MODEL_ID)
+            max_tokens:   Max output tokens
+            temperature:  Sampling temperature (0 = deterministic)
+            timeout:      Timeout giây (cao hơn invoke_gemini vì phải download ảnh)
+            json_mode:    True = yêu cầu JSON response
+            max_images:   Giới hạn số ảnh gửi lên (mặc định 5, tiết kiệm cost)
+
+        Returns:
+            dict: content, input_tokens, output_tokens, model_id, latency_ms,
+                  estimated_cost_usd, images_analyzed (int)
+        """
+        self._ensure_available()
+
+        model = model_id or settings.VERTEX_MODERATION_MODEL_ID
+
+        # Download ảnh song song (asyncio.gather)
+        valid_urls = [u for u in (image_urls or []) if u and u.startswith("http")][:max_images]
+        image_parts: list[dict] = []
+
+        if valid_urls:
+            fetch_tasks = [self._fetch_image_as_base64(url) for url in valid_urls]
+            fetch_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+            for fetch_result in fetch_results:
+                if isinstance(fetch_result, dict) and fetch_result.get("data"):
+                    image_parts.append(fetch_result)
+
+        images_analyzed = len(image_parts)
+        logger.info("[Multimodal] Prompt=%d chars, Images requested=%d, fetched=%d",
+                    len(prompt), len(valid_urls), images_analyzed)
+
+        def _invoke() -> dict:
+            config_kwargs: dict = {
+                "temperature": temperature,
+                "max_output_tokens": max_tokens,
+            }
+            if system_prompt:
+                config_kwargs["system_instruction"] = system_prompt
+            if json_mode:
+                config_kwargs["response_mime_type"] = "application/json"
+                config_kwargs["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=0)
+
+            config = genai_types.GenerateContentConfig(**config_kwargs)
+
+            # Build multipart contents: text + image parts
+            # google-genai SDK expects list of Part objects
+            parts: list = [genai_types.Part.from_text(prompt.strip())]
+            for img in image_parts:
+                parts.append(
+                    genai_types.Part.from_bytes(
+                        data=img["data"],
+                        mime_type=img["mime_type"],
+                    )
+                )
+
+            response = self._client.models.generate_content(
+                model=model,
+                contents=parts,
+                config=config,
+            )
+
+            content = self._extract_text(response)
+
+            usage = getattr(response, "usage_metadata", None)
+            input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
+            output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+
+            if input_tokens <= 0:
+                # Rough estimate: text tokens + ~256 tokens per image
+                input_tokens = self._estimate_tokens(prompt + (system_prompt or "")) + images_analyzed * 256
+            if output_tokens == 0 and content:
+                output_tokens = self._estimate_tokens(content)
+
+            return {
+                "content": content,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "model_id": model,
+                "images_analyzed": images_analyzed,
+            }
+
+        result = await self._run_with_retry(
+            operation_name="gemini_multimodal",
+            operation_fn=_invoke,
+            timeout=timeout,
+        )
+
+        result["estimated_cost_usd"] = self._calculate_cost(
+            model,
+            result.get("input_tokens", 0),
+            result.get("output_tokens", 0),
+        )
+        result.setdefault("images_analyzed", images_analyzed)
+        return result
+
+    async def _fetch_image_as_base64(self, url: str) -> dict:
+        """
+        Download ảnh từ URL và trả về bytes để gửi vào Gemini multimodal.
+        Dùng httpx (đã có trong requirements) thay vì aiohttp.
+
+        Returns:
+            dict: {"data": bytes, "mime_type": str} hoặc {} nếu thất bại
+        """
+        import httpx
+
+        SUPPORTED_MIMES = {
+            "image/jpeg", "image/jpg", "image/png", "image/webp",
+            "image/gif", "image/bmp",
+        }
+        MAX_SIZE_BYTES = 4 * 1024 * 1024  # 4MB limit per image
+
+        try:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    logger.warning("[Multimodal] Image fetch failed url=%s status=%d", url, resp.status_code)
+                    return {}
+
+                content_type = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+                # Fallback mime detection from URL extension
+                if content_type not in SUPPORTED_MIMES:
+                    ext = url.rsplit(".", 1)[-1].lower() if "." in url else ""
+                    ext_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                               "webp": "image/webp", "gif": "image/gif", "bmp": "image/bmp"}
+                    content_type = ext_map.get(ext, "image/jpeg")
+
+                if content_type not in SUPPORTED_MIMES:
+                    logger.warning("[Multimodal] Unsupported image type url=%s mime=%s", url, content_type)
+                    return {}
+
+                raw = resp.content
+                if len(raw) > MAX_SIZE_BYTES:
+                    logger.warning("[Multimodal] Image too large (%d bytes), skipping: %s", len(raw), url)
+                    return {}
+
+                return {"data": raw, "mime_type": content_type}
+
+        except httpx.TimeoutException:
+            logger.warning("[Multimodal] Timeout downloading image: %s", url)
+            return {}
+        except Exception as exc:
+            logger.warning("[Multimodal] Error fetching image %s: %s", url, exc)
+            return {}
+
+
+
 
     async def invoke_embedding(
         self,
