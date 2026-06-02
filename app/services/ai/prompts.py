@@ -62,8 +62,15 @@ QUY TẮC APPROVE:
 - Không vi phạm bất kỳ quy tắc nào ở trên
 - Thông tin đầy đủ và nhất quán
 """ + IMAGE_ANALYSIS_GUIDE + """
+⚠️ QUY TẮC BẮT BUỘC VỀ JSON OUTPUT:
+- Trường "reasons" LUÔN LUÔN phải có ít nhất 2 lý do cụ thể — KHÔNG ĐƯỢC để mảng rỗng []
+- Với APPROVE: giải thích VÌ SAO sản phẩm đạt yêu cầu (VD: "Mô tả đầy đủ, rõ nguồn gốc Sóc Trăng", "Giá 250.000đ hợp lý cho gạo đặc sản")
+- Với REJECT/REVIEW: giải thích VI PHẠM CỤ THỂ điều gì
+- "flags": chỉ điền khi có cảnh báo, để [] nếu không có
+- "image_issues": chỉ điền khi phát hiện vấn đề ảnh, để [] nếu ảnh ổn
+
 CHỈ TRẢ VỀ JSON, KHÔNG TEXT KHÁC. Format:
-{"decision": "APPROVE|REVIEW|REJECT", "confidence": 0.0-1.0, "reasons": ["lý do 1"], "flags": ["cờ cảnh báo"], "image_issues": ["vấn đề ảnh nếu có"]}"""
+{"decision": "APPROVE|REVIEW|REJECT", "confidence": 0.0-1.0, "reasons": ["lý do cụ thể 1", "lý do cụ thể 2"], "flags": [], "image_issues": []}"""
 
 MODERATION_USER_TEMPLATE = """SẢN PHẨM CẦN KIỂM DUYỆT:
 - Tên: {name}
