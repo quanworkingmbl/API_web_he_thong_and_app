@@ -41,13 +41,16 @@ router = APIRouter()
 # HELPERS
 # ==============================================================================
 
+ADMIN_TYPES = {"admin", "superadmin"}
+
+
 def _require_admin(user: User):
-    if user.type != "admin":
+    if user.type not in ADMIN_TYPES:
         raise HTTPException(status_code=403, detail="Chỉ admin mới có quyền thực hiện")
 
 
 def _require_seller(user: User):
-    if user.type not in {"producer", "seller", "admin"}:
+    if user.type not in {"producer", "seller", "admin", "superadmin"}:
         raise HTTPException(status_code=403, detail="Chỉ người bán mới có quyền truy cập")
 
 
@@ -152,9 +155,10 @@ async def get_settlement_history(
     _require_seller(current_user)
 
     query = db.query(Settlement)
-    if current_user.type == "admin" and seller_id:
+    is_admin = current_user.type in ADMIN_TYPES
+    if is_admin and seller_id:
         query = query.filter(Settlement.seller_id == seller_id)
-    elif current_user.type != "admin":
+    elif not is_admin:
         query = query.filter(Settlement.seller_id == current_user.id)
 
     total = query.count()

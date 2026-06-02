@@ -51,7 +51,7 @@ AMOUNT_TOLERANCE = Decimal("1")   # 1 VND tolerance
 
 def _resolve_role(user: User) -> str:
     t = (user.type or "").lower()
-    if t == "admin":
+    if t in ("admin", "superadmin"):
         return "admin"
     if t in ("producer", "seller"):
         return "seller"
@@ -670,7 +670,7 @@ async def get_payment_reconciliation(
     db: Session = Depends(get_db)
 ):
     """[Admin] Đối soát doanh thu theo khoảng thời gian."""
-    if current_user.type != "admin":
+    if (current_user.type or "").lower() not in ("admin", "superadmin"):
         raise HTTPException(403, "Chỉ admin mới có quyền đối soát")
 
     query = db.query(Payment).filter(Payment.status == PaymentStatus.COMPLETED)
