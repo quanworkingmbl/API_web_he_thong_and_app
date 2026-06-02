@@ -268,9 +268,9 @@ async def topup_vnpay(
     db.add(tx)
     db.flush()  # lấy tx.id
 
-    # TxnRef: chỉ chữ+số (VNPAY Alphanumeric) — DEP + id + timestamp
+    # TxnRef: chỉ số — id (6 chữ số) + timestamp (14), ví dụ 00000220260601165343
     now_str = datetime.now(_TZ_VN).strftime("%Y%m%d%H%M%S")
-    txn_ref = f"DEP{tx.id}{now_str}"
+    txn_ref = f"{tx.id:06d}{now_str}"
     tx.vnpay_txn_ref = txn_ref
 
     deposit_return_url = os.getenv("VNPAY_DEPOSIT_RETURN_URL") or (

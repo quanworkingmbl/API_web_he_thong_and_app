@@ -89,6 +89,12 @@ class VNPayService:
             logger.warning(
                 "[VNPAY] VNPAY_TMN_CODE hoặc VNPAY_HASH_SECRET chưa được cấu hình trong .env!"
             )
+        else:
+            logger.info(
+                "[VNPAY] config tmn=%s secret_len=%d",
+                self.tmn_code,
+                len(self.hash_secret),
+            )
 
     # ──────────────────────────────────────────────────────────────────────────
     # INTERNAL HELPERS
@@ -162,20 +168,21 @@ class VNPayService:
         if not txn_ref:
             txn_ref = f"{order_id}{create_date}"
 
-        # vnp_OrderInfo: ASCII, không ký tự đặc biệt (#, &, ...) — tránh lỗi format/hash
+        # vnp_OrderInfo: ASCII, không ký tự đặc biệt, gộp khoảng trắng thừa
         safe_order_info = re.sub(
             r"[^a-zA-Z0-9\s]",
             " ",
             order_info[:255].encode("ascii", errors="replace").decode("ascii"),
-        ).strip() or "Thanh toan"
+        )
+        safe_order_info = re.sub(r"\s+", " ", safe_order_info).strip() or "Thanh toan"
 
-        # FIX: Đảm bảo IP là IPv4 hợp lệ (không phải IPv6 như ::1 hay ::ffff:x.x.x.x)
-        safe_ip = client_ip
-        if ":" in client_ip:  # IPv6
-            if client_ip.startswith("::ffff:"):
-                safe_ip = client_ip[7:]   # lấy phần IPv4 sau prefix
-            else:
-                safe_ip = "127.0.0.1"    # fallback
+        # vnp_IpAddr: IPv4 thật (Postman/localhost → fallback IP public, tránh 03/70 sandbox)
+        fallback_ip = (os.getenv("VNPAY_CLIENT_IP_FALLBACK") or "203.205.26.141").strip()
+        safe_ip = (client_ip or "").strip()
+        if ":" in safe_ip:
+            safe_ip = safe_ip[7:] if safe_ip.startswith("::ffff:") else fallback_ip
+        if safe_ip in ("", "127.0.0.1", "::1"):
+            safe_ip = fallback_ip
 
         params = {
             "vnp_Version":    "2.1.0",
