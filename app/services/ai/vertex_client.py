@@ -308,20 +308,25 @@ class VertexAIClient:
 
             config = genai_types.GenerateContentConfig(**config_kwargs)
 
-            # Build multipart contents: text + image parts
-            # google-genai SDK expects list of Part objects
-            parts: list = [genai_types.Part.from_text(prompt.strip())]
+            # Build parts dùng constructor trực tiếp (stable hơn classmethod
+            # from_text/from_bytes vốn thay đổi giữa các version SDK)
+            parts = [genai_types.Part(text=prompt.strip())]
             for img in image_parts:
                 parts.append(
-                    genai_types.Part.from_bytes(
-                        data=img["data"],
-                        mime_type=img["mime_type"],
+                    genai_types.Part(
+                        inline_data=genai_types.Blob(
+                            data=img["data"],
+                            mime_type=img["mime_type"],
+                        )
                     )
                 )
 
+            # Bọc trong Content object — cần thiết cho multimodal request
+            content_obj = genai_types.Content(parts=parts, role="user")
+
             response = self._client.models.generate_content(
                 model=model,
-                contents=parts,
+                contents=content_obj,
                 config=config,
             )
 
