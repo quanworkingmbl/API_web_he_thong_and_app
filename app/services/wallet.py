@@ -6,7 +6,7 @@ Xử lý logic ví seller (SellerWallet).
 Nguyên tắc (80/20 Reserve):
 - Khi buyer xác nhận nhận hàng → credit_seller_wallet() tách:
     80% → available_balance  (rút được ngay, trừ min_reserve)
-    20% → reserve_balance    (giữ 14 ngày, tự giải phóng về available)
+    20% → reserve_balance    (giữ 7 ngày, tự giải phóng về available)
 - Dùng wallet_credited để chống double-credit
 - min_reserve = số sản phẩm đang bán × MIN_RESERVE_PER_PRODUCT
 """
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 # ── Hằng số ───────────────────────────────────────────────────────────────────
 AVAILABLE_RATIO   = Decimal("0.80")   # 80% vào available ngay
-RESERVE_RATIO     = Decimal("0.20")   # 20% giữ 14 ngày
-RESERVE_HOLD_DAYS = 14                # Số ngày giữ reserve trước khi giải phóng
+RESERVE_RATIO     = Decimal("0.20")   # 20% giữ 7 ngày
+RESERVE_HOLD_DAYS = 7                 # Số ngày giữ reserve trước khi giải phóng
 MIN_RESERVE_PER_PRODUCT = Decimal("50000")  # 50,000 VND / sản phẩm đang bán
 MAX_RESERVE_RATIO = Decimal("0.20")   # Tối đa 20% available_balance — tránh khóa seller hoàn toàn
 
@@ -86,7 +86,7 @@ def credit_seller_wallet(db: Session, order: Order) -> bool:
     """
     Tách seller_amount theo tỷ lệ 80/20 vào ví:
         80% → available_balance  (rút được ngay, trừ min_reserve)
-        20% → reserve_balance    (giữ 30 ngày)
+        20% → reserve_balance    (giữ 7 ngày)
 
     Chỉ được gọi khi USER xác nhận nhận hàng (confirm_order_received).
     KHÔNG gọi khi seller/admin set DELIVERED thủ công.
@@ -163,7 +163,7 @@ def credit_seller_wallet(db: Session, order: Order) -> bool:
 
 def release_matured_reserves(seller_id: int, db: Session) -> Decimal:
     """
-    Giải phóng reserve đã quá 30 ngày về available_balance.
+    Giải phóng reserve đã quá 7 ngày về available_balance.
     Gọi thủ công bởi admin hoặc trigger định kỳ.
 
     Returns: tổng số tiền đã giải phóng

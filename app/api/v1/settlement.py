@@ -13,7 +13,7 @@ Endpoints:
 - GET  /settlement/withdrawal/admin          – Admin xem tất cả yêu cầu
 - POST /settlement/withdrawal/{id}/approve   – Admin duyệt yêu cầu rút
 - POST /settlement/withdrawal/{id}/reject    – Admin từ chối yêu cầu rút
-- POST /settlement/release-reserves          – Admin/system giải phóng reserve đã đủ 30 ngày
+- POST /settlement/release-reserves          – Admin/system giải phóng reserve đã đủ 7 ngày
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query

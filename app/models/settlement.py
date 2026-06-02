@@ -35,7 +35,7 @@ class SellerWallet(Base):
     # Số dư
     pending_balance   = Column(Numeric(15, 2), default=0, nullable=False)  # Legacy – chờ buyer xác nhận
     available_balance = Column(Numeric(15, 2), default=0, nullable=False)  # 80% seller_amount – có thể rút
-    reserve_balance   = Column(Numeric(15, 2), default=0, nullable=False)  # 20% giữ lại 30 ngày bảo lãnh
+    reserve_balance   = Column(Numeric(15, 2), default=0, nullable=False)  # 20% giữ lại 7 ngày bảo lãnh
     total_withdrawn   = Column(Numeric(15, 2), default=0, nullable=False)  # Tổng đã rút ra
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

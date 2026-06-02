@@ -392,6 +392,23 @@ async def create_product(
     is_admin = current_user.type == "admin"
     if not is_admin:
         check_seller_kyc_verified(current_user, db)
+        # ── Kiểm tra ký quỹ bán hàng (Deposit Gate) ─────────────────────────
+        from app.models.settlement import SellerDepositWallet
+        from app.api.v1.deposit import MIN_DEPOSIT_REQUIRED
+        deposit_wallet = db.query(SellerDepositWallet).filter(
+            SellerDepositWallet.seller_id == current_user.id
+        ).first()
+        deposit_bal = Decimal(str(deposit_wallet.deposit_balance or 0)) if deposit_wallet else Decimal("0")
+        if deposit_bal < MIN_DEPOSIT_REQUIRED:
+            short = MIN_DEPOSIT_REQUIRED - deposit_bal
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Chưa đủ ký quỹ bán hàng. "
+                    f"Số dư hiện tại: {deposit_bal:,.0f}đ — "
+                    f"Cần nạp thêm tối thiểu {short:,.0f}đ vào Ví Sàn để đăng sản phẩm."
+                ),
+            )
     actual_id = product_data.seller_id if is_admin else current_user.id
     if not db.query(User).filter(User.id == actual_id).first():
         raise HTTPException(status_code=400, detail="Seller not found")
