@@ -146,7 +146,7 @@ async def get_seller_wallet(
 @router.get("/history", summary="Lịch sử kỳ đối soát")
 async def get_settlement_history(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     seller_id: Optional[int] = Query(None, description="Filter theo seller (admin)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
