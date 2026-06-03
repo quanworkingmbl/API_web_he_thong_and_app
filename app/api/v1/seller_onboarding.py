@@ -38,7 +38,7 @@ class SellerRegisterRequest(BaseModel):
     business_name: str = Field(..., min_length=2, max_length=255)
     business_type: str = Field(
         default="HOUSEHOLD",
-        pattern="^(HOUSEHOLD|COOPERATIVE|COMPANY)$"
+        pattern="^(INDIVIDUAL|HOUSEHOLD|COOPERATIVE|COMPANY)$"
     )
     description: Optional[str] = None
     address: Optional[str] = None
