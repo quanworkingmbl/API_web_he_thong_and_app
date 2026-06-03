@@ -1326,6 +1326,12 @@ async def get_seller_profile(
     ).count()
     total_orders = db.query(Order).filter(Order.seller_id == current_user.id).count()
 
+    # Lấy thông tin hồ sơ doanh nghiệp (địa chỉ cửa hàng, số điện thoại shop...)
+    from app.models.seller_profile import SellerProfile
+    seller_profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == current_user.id
+    ).first()
+
     return {
         "success": True,
         "data": {
@@ -1340,7 +1346,27 @@ async def get_seller_profile(
                 "approved_products": approved_products,
                 "total_orders": total_orders
             },
-            "member_since": current_user.created_at.isoformat() if current_user.created_at else None
+            "member_since": current_user.created_at.isoformat() if current_user.created_at else None,
+            # ── Thông tin hồ sơ doanh nghiệp ──────────────────────────────
+            "business_name": seller_profile.business_name if seller_profile else None,
+            "business_type": (
+                seller_profile.business_type.value
+                if seller_profile and hasattr(seller_profile.business_type, "value")
+                else str(seller_profile.business_type) if seller_profile and seller_profile.business_type else None
+            ),
+            "description": seller_profile.description if seller_profile else None,
+            # Địa chỉ CỬA HÀNG (từ SellerProfile, khác với địa chỉ giao hàng)
+            "shop_address": seller_profile.address if seller_profile else None,
+            "shop_phone": seller_profile.shop_phone if seller_profile else None,
+            "shop_email": seller_profile.shop_email if seller_profile else None,
+            "verification_status": (
+                seller_profile.verification_status.value
+                if seller_profile and hasattr(seller_profile.verification_status, "value")
+                else str(seller_profile.verification_status) if seller_profile and seller_profile.verification_status else None
+            ),
+            "bank_name": seller_profile.bank_name if seller_profile else None,
+            "bank_account_number": seller_profile.bank_account_number if seller_profile else None,
+            "bank_account_name": seller_profile.bank_account_name if seller_profile else None,
         }
     }
 
