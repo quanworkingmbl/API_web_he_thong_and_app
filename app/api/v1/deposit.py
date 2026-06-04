@@ -301,6 +301,241 @@ async def topup_vnpay(
     }
 
 
+def _build_result_html(success: bool, amount: int = 0, tx_id: int = 0,
+                        title: str = "", subtitle: str = "",
+                        redirect_url: str = "/seller/wallet?tab=topup") -> str:
+    """Tạo trang kết quả thanh toán đẹp với animation."""
+    if success:
+        icon_color  = "#22c55e"
+        bg_color    = "#f0fdf4"
+        border_color = "#bbf7d0"
+        circle_anim = "circle-success"
+        path_d = "M6 12 L10 16 L18 8"
+        status_label = "THÀNH CÔNG"
+        amount_fmt = f"{amount:,}đ".replace(",", ".")
+        detail_html = f"""
+            <div class="amount">+{amount_fmt}</div>
+            <p class="detail-text">Ký quỹ Ví Sàn đã được cộng vào tài khoản của bạn</p>
+        """
+    else:
+        icon_color   = "#ef4444"
+        bg_color     = "#fef2f2"
+        border_color = "#fecaca"
+        circle_anim  = "circle-fail"
+        path_d = "M8 8 L16 16 M16 8 L8 16"
+        status_label = "THẤT BẠI"
+        amount_fmt = f"{amount:,}đ".replace(",", ".") if amount else ""
+        detail_html = f"""
+            <p class="detail-text" style="color:#ef4444">
+                Giao dịch không thành công.<br>Vui lòng thử lại hoặc liên hệ hỗ trợ.
+            </p>
+        """
+
+    return f"""<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{'Nạp ký quỹ thành công' if success else 'Thanh toán thất bại'} — Agrarian</title>
+  <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: {bg_color};
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }}
+    .card {{
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.10);
+      padding: 48px 40px 40px;
+      text-align: center;
+      max-width: 420px;
+      width: 100%;
+      border: 1px solid {border_color};
+      animation: slide-up 0.5s cubic-bezier(.22,.68,0,1.2) both;
+    }}
+    @keyframes slide-up {{
+      from {{ opacity: 0; transform: translateY(32px) scale(0.97); }}
+      to   {{ opacity: 1; transform: translateY(0)   scale(1); }}
+    }}
+
+    /* ── Animated circle ── */
+    .icon-wrap {{
+      width: 88px; height: 88px;
+      margin: 0 auto 24px;
+    }}
+    .icon-wrap svg {{
+      width: 88px; height: 88px;
+      overflow: visible;
+    }}
+    .circle {{
+      fill: none;
+      stroke: {icon_color};
+      stroke-width: 3;
+      stroke-dasharray: 264;
+      stroke-dashoffset: 264;
+      stroke-linecap: round;
+      transform-origin: center;
+      transform: rotate(-90deg);
+      animation: draw-circle 0.65s ease forwards 0.1s;
+    }}
+    @keyframes draw-circle {{
+      to {{ stroke-dashoffset: 0; }}
+    }}
+    .checkmark {{
+      fill: none;
+      stroke: {icon_color};
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 40;
+      stroke-dashoffset: 40;
+      animation: draw-check 0.4s ease forwards 0.75s;
+    }}
+    @keyframes draw-check {{
+      to {{ stroke-dashoffset: 0; }}
+    }}
+    .icon-bg {{
+      fill: {'#dcfce7' if success else '#fee2e2'};
+      stroke: none;
+    }}
+
+    /* ── Badge ── */
+    .badge {{
+      display: inline-block;
+      background: {icon_color};
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      padding: 4px 14px;
+      border-radius: 99px;
+      margin-bottom: 14px;
+    }}
+
+    h1 {{
+      font-size: 22px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 6px;
+    }}
+    .amount {{
+      font-size: 36px;
+      font-weight: 800;
+      color: {icon_color};
+      margin: 16px 0 8px;
+      letter-spacing: -1px;
+    }}
+    .detail-text {{
+      color: #6b7280;
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }}
+
+    /* ── Info box ── */
+    .info-box {{
+      background: #f9fafb;
+      border: 1px solid #f0f0f0;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 28px;
+      text-align: left;
+    }}
+    .info-row {{
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      padding: 6px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }}
+    .info-row:last-child {{ border-bottom: none; }}
+    .info-label {{ color: #9ca3af; }}
+    .info-value {{ color: #111; font-weight: 600; }}
+
+    /* ── Buttons ── */
+    .btn-primary {{
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: {'#16a34a' if success else '#6b7280'};
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.15s;
+    }}
+    .btn-primary:hover {{ opacity: 0.88; }}
+
+    /* ── Countdown ── */
+    .countdown {{
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 14px;
+    }}
+    #cnt {{ font-weight: 700; color: #374151; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-wrap">
+      <svg viewBox="0 0 88 88">
+        <circle class="icon-bg" cx="44" cy="44" r="40"/>
+        <circle class="circle" cx="44" cy="44" r="40"/>
+        <path class="checkmark" d="{path_d.replace('6 12','18 44').replace('10 16','38 60').replace('18 8','70 28').replace('8 8','28 28').replace('16 16','60 60').replace('16 8','60 28').replace('8 16','28 60')}"/>
+      </svg>
+    </div>
+
+    <div class="badge">{status_label}</div>
+    <h1>{'Nạp ký quỹ thành công!' if success else 'Thanh toán không thành công'}</h1>
+
+    {detail_html}
+
+    <div class="info-box">
+      <div class="info-row">
+        <span class="info-label">Mã giao dịch</span>
+        <span class="info-value">#{tx_id}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Phương thức</span>
+        <span class="info-value">VNPay</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Trạng thái</span>
+        <span class="info-value" style="color:{icon_color}">{status_label}</span>
+      </div>
+    </div>
+
+    <a href="{redirect_url}" class="btn-primary" id="back-btn">
+      {'↩ Quay lại Ví Sàn' if success else '↩ Thử lại'}
+    </a>
+    <p class="countdown">Tự động chuyển sau <span id="cnt">5</span> giây</p>
+  </div>
+
+  <script>
+    var n = 5;
+    var el = document.getElementById('cnt');
+    var timer = setInterval(function() {{
+      n--;
+      el.textContent = n;
+      if (n <= 0) {{
+        clearInterval(timer);
+        window.location.href = '{redirect_url}';
+      }}
+    }}, 1000);
+  </script>
+</body>
+</html>"""
+
+
 @router.get("/vnpay/return", summary="VNPay: Redirect callback sau khi thanh toán")
 async def vnpay_return(
     request: Request,
@@ -308,21 +543,39 @@ async def vnpay_return(
 ):
     """
     VNPay redirect người dùng về đây sau khi thanh toán.
-    Xác minh chữ ký → cập nhật trạng thái → trả về HTML thông báo.
+    Xác minh chữ ký → cập nhật trạng thái → trả về HTML thông báo đẹp.
     """
-    params = dict(request.query_params)
-    result = vnpay_service.verify_return_url(params)
-
+    params  = dict(request.query_params)
+    result  = vnpay_service.verify_return_url(params)
     txn_ref = params.get("vnp_TxnRef", "")
+
+    # Lấy VNPAY_WEB_URL để build redirect link về UI
+    web_url = os.getenv("VNPAY_WEB_URL", "").rstrip("/")
+    wallet_url = f"{web_url}/seller/wallet?tab=history" if web_url else "/seller/wallet?tab=history"
+
     tx = db.query(DepositTransaction).filter(
         DepositTransaction.vnpay_txn_ref == txn_ref
     ).first()
 
     if not tx:
-        return HTMLResponse("<h2>Khong tim thay giao dich. Vui long lien he ho tro.</h2>", status_code=404)
+        return HTMLResponse(
+            _build_result_html(
+                success=False, tx_id=0,
+                redirect_url=wallet_url,
+            ),
+            status_code=404,
+        )
 
+    # Đã xử lý rồi → vẫn hiện trang success đẹp
     if tx.status == DepositStatus.CONFIRMED:
-        return HTMLResponse("<h2>Giao dich da duoc xu ly truoc do.</h2>")
+        return HTMLResponse(
+            _build_result_html(
+                success=True,
+                amount=int(tx.amount),
+                tx_id=tx.id,
+                redirect_url=wallet_url,
+            )
+        )
 
     tx.vnpay_response = json.dumps(params)
 
@@ -333,18 +586,27 @@ async def vnpay_return(
         db.commit()
         logger.info("[Deposit] VNPay return OK — tx #%s CONFIRMED", tx.id)
         return HTMLResponse(
-            f"<h2>Nap ky quy thanh cong: {int(tx.amount):,}d</h2>"
-            "<p>Ban co the dong trang nay va quay lai Ky Quy Seller.</p>"
+            _build_result_html(
+                success=True,
+                amount=int(tx.amount),
+                tx_id=tx.id,
+                redirect_url=wallet_url,
+            )
         )
     else:
         tx.status = DepositStatus.REJECTED
-        tx.note = f"VNPay response_code={result.get('response_code')}"
+        tx.note   = f"VNPay response_code={result.get('response_code')}"
         db.commit()
         logger.warning("[Deposit] VNPay return FAIL — tx #%s, code=%s", tx.id, result.get("response_code"))
         return HTMLResponse(
-            f"<h2>Thanh toan that bai (ma: {result.get('response_code')})</h2>"
-            "<p>Vui long thu lai hoac lien he ho tro.</p>"
+            _build_result_html(
+                success=False,
+                amount=int(tx.amount) if tx.amount else 0,
+                tx_id=tx.id,
+                redirect_url=wallet_url,
+            )
         )
+
 
 
 @router.get("/vnpay/ipn", summary="VNPay: IPN server-to-server callback")
