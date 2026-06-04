@@ -19,6 +19,12 @@ _PUBLIC_PATHS = {
     "/openapi.json",
 }
 
+# VNPAY callback paths – VNPAY Gateway and browser never send X-Quan-Secret
+_VNPAY_CALLBACK_PREFIXES = (
+    "/api/payments/vnpay/ipn",
+    "/api/payments/vnpay/return",
+)
+
 class ApiSecretMiddleware(BaseHTTPMiddleware):
     """Middleware that validates the X-Quan-Secret header on every request.
     
@@ -36,6 +42,11 @@ class ApiSecretMiddleware(BaseHTTPMiddleware):
 
         # Skip check for public paths
         if path in _PUBLIC_PATHS or path.startswith("/docs") or path.startswith("/redoc") or path.startswith("/openapi"):
+            return await call_next(request)
+
+        # Skip check for VNPAY callback paths (IPN + return URL)
+        # VNPAY Gateway never sends custom headers – exempting these prevents 403
+        if any(path.startswith(prefix) for prefix in _VNPAY_CALLBACK_PREFIXES):
             return await call_next(request)
 
         secret = request.headers.get("X-Quan-Secret")

@@ -411,7 +411,7 @@ async def vnpay_return(
     return HTMLResponse(content=html)
 
 
-@router.post("/vnpay/ipn", summary="VNPAY IPN Webhook")
+@router.api_route("/vnpay/ipn", methods=["GET", "POST"], summary="VNPAY IPN Webhook")
 async def vnpay_ipn(
     request: Request,
     db: Session = Depends(get_db)
