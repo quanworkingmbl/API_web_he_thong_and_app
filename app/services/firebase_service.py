@@ -225,3 +225,64 @@ def mark_messages_as_read(chat_id: str, reader_type: str) -> None:
     db = get_firestore()
     field = f"unread_{reader_type}"
     db.collection("chats").document(chat_id).update({field: 0})
+
+
+def send_order_notification_to_chat(
+    buyer_id: int,
+    seller_id: int,
+    buyer_name: str,
+    shop_name: str,
+    order_number: str,
+    total_amount: str,
+    items_summary: str,
+) -> str:
+    """
+    Ghi thông báo đơn hàng mới vào phòng chat buyer↔seller.
+    sender_type="system" — chỉ seller thấy, buyer UI sẽ ẩn.
+
+    Returns: chat_id
+    """
+    import datetime
+
+    # 1. Tạo/lấy phòng chat
+    chat_id, _ = get_or_create_chat_room(
+        buyer_id=buyer_id,
+        seller_id=seller_id,
+        shop_name=shop_name,
+        buyer_name=buyer_name,
+    )
+
+    # 2. Nội dung thông báo
+    content = (
+        f"🛒 Đơn hàng mới: #{order_number}\n"
+        f"👤 Khách: {buyer_name}\n"
+        f"📦 {items_summary}\n"
+        f"💰 Tổng tiền: {total_amount}"
+    )
+
+    # 3. Ghi vào Firestore (type="order_notification", sender_type="system")
+    db = get_firestore()
+    chat_ref = db.collection("chats").document(chat_id)
+    messages_ref = chat_ref.collection("messages")
+
+    now = datetime.datetime.utcnow()
+    _, msg_ref = messages_ref.add({
+        "sender_id": 0,               # 0 = system
+        "sender_type": "system",      # marker để buyer UI ẩn đi
+        "content": content,
+        "type": "order_notification", # loại đặc biệt
+        "order_number": order_number, # metadata thêm
+        "created_at": now,
+        "read": False,
+    })
+
+    # 4. Cập nhật last_message và tăng unread_seller
+    chat_ref.update({
+        "last_message": f"🛒 Đơn hàng mới #{order_number}",
+        "last_at": now,
+        "unread_seller": firestore.Increment(1),
+        # KHÔNG tăng unread_buyer — buyer không cần xem cái này
+    })
+
+    logger.info(f"[Chat] Order notification sent: chat={chat_id}, order={order_number}")
+    return chat_id

@@ -1982,6 +1982,38 @@ async def create_order(
         total_amount=total_amount,
     )
 
+    # [CHAT] Ghi thông báo đơn hàng vào Firestore — chỉ seller thấy trong tab Chat
+    try:
+        from app.services.firebase_service import send_order_notification_to_chat
+        # Tóm tắt danh sách sản phẩm (tối đa 3 dòng)
+        item_lines = [
+            f"{d['product'].name} x{d['quantity']}"
+            for d in items_of_seller[:3]
+        ]
+        if len(items_of_seller) > 3:
+            item_lines.append(f"... và {len(items_of_seller) - 3} sản phẩm khác")
+        items_summary = ", ".join(item_lines)
+
+        # Lấy shop_name từ Store hoặc User
+        seller_user = db.query(User).filter(User.id == detected_seller_id).first()
+        shop_name = seller_user.name if seller_user else f"Shop #{detected_seller_id}"
+
+        send_order_notification_to_chat(
+            buyer_id=current_user.id,
+            seller_id=detected_seller_id,
+            buyer_name=customer_name_val,
+            shop_name=shop_name,
+            order_number=order_number,
+            total_amount=f"{int(total_amount):,}đ",
+            items_summary=items_summary,
+        )
+    except Exception as _chat_err:
+        # Không để lỗi chat ảnh hưởng đến đơn hàng
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "[Checkout] Chat notification failed (non-critical): %s", _chat_err
+        )
+
     # ── Bước 4: Xóa các cart items đã checkout thành công ──────────────────
     # Chỉ xóa đúng các items user vừa đặt (theo product_id + variant_id)
     # để không ảnh hưởng các sản phẩm còn lại trong giỏ (nếu có)
