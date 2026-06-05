@@ -144,19 +144,22 @@ async def list_rooms(
         db_fs = firebase_service.get_firestore()
         is_seller = current_user.type in SELLER_TYPES
 
+        # Không dùng orderBy trong Firestore query để tránh cần composite index.
+        # Lọc theo buyer_id hoặc seller_id, sau đó sort bằng Python.
         if is_seller:
             query = db_fs.collection("chats").where(
                 "seller_id", "==", current_user.id
-            ).order_by("last_at", direction="DESCENDING").limit(50)
+            ).limit(50)
         else:
             query = db_fs.collection("chats").where(
                 "buyer_id", "==", current_user.id
-            ).order_by("last_at", direction="DESCENDING").limit(50)
+            ).limit(50)
 
         docs = query.stream()
         rooms = []
         for doc in docs:
             d = doc.to_dict()
+            last_at = d.get("last_at")
             rooms.append({
                 "chat_id": doc.id,
                 "buyer_id": d.get("buyer_id"),
@@ -164,14 +167,19 @@ async def list_rooms(
                 "shop_name": d.get("shop_name", ""),
                 "buyer_name": d.get("buyer_name", ""),
                 "last_message": d.get("last_message", ""),
-                "last_at": d.get("last_at").isoformat() if d.get("last_at") else None,
+                "last_at": last_at.isoformat() if last_at else None,
+                "last_at_raw": last_at,  # dùng để sort
                 "unread_count": d.get("unread_seller" if is_seller else "unread_buyer", 0),
             })
+
+        # Sort mới nhất lên đầu (Python-side, không cần composite index)
+        rooms.sort(key=lambda r: r.pop("last_at_raw") or 0, reverse=True)
 
         return {"success": True, "data": rooms}
     except Exception as e:
         logger.error(f"[Chat] list_rooms error: {e}")
         raise HTTPException(status_code=503, detail="Không thể tải danh sách chat")
+
 
 
 @router.post("/rooms/{chat_id}/messages", summary="Gửi tin nhắn")
