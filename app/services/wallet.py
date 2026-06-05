@@ -3,12 +3,28 @@ app/services/wallet.py
 ======================
 Xử lý logic ví seller (SellerWallet).
 
-Nguyên tắc (80/20 Reserve):
-- Khi buyer xác nhận nhận hàng → credit_seller_wallet() tách:
-    80% → available_balance  (rút được ngay, trừ min_reserve)
-    20% → reserve_balance    (giữ 7 ngày, tự giải phóng về available)
-- Dùng wallet_credited để chống double-credit
-- min_reserve = số sản phẩm đang bán × MIN_RESERVE_PER_PRODUCT
+Nguyên tắc (100% Hold 7 ngày — áp dụng từ phiên bản hiện tại):
+─────────────────────────────────────────────────────────────────
+  Khi buyer xác nhận nhận hàng (hoặc auto-confirm sau 7 ngày shipping):
+    100% seller_amount → pending_balance  (giữ 7 ngày chờ khiếu nại)
+
+  Sau 7 ngày không có khiếu nại:
+    pending_balance → available_balance   (có thể rút toàn bộ)
+
+  Seller rút tiền:
+    available_balance → total_withdrawn
+
+Luồng tiền mẫu (đơn 80.000đ, phí sàn 10%):
+  Khách trả: 80.000đ
+  Phí sàn (10%): 8.000đ  → Admin
+  Seller nhận:   72.000đ → pending_balance (7 ngày)
+  Sau 7 ngày:    72.000đ → available_balance (rút được)
+
+Ghi chú backward compat:
+  - Đơn cũ (đã credit theo 80/20) KHÔNG bị ảnh hưởng.
+    reserve_balance cũ vẫn giữ đúng, được giải phóng bình thường.
+  - Đơn mới (wallet_credited = True sau khi cập nhật code):
+    100% vào pending_balance.
 """
 
 import logging
@@ -22,11 +38,7 @@ from app.models.settlement import SellerWallet
 logger = logging.getLogger(__name__)
 
 # ── Hằng số ───────────────────────────────────────────────────────────────────
-AVAILABLE_RATIO   = Decimal("0.80")   # 80% vào available ngay
-RESERVE_RATIO     = Decimal("0.20")   # 20% giữ 7 ngày
-RESERVE_HOLD_DAYS = 7                 # Số ngày giữ reserve trước khi giải phóng
-MIN_RESERVE_PER_PRODUCT = Decimal("50000")  # 50,000 VND / sản phẩm đang bán
-MAX_RESERVE_RATIO = Decimal("0.20")   # Tối đa 20% available_balance — tránh khóa seller hoàn toàn
+HOLD_DAYS = 7   # Giữ 100% seller_amount 7 ngày trước khi chuyển sang available
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -51,45 +63,24 @@ def _get_or_create_wallet(seller_id: int, db: Session) -> SellerWallet:
     return wallet
 
 
-def calc_min_reserve(seller_id: int, db: Session, available_balance: Decimal = None) -> Decimal:
-    """
-    Tính min_reserve dựa trên số sản phẩm đang APPROVED của seller.
-    Seller chỉ rút được: available_balance - min_reserve
-    Có giới hạn: không vượt quá 20% available_balance (tránh khóa seller hoàn toàn).
-    """
-    from app.models.product import Product, ProductStatus
-    active_count = db.query(Product).filter(
-        Product.seller_id == seller_id,
-        Product.status == ProductStatus.APPROVED,
-        Product.is_active == True,
-    ).count()
-    product_based = MIN_RESERVE_PER_PRODUCT * active_count
-
-    # Cap: nếu biết available_balance, giới hạn tối đa 20%
-    if available_balance is not None and available_balance > 0 and active_count > 0:
-        cap = (available_balance * MAX_RESERVE_RATIO).quantize(Decimal("0.01"))
-        return min(product_based, cap)
-    return product_based
-
-
 def calc_max_withdrawable(seller_id: int, db: Session) -> Decimal:
-    """Số tiền tối đa seller có thể rút = available_balance - min_reserve (có cap 20%)."""
+    """
+    Số tiền tối đa seller có thể rút = available_balance.
+    (Bỏ min_reserve — tiền đã giữ 7 ngày nên không cần giữ thêm.)
+    """
     wallet = _get_or_create_wallet(seller_id, db)
-    available = Decimal(str(wallet.available_balance or 0))
-    min_r = calc_min_reserve(seller_id, db, available_balance=available)
-    return max(Decimal("0"), available - min_r)
+    return max(Decimal("0"), Decimal(str(wallet.available_balance or 0)))
 
 
 # ── Core functions ─────────────────────────────────────────────────────────────
 
 def credit_seller_wallet(db: Session, order: Order) -> bool:
     """
-    Tách seller_amount theo tỷ lệ 80/20 vào ví:
-        80% → available_balance  (rút được ngay, trừ min_reserve)
-        20% → reserve_balance    (giữ 7 ngày)
+    Ghi 100% seller_amount vào pending_balance (giữ 7 ngày).
 
-    Chỉ được gọi khi USER xác nhận nhận hàng (confirm_order_received).
-    KHÔNG gọi khi seller/admin set DELIVERED thủ công.
+    Chỉ được gọi khi:
+      - Buyer xác nhận nhận hàng (confirm_order_received)
+      - Auto-confirm sau 7 ngày shipping
 
     Returns:
         True  – cộng thành công
@@ -105,9 +96,6 @@ def credit_seller_wallet(db: Session, order: Order) -> bool:
         return False
 
     # ── Khóa row Order (FOR UPDATE) để chống concurrent double-credit ───────
-    # Tình huống race: 2 request confirm-received cùng lúc, cả 2 đọc
-    # wallet_credited=False trước khi cái nào ghi xong → double-credit.
-    # SELECT FOR UPDATE đảm bảo chỉ 1 transaction xử lý tại một thời điểm.
     locked_order = (
         db.query(Order)
         .filter(Order.id == order.id)
@@ -121,12 +109,7 @@ def credit_seller_wallet(db: Session, order: Order) -> bool:
     # Cập nhật flag ngay để các transaction khác thấy sau khi commit
     locked_order.wallet_credited = True
 
-    available_credit = (seller_amount * AVAILABLE_RATIO).quantize(Decimal("0.01"))
-    reserve_credit   = (seller_amount * RESERVE_RATIO).quantize(Decimal("0.01"))
-    # Tránh lệch do làm tròn
-    available_credit = seller_amount - reserve_credit
-
-    # Khóa ví seller (FOR UPDATE) để ghi số dư an toàn
+    # ── 100% vào pending_balance (giữ 7 ngày) ─────────────────────────────
     wallet = (
         db.query(SellerWallet)
         .filter(SellerWallet.seller_id == locked_order.seller_id)
@@ -144,27 +127,28 @@ def credit_seller_wallet(db: Session, order: Order) -> bool:
         db.add(wallet)
         db.flush()
 
-    wallet.available_balance = Decimal(str(wallet.available_balance or 0)) + available_credit
-    wallet.reserve_balance   = Decimal(str(wallet.reserve_balance   or 0)) + reserve_credit
+    wallet.pending_balance = Decimal(str(wallet.pending_balance or 0)) + seller_amount
 
-    # Lưu thời điểm giải phóng reserve
+    # Lưu thời điểm giải phóng (now + 7 ngày)
     if hasattr(locked_order, "reserve_release_at"):
-        locked_order.reserve_release_at = datetime.utcnow() + timedelta(days=RESERVE_HOLD_DAYS)
+        locked_order.reserve_release_at = datetime.utcnow() + timedelta(days=HOLD_DAYS)
 
-    # Đồng bộ lại object order được truyền vào (tránh stale data)
+    # Đồng bộ lại object order được truyền vào
     order.wallet_credited = True
 
     logger.info(
-        "[Wallet] Order #%s → available +%s | reserve +%s (seller #%s)",
-        order.id, available_credit, reserve_credit, order.seller_id,
+        "[Wallet] Order #%s → pending +%s (seller #%s) — giải phóng sau %d ngày",
+        order.id, seller_amount, order.seller_id, HOLD_DAYS,
     )
     return True
 
 
-def release_matured_reserves(seller_id: int, db: Session) -> Decimal:
+def release_matured_holds(seller_id: int, db: Session) -> Decimal:
     """
-    Giải phóng reserve đã quá 7 ngày về available_balance.
+    Giải phóng tiền đã qua 7 ngày từ pending_balance → available_balance.
     Gọi thủ công bởi admin hoặc trigger định kỳ.
+
+    Xử lý cả đơn cũ (20% reserve) lẫn đơn mới (100% pending).
 
     Returns: tổng số tiền đã giải phóng
     """
@@ -185,16 +169,39 @@ def release_matured_reserves(seller_id: int, db: Session) -> Decimal:
         return total_released
 
     wallet = _get_or_create_wallet(seller_id, db)
+
     for o in matured_orders:
-        reserve_amt = (Decimal(str(o.seller_amount or 0)) * RESERVE_RATIO).quantize(Decimal("0.01"))
-        release_amt = Decimal(str(o.seller_amount or 0)) - reserve_amt  # = available_credit đã ghi
-        # Lấy đúng phần reserve của đơn này
-        order_reserve = reserve_amt
+        seller_amt = Decimal(str(o.seller_amount or 0))
+        # Đơn cũ (80/20): giải phóng phần reserve (20%)
+        old_reserve_ratio = Decimal("0.20")
+        old_reserve = (seller_amt * old_reserve_ratio).quantize(Decimal("0.01"))
 
-        wallet.reserve_balance   = max(Decimal("0"), Decimal(str(wallet.reserve_balance or 0)) - order_reserve)
-        wallet.available_balance = Decimal(str(wallet.available_balance or 0)) + order_reserve
+        # Kiểm tra đây là đơn mới (100% pending) hay đơn cũ (20% reserve)
+        # Đơn mới: toàn bộ seller_amount nằm trong pending_balance
+        # Heuristic: nếu pending_balance đủ chứa seller_amount → đơn mới
+        current_pending = Decimal(str(wallet.pending_balance or 0))
+        if current_pending >= seller_amt:
+            # Đơn mới: giải phóng 100%
+            release_amt = seller_amt
+            wallet.pending_balance = max(Decimal("0"), current_pending - release_amt)
+        else:
+            # Đơn cũ: giải phóng 20% reserve (từ reserve_balance)
+            release_amt = old_reserve
+            wallet.reserve_balance = max(
+                Decimal("0"),
+                Decimal(str(wallet.reserve_balance or 0)) - release_amt
+            )
+
+        wallet.available_balance = Decimal(str(wallet.available_balance or 0)) + release_amt
         o.reserve_released = True
-        total_released += order_reserve
+        total_released += release_amt
 
-    logger.info("[Wallet] Giải phóng reserve %s cho seller #%s (%d đơn)", total_released, seller_id, len(matured_orders))
+    logger.info(
+        "[Wallet] Giải phóng %s cho seller #%s (%d đơn)",
+        total_released, seller_id, len(matured_orders)
+    )
     return total_released
+
+
+# Alias backward compat (một số nơi gọi release_matured_reserves)
+release_matured_reserves = release_matured_holds

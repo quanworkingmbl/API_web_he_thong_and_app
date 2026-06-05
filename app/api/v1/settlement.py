@@ -89,18 +89,28 @@ async def get_seller_wallet(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Lấy thông tin ví: pending, available, đã rút + thống kê doanh thu."""
+    """
+    Lấy thông tin ví seller:
+    - pending_balance   : Tiền đang giữ 7 ngày chờ khiếu nại
+    - available_balance : Tiền đã qua 7 ngày, có thể rút
+    - total_withdrawn   : Tổng đã rút ra
+    - total_earned      : Tổng doanh thu (seller_amount) đã credited
+    - total_order_value : Tổng giá trị đơn hàng (trước phí)
+    - total_platform_fee_paid : Tổng phí sàn đã khấu trừ
+    """
     _require_seller(current_user)
     wallet = _get_or_create_wallet(current_user.id, db)
 
     from sqlalchemy import func as sf
     from app.models.order import Order, OrderStatus
-    from app.services.wallet import calc_min_reserve, calc_max_withdrawable
+    from app.services.wallet import calc_max_withdrawable
 
     # Tổng tất cả đơn DELIVERED đã credited cho seller
     total_stats = db.query(
         sf.count(Order.id).label("total_orders"),
         sf.coalesce(sf.sum(Order.seller_amount), 0).label("total_earned"),
+        sf.coalesce(sf.sum(Order.total_amount), 0).label("total_order_value"),
+        sf.coalesce(sf.sum(Order.platform_fee_amount), 0).label("total_platform_fee"),
     ).filter(
         Order.seller_id == current_user.id,
         Order.status == OrderStatus.DELIVERED,
@@ -113,6 +123,7 @@ async def get_seller_wallet(
     month_start = datetime(now.year, now.month, 1)
     month_stats = db.query(
         sf.coalesce(sf.sum(Order.seller_amount), 0).label("month_earned"),
+        sf.coalesce(sf.sum(Order.total_amount), 0).label("month_order_value"),
     ).filter(
         Order.seller_id == current_user.id,
         Order.status == OrderStatus.DELIVERED,
@@ -121,22 +132,26 @@ async def get_seller_wallet(
         Order.delivered_at >= month_start,
     ).first()
 
-    min_reserve    = calc_min_reserve(current_user.id, db)
-    max_withdraw   = calc_max_withdrawable(current_user.id, db)
+    max_withdraw = calc_max_withdrawable(current_user.id, db)
 
     return {
         "success": True,
         "data": {
             "seller_id": current_user.id,
-            "pending_balance": str(wallet.pending_balance or 0),
+            # Số dư ví
+            "pending_balance":   str(wallet.pending_balance   or 0),
             "available_balance": str(wallet.available_balance or 0),
-            "reserve_balance": str(wallet.reserve_balance or 0),
-            "total_withdrawn": str(wallet.total_withdrawn or 0),
-            "min_reserve": str(min_reserve),
-            "max_withdrawable": str(max_withdraw),
-            "total_earned": str(total_stats.total_earned if total_stats else 0),
-            "total_delivered_orders": total_stats.total_orders if total_stats else 0,
-            "this_month_earned": str(month_stats.month_earned if month_stats else 0),
+            "reserve_balance":   str(wallet.reserve_balance   or 0),   # legacy
+            "total_withdrawn":   str(wallet.total_withdrawn   or 0),
+            "max_withdrawable":  str(max_withdraw),
+            # Thống kê doanh thu (all time)
+            "total_earned":             str(total_stats.total_earned      if total_stats else 0),
+            "total_order_value":        str(total_stats.total_order_value if total_stats else 0),
+            "total_platform_fee_paid":  str(total_stats.total_platform_fee if total_stats else 0),
+            "total_delivered_orders":   total_stats.total_orders           if total_stats else 0,
+            # Tháng hiện tại
+            "this_month_earned":        str(month_stats.month_earned      if month_stats else 0),
+            "this_month_order_value":   str(month_stats.month_order_value if month_stats else 0),
             "updated_at": wallet.updated_at.isoformat() if wallet.updated_at else None,
         }
     }
@@ -750,4 +765,79 @@ async def auto_confirm_orders(
         "message": f"Đã tự động xác nhận {len(confirmed_ids)} đơn hàng (shipping > {AUTO_CONFIRM_DAYS} ngày).",
         "confirmed_count": len(confirmed_ids),
         "confirmed_order_ids": confirmed_ids,
+    }
+
+
+# ==============================================================================
+# ADMIN FINANCIAL OVERVIEW — Tổng quan tài chính toàn sàn
+# ==============================================================================
+
+@router.get("/admin/financial-overview", summary="Admin: Tổng quan tài chính toàn sàn")
+async def admin_financial_overview(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Tổng quan tài chính toàn sàn cho Admin:
+    - Tổng tiền khách trả
+    - Tổng phí sàn thu được
+    - Tổng seller nhận (sau phí)
+    - Tổng đang giữ (pending, chưa giải phóng)
+    - Tổng đã khả dụng cho sellers
+    - Tổng đã rút ra
+    """
+    _require_admin(current_user)
+
+    from sqlalchemy import func as sf
+    from app.models.order import Order, OrderStatus
+
+    # Tổng từ các đơn DELIVERED đã credited (toàn sàn)
+    order_stats = db.query(
+        sf.count(Order.id).label("total_orders"),
+        sf.coalesce(sf.sum(Order.total_amount), 0).label("total_customer_paid"),
+        sf.coalesce(sf.sum(Order.platform_fee_amount), 0).label("total_platform_fee"),
+        sf.coalesce(sf.sum(Order.seller_amount), 0).label("total_seller_amount"),
+    ).filter(
+        Order.status == OrderStatus.DELIVERED,
+        Order.wallet_credited == True,
+        Order.is_active == True,
+    ).first()
+
+    # Tổng ví tất cả sellers
+    wallet_stats = db.query(
+        sf.coalesce(sf.sum(SellerWallet.pending_balance), 0).label("total_pending"),
+        sf.coalesce(sf.sum(SellerWallet.available_balance), 0).label("total_available"),
+        sf.coalesce(sf.sum(SellerWallet.reserve_balance), 0).label("total_reserve"),
+        sf.coalesce(sf.sum(SellerWallet.total_withdrawn), 0).label("total_withdrawn"),
+    ).first()
+
+    # Số seller có tiền đang giữ
+    active_sellers_count = db.query(sf.count(sf.distinct(SellerWallet.seller_id))).filter(
+        SellerWallet.pending_balance > 0
+    ).scalar() or 0
+
+    # Tổng đơn hàng đang chờ xử lý
+    pending_orders_count = db.query(sf.count(Order.id)).filter(
+        Order.status == OrderStatus.SHIPPING,
+        Order.wallet_credited == False,
+        Order.is_active == True,
+    ).scalar() or 0
+
+    return {
+        "success": True,
+        "data": {
+            # Từ đơn hàng
+            "total_delivered_orders":   order_stats.total_orders          if order_stats else 0,
+            "total_customer_paid":      str(order_stats.total_customer_paid  if order_stats else 0),
+            "total_platform_fee":       str(order_stats.total_platform_fee   if order_stats else 0),
+            "total_seller_amount":      str(order_stats.total_seller_amount  if order_stats else 0),
+            # Từ ví sellers
+            "total_pending_all_sellers":    str(wallet_stats.total_pending   if wallet_stats else 0),
+            "total_available_all_sellers":  str(wallet_stats.total_available if wallet_stats else 0),
+            "total_reserve_legacy":         str(wallet_stats.total_reserve   if wallet_stats else 0),
+            "total_withdrawn_all_sellers":  str(wallet_stats.total_withdrawn if wallet_stats else 0),
+            # Metadata
+            "sellers_with_pending_funds":   active_sellers_count,
+            "orders_pending_confirmation":  pending_orders_count,
+        }
     }

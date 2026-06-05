@@ -26,16 +26,24 @@ class WithdrawalStatus(str, enum.Enum):
 
 
 class SellerWallet(Base):
-    """Ví người bán – theo dõi số dư"""
+    """
+    Ví người bán – theo dõi số dư.
+
+    Luồng tiền (VD: đơn 80.000đ, phí sàn 10%):
+      Khách trả 80.000đ
+        → Phí sàn 10% = 8.000đ (admin giữ)
+        → Seller nhận 72.000đ → pending_balance (giữ 7 ngày)
+        → Sau 7 ngày không khiếu nại → available_balance (rút được)
+    """
     __tablename__ = "seller_wallets"
 
     id = Column(Integer, primary_key=True, index=True)
     seller_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
 
     # Số dư
-    pending_balance   = Column(Numeric(15, 2), default=0, nullable=False)  # Legacy – chờ buyer xác nhận
-    available_balance = Column(Numeric(15, 2), default=0, nullable=False)  # 80% seller_amount – có thể rút
-    reserve_balance   = Column(Numeric(15, 2), default=0, nullable=False)  # 20% giữ lại 7 ngày bảo lãnh
+    pending_balance   = Column(Numeric(15, 2), default=0, nullable=False)  # 100% seller_amount – giữ 7 ngày chờ khiếu nại
+    available_balance = Column(Numeric(15, 2), default=0, nullable=False)  # Đã qua 7 ngày – có thể rút toàn bộ
+    reserve_balance   = Column(Numeric(15, 2), default=0, nullable=False)  # Legacy (đơn cũ 80/20) – deprecated với đơn mới
     total_withdrawn   = Column(Numeric(15, 2), default=0, nullable=False)  # Tổng đã rút ra
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
