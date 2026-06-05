@@ -165,7 +165,7 @@ async def list_rooms(
                 "buyer_name": d.get("buyer_name", ""),
                 "last_message": d.get("last_message", ""),
                 "last_at": d.get("last_at").isoformat() if d.get("last_at") else None,
-                "unread_count": d.get("unread_buyer" if is_seller else "unread_seller", 0),
+                "unread_count": d.get("unread_seller" if is_seller else "unread_buyer", 0),
             })
 
         return {"success": True, "data": rooms}
