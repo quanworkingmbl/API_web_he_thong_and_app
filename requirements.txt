@@ -45,3 +45,6 @@ resend>=0.8.0
 
 # --- Redis (Upstash OTP cache) ---
 redis>=5.0.0
+
+# --- Firebase Admin (Firestore chat + FCM push notification) ---
+firebase-admin>=6.5.0

@@ -30,6 +30,7 @@ from app.api.v1 import (
     notifications,
     otp,
     deposit,
+    chat,
 )
 
 api_router = APIRouter()
@@ -74,6 +75,9 @@ api_router.include_router(settlement.router, prefix="/settlement", tags=["💰 S
 
 # Platform Deposit Wallet (Ví Sàn)
 api_router.include_router(deposit.router, prefix="/deposit", tags=["🏦 Deposit Wallet"])
+
+# Chat (Firestore real-time)
+api_router.include_router(chat.router, prefix="/chat", tags=["💬 Chat"])
 
 # Traceability / Certificate
 api_router.include_router(traceability.router, prefix="/traceability", tags=["🔍 Traceability"])
