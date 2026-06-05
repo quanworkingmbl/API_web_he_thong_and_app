@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.user import User
-from app.models.notifications import FcmToken
 from app.services import firebase_service
 
 logger = logging.getLogger(__name__)
@@ -44,12 +43,11 @@ class MarkReadRequest(BaseModel):
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _get_fcm_tokens(db: Session, user_id: int) -> list[str]:
-    """Lấy tất cả FCM token của một user (có thể nhiều thiết bị)."""
-    tokens = db.query(FcmToken).filter(
-        FcmToken.user_id == user_id,
-        FcmToken.is_active == True,
-    ).all()
-    return [t.token for t in tokens if t.token]
+    """Lấy FCM token của một user (lưu trong cột fcm_token của User)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if user and user.fcm_token:
+        return [user.fcm_token]
+    return []
 
 
 def _get_seller_info(db: Session, seller_id: int) -> User:
