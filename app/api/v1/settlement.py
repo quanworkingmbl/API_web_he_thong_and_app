@@ -439,17 +439,18 @@ async def create_withdrawal_request(
     Không được có yêu cầu PENDING khác đang chờ duyệt.
     """
     _require_seller(current_user)
-    from app.services.wallet import calc_min_reserve, calc_max_withdrawable
+    from app.services.wallet import calc_max_withdrawable
+    from decimal import Decimal as D
 
     wallet = _get_or_create_wallet(current_user.id, db)
     max_withdraw = calc_max_withdrawable(current_user.id, db)
-    min_reserve  = calc_min_reserve(current_user.id, db)
+    min_reserve  = D("0")   # Không giữ dự phòng — tiền đã qua 7 ngày là rút được hết
 
     if data.amount > max_withdraw:
         raise HTTPException(
             status_code=400,
             detail=f"Số tiền vượt quá giới hạn. Tối đa có thể rút: {max_withdraw:,.0f} VND "
-                   f"(available={wallet.available_balance:,.0f}, min_reserve={min_reserve:,.0f})"
+                   f"(available_balance={wallet.available_balance:,.0f})"
         )
 
     # Kiểm tra không có yêu cầu PENDING nào đang chờ
