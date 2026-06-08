@@ -324,20 +324,45 @@ async def vnpay_return(
         amount_from_gw = Decimal("0")
 
     order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        return {"success": False, "message": "Đơn hàng không tồn tại"}
 
     # [IDEMPOTENCY] Kiểm tra xem transaction_no đã được xử lý chưa
+    # Chỉ filter theo transaction_no (không filter order_id) vì VNPAY đảm bảo
+    # transaction_no là unique per giao dịch — tránh edge case order mới cùng txn_no
     existing = db.query(Payment).filter(
-        Payment.order_id == order.id,
         Payment.vnpay_transaction_no == transaction_no,
-    ).first()
+    ).first() if transaction_no else None
+
     if existing:
-        return {
-            "success": True,
-            "message": "Giao dịch đã được xử lý trước đó (idempotent)",
-            "data": {"order_id": order_id, "payment_id": existing.id, "status": existing.status.value}
-        }
+        # Trả HTMLResponse + deep link redirect thay vì JSON thô
+        # (JSON thô sẽ hiển thị nguyên trong WebView, user bị kẹt)
+        _was_success = existing.status == PaymentStatus.COMPLETED
+        _dl = vnpay_service.build_deep_link(
+            success=_was_success,
+            order_id=existing.order_id,
+            payment_id=existing.id,
+            response_code=response_code,
+        )
+        _msg_inline = "✅ Thanh toán thành công!" if _was_success else "❌ Giao dịch đã được ghi nhận."
+        _msg_body   = f"{_msg_inline} Đang quay lại ứng dụng..."
+        return HTMLResponse(content=f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Agrarian Payment</title></head>
+<body>
+<script>
+  window.location.href = "{_dl}";
+  setTimeout(function() {{
+    document.body.innerHTML = '<p style="font-family:sans-serif;text-align:center;margin-top:60px">{_msg_inline}</p>';
+  }}, 2000);
+</script>
+<p style="font-family:sans-serif;text-align:center;margin-top:60px">{_msg_body}</p>
+</body></html>""")
+
+    if not order:
+        _dl_err = vnpay_service.build_deep_link(success=False, order_id=order_id, response_code="ORDER_NOT_FOUND")
+        return HTMLResponse(content=f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body><script>window.location.href = "{_dl_err}";</script>
+<p style="font-family:sans-serif;text-align:center;margin-top:60px">❌ Đơn hàng không tồn tại.</p>
+</body></html>""")
 
     # Khởi tạo payment = None – đảm bảo biến luôn được định nghĩa
     # dù thanh toán thành công hay thất bại, tránh NameError ở bước build deep link
