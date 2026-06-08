@@ -448,3 +448,178 @@ async def update_user_status(
         }
     }
 
+
+@router.get("/{user_id}/change-logs")
+async def get_user_change_logs(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lịch sử thay đổi thông tin user.
+    Tổng hợp từ các trường metadata (created_by, updated_by, deleted_by, status...).
+    """
+    check_user_manage_access(current_user)
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    logs = []
+
+    # Tạo tài khoản
+    logs.append({
+        "action": "CREATE",
+        "label": "Tạo tài khoản",
+        "actor": user.created_by or "system",
+        "timestamp": user.created_at.isoformat() if user.created_at else None,
+        "detail": f"Loại: {user.type or '–'}",
+    })
+
+    # Cập nhật gần nhất
+    if user.updated_at and user.updated_by:
+        logs.append({
+            "action": "UPDATE",
+            "label": "Cập nhật thông tin",
+            "actor": user.updated_by,
+            "timestamp": user.updated_at.isoformat(),
+            "detail": f"Trạng thái: {user.status.value if hasattr(user.status, 'value') else user.status}",
+        })
+
+    # Đổi status (nếu không ACTIVE)
+    status_val = user.status.value if hasattr(user.status, "value") else str(user.status)
+    if status_val != "ACTIVE":
+        logs.append({
+            "action": "STATUS_CHANGE",
+            "label": f"Đổi trạng thái → {status_val}",
+            "actor": user.updated_by or "admin",
+            "timestamp": user.updated_at.isoformat() if user.updated_at else None,
+            "detail": user.status_reason or "–",
+        })
+
+    # Xóa (soft-delete)
+    if user.deleted_at:
+        logs.append({
+            "action": "DELETE",
+            "label": "Vô hiệu hoá tài khoản",
+            "actor": user.deleted_by or "admin",
+            "timestamp": user.deleted_at.isoformat(),
+            "detail": "Soft-delete",
+        })
+
+    # Sắp xếp mới nhất lên đầu
+    logs.sort(key=lambda x: x["timestamp"] or "", reverse=True)
+
+    total = len(logs)
+    start = (page - 1) * limit
+    page_logs = logs[start: start + limit]
+
+    return {
+        "success": True,
+        "data": page_logs,
+        "meta": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": max(1, (total + limit - 1) // limit),
+        },
+    }
+
+
+@router.get("/{user_id}/audit-logs")
+async def get_user_audit_logs(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lịch sử duyệt (audit trail) của user.
+    Bao gồm: tạo, kích hoạt, đổi status, gán role, xóa tài khoản.
+    """
+    check_user_manage_access(current_user)
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from app.models.user import UserRole
+    from app.models.role import Role
+
+    audit_entries = []
+
+    # 1. Tạo tài khoản
+    audit_entries.append({
+        "event": "ACCOUNT_CREATED",
+        "label": "✅ Tạo tài khoản",
+        "actor": user.created_by or "system",
+        "timestamp": user.created_at.isoformat() if user.created_at else None,
+        "detail": f"Email: {user.email} | Loại: {user.type or '–'}",
+    })
+
+    # 2. Activated / Deactivated
+    if user.updated_by:
+        activated_label = "✅ Kích hoạt" if user.activated == 1 else "🚫 Vô hiệu hóa"
+        audit_entries.append({
+            "event": "ACTIVATION_CHANGED",
+            "label": activated_label,
+            "actor": user.updated_by,
+            "timestamp": user.updated_at.isoformat() if user.updated_at else None,
+            "detail": f"activated = {user.activated}",
+        })
+
+    # 3. Status thay đổi (nếu không phải ACTIVE)
+    status_val = user.status.value if hasattr(user.status, "value") else str(user.status)
+    if status_val != "ACTIVE" and user.updated_by:
+        audit_entries.append({
+            "event": "STATUS_CHANGED",
+            "label": f"⚠️ Đổi trạng thái → {status_val}",
+            "actor": user.updated_by or "admin",
+            "timestamp": user.updated_at.isoformat() if user.updated_at else None,
+            "detail": f"Lý do: {user.status_reason or '–'}",
+        })
+
+    # 4. Roles hiện tại
+    user_roles = db.query(UserRole).filter(UserRole.user_id == user_id).all()
+    role_ids = [ur.role_id for ur in user_roles]
+    if role_ids:
+        roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
+        role_names = ", ".join(r.role_name for r in roles)
+        audit_entries.append({
+            "event": "ROLES_ASSIGNED",
+            "label": "🔑 Phân quyền",
+            "actor": user.updated_by or "admin",
+            "timestamp": user.updated_at.isoformat() if user.updated_at else None,
+            "detail": f"Roles: {role_names}",
+        })
+
+    # 5. Xóa tài khoản
+    if user.deleted_at:
+        audit_entries.append({
+            "event": "ACCOUNT_DELETED",
+            "label": "🗑️ Xóa tài khoản",
+            "actor": user.deleted_by or "admin",
+            "timestamp": user.deleted_at.isoformat(),
+            "detail": "Soft-delete",
+        })
+
+    # Sắp xếp mới nhất lên đầu
+    audit_entries.sort(key=lambda x: x["timestamp"] or "", reverse=True)
+
+    total = len(audit_entries)
+    start = (page - 1) * limit
+    page_entries = audit_entries[start: start + limit]
+
+    return {
+        "success": True,
+        "data": page_entries,
+        "meta": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": max(1, (total + limit - 1) // limit),
+        },
+    }
