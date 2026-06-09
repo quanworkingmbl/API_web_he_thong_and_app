@@ -659,6 +659,16 @@ async def approve_product(
         if not sp or sp.verification_status != VerificationStatus.VERIFIED:
             raise HTTPException(status_code=400, detail="Seller chua KYC – khong the duyet")
         product.approved_at = datetime.utcnow()
+
+    # Ghi lịch sử duyệt vào product_change_logs (STATUS_CHANGE)
+    log_product_changes(
+        db,
+        product,
+        {"status": approval_data.status},
+        changed_by=current_user.id,
+        change_type="STATUS_CHANGE",
+        reason=approval_data.notes,
+    )
     product.status = approval_data.status
     db.add(ProductApproval(
         product_id=product_id, approver_id=current_user.id,
