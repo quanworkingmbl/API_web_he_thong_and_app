@@ -831,6 +831,69 @@ async def get_product_reviews_cms(
 
 
 # ==============================================================================
+# APPROVAL HISTORY – Lịch sử duyệt sản phẩm (Admin + Seller)
+# ==============================================================================
+
+@router.get("/{product_id}/approvals", summary="Lịch sử duyệt sản phẩm")
+async def get_product_approval_history(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Trả về lịch sử duyệt/từ chối sản phẩm từ bảng product_approvals.
+    - Admin/content_manager: xem mọi sản phẩm.
+    - Seller/producer: chỉ xem sản phẩm của mình.
+    """
+    is_admin = current_user.type in ("admin", "content_manager")
+    is_seller = current_user.type in ("seller", "producer")
+
+    if not is_admin and not is_seller:
+        raise HTTPException(status_code=403, detail="Không có quyền truy cập")
+
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
+
+    if is_seller and not is_admin:
+        if product.seller_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Không có quyền xem lịch sử duyệt sản phẩm này")
+
+    approvals = (
+        db.query(ProductApproval)
+        .filter(ProductApproval.product_id == product_id)
+        .order_by(ProductApproval.created_at.desc())
+        .all()
+    )
+
+    approval_list = []
+    for ap in approvals:
+        approver = db.query(User).filter(User.id == ap.approver_id).first()
+        approval_list.append({
+            "id": ap.id,
+            "status": ap.status.value if hasattr(ap.status, "value") else str(ap.status),
+            "notes": ap.notes,
+            "checked_description": ap.checked_description,
+            "checked_price": ap.checked_price,
+            "checked_images": ap.checked_images,
+            "checked_traceability": ap.checked_traceability,
+            "approver_id": ap.approver_id,
+            "approver_name": approver.name if approver else "—",
+            "approver_type": approver.type if approver else "—",
+            "created_at": ap.created_at.isoformat() if ap.created_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "product_id": product_id,
+            "product_name": product.name,
+            "approvals": approval_list,
+        },
+    }
+
+
+# ==============================================================================
 # CHANGE LOGS – Lịch sử thay đổi sản phẩm (Admin + Seller)
 # ==============================================================================
 
