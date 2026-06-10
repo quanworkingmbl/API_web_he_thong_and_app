@@ -373,7 +373,8 @@ async def vnpay_return(
                                          bank_code, amount_from_gw, params)
         if not payment.amount_mismatch:
             order.payment_status = "PAID"
-            order.status = OrderStatus.CONFIRMED
+            # ❌ KHÔNG tự động set CONFIRMED — Seller phải xác nhận thủ công
+            # order.status vẫn giữ nguyên PENDING để Seller thấy và xác nhận
         else:
             order.payment_status = "FAILED"
 
@@ -515,7 +516,8 @@ async def vnpay_ipn(
             return {"RspCode": "04", "Message": "Invalid Amount"}
 
         order.payment_status = "PAID"
-        order.status = OrderStatus.CONFIRMED
+        # ❌ KHÔNG tự động set CONFIRMED — Seller phải xác nhận thủ công
+        # order.status vẫn giữ nguyên PENDING để Seller thấy và xác nhận
         _audit(db, "IPN_RECEIVED", payment.id,
                note=f"txn={transaction_no}, code={response_code}, bank={bank_code}")
         db.commit()

@@ -7,8 +7,8 @@ Dùng APScheduler (AsyncIOScheduler) tích hợp với FastAPI lifecycle.
 
 Danh sách tác vụ:
 - release_reserves_job  : Chạy mỗi ngày lúc 2:00 SA
-                          Giải phóng 20% reserve đã quá 30 ngày
-                          về available_balance cho tất cả seller.
+                          Giải phóng 100% seller_amount đã qua 7 ngày giữ
+                          (từ pending_balance → available_balance) cho tất cả seller.
 
 Cách tích hợp: gọi start_scheduler() trong lifespan của FastAPI (app/main.py).
 """
@@ -33,7 +33,7 @@ _scheduler: AsyncIOScheduler | None = None
 
 def _release_reserves_all_sellers() -> None:
     """
-    Giải phóng reserve đã đủ 30 ngày cho TẤT CẢ seller có reserve chờ.
+    Giải phóng 100% seller_amount đã đủ 7 ngày giữ cho TẤT CẢ seller có pending chờ.
 
     Logic:
     1. Lấy danh sách seller_id còn reserve chưa giải phóng.
@@ -110,7 +110,7 @@ def start_scheduler() -> AsyncIOScheduler:
         _release_reserves_all_sellers,
         trigger=CronTrigger(hour=2, minute=0),
         id="release_reserves_daily",
-        name="Giải phóng reserve 30 ngày cho seller",
+        name="Giải phóng pending 7 ngày → available cho seller",
         replace_existing=True,
         misfire_grace_time=3600,  # Nếu server down, cho phép chạy bù trong vòng 1h
     )

@@ -207,3 +207,49 @@ class DepositTransaction(Base):
 
     seller   = relationship("User", foreign_keys=[seller_id])
     reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+
+# ==============================================================================
+# RÚT KÝ QUỸ — Seller yêu cầu rút một phần ký quỹ (giữ tối thiểu 500,000đ)
+# ==============================================================================
+
+class DepositWithdrawalStatus(str, enum.Enum):
+    PENDING  = "PENDING"   # Chờ admin duyệt
+    APPROVED = "APPROVED"  # Đã duyệt, đã chuyển khoản
+    REJECTED = "REJECTED"  # Admin từ chối
+
+
+class DepositWithdrawalRequest(Base):
+    """
+    Yêu cầu rút một phần ký quỹ của seller.
+
+    Quy tắc:
+      deposit_balance - amount >= MIN_DEPOSIT_REQUIRED (500,000đ)
+      Không trừ ví ngay — chờ admin duyệt mới trừ deposit_balance.
+    """
+    __tablename__ = "deposit_withdrawal_requests"
+
+    id        = Column(Integer, primary_key=True, index=True)
+    seller_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    amount = Column(Numeric(15, 2), nullable=False)              # Số tiền muốn rút
+    balance_snapshot = Column(Numeric(15, 2), nullable=True)     # deposit_balance lúc tạo yêu cầu
+
+    # Thông tin ngân hàng (snapshot từ seller_profile)
+    bank_name           = Column(String(255), nullable=True)
+    bank_account_number = Column(String(50),  nullable=True)
+    bank_account_name   = Column(String(255), nullable=True)
+
+    status     = Column(SQLEnum(DepositWithdrawalStatus), default=DepositWithdrawalStatus.PENDING, nullable=False, index=True)
+    note       = Column(Text, nullable=True)        # Ghi chú của seller
+    admin_note = Column(Text, nullable=True)         # Lý do từ chối / ghi chú admin
+    transaction_ref = Column(String(255), nullable=True)  # Mã CK khi duyệt
+
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    seller   = relationship("User", foreign_keys=[seller_id])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])

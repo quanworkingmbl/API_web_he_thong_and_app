@@ -843,3 +843,330 @@ async def admin_list_wallets(
         "data": result,
         "meta": {"total": total, "page": page, "per_page": per_page},
     }
+
+
+# ==============================================================================
+# RÚT KÝ QUỸ — Seller yêu cầu rút một phần ký quỹ
+# ==============================================================================
+
+from app.models.settlement import DepositWithdrawalRequest, DepositWithdrawalStatus
+from app.models.seller_profile import SellerProfile
+
+
+class DepositWithdrawalRequestBody(BaseModel):
+    amount: float
+    note: Optional[str] = None
+
+
+class AdminReviewWithdrawalBody(BaseModel):
+    transaction_ref: Optional[str] = None
+    admin_note: Optional[str] = None
+
+
+class AdminRejectWithdrawalBody(BaseModel):
+    admin_note: str
+
+
+@router.post("/withdrawal/request", summary="Seller: Tạo yêu cầu rút ký quỹ")
+async def create_deposit_withdrawal(
+    body: DepositWithdrawalRequestBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Seller tạo yêu cầu rút một phần ký quỹ.
+
+    Quy tắc:
+      - deposit_balance - amount >= MIN_DEPOSIT_REQUIRED (500,000đ)
+      - Không trừ ví ngay — chờ admin duyệt
+      - Chỉ được có 1 yêu cầu PENDING cùng lúc
+    """
+    _require_seller(current_user)
+
+    amount = Decimal(str(body.amount))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Số tiền rút phải lớn hơn 0")
+
+    wallet = _get_or_create_deposit_wallet(current_user.id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+
+    if balance - amount < MIN_DEPOSIT_REQUIRED:
+        max_withdrawable = balance - MIN_DEPOSIT_REQUIRED
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Số dư sau rút phải giữ tối thiểu {int(MIN_DEPOSIT_REQUIRED):,}đ. "
+                f"Số tiền tối đa có thể rút: {max(0, int(max_withdrawable)):,}đ"
+            ),
+        )
+
+    # Chỉ được có 1 yêu cầu PENDING
+    existing = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.seller_id == current_user.id,
+        DepositWithdrawalRequest.status == DepositWithdrawalStatus.PENDING,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Bạn đã có yêu cầu rút ký quỹ đang chờ duyệt. Vui lòng chờ admin xử lý."
+        )
+
+    # Snapshot thông tin ngân hàng
+    seller_profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == current_user.id
+    ).first()
+
+    req = DepositWithdrawalRequest(
+        seller_id=current_user.id,
+        amount=amount,
+        balance_snapshot=balance,
+        bank_name=seller_profile.bank_name if seller_profile else None,
+        bank_account_number=seller_profile.bank_account_number if seller_profile else None,
+        bank_account_name=seller_profile.bank_account_name if seller_profile else None,
+        note=body.note,
+        status=DepositWithdrawalStatus.PENDING,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+
+    return {
+        "success": True,
+        "message": "Đã gửi yêu cầu rút ký quỹ. Admin sẽ xử lý trong 1-3 ngày làm việc.",
+        "data": {
+            "id": req.id,
+            "amount": str(req.amount),
+            "balance_snapshot": str(req.balance_snapshot),
+            "status": req.status.value,
+            "created_at": req.created_at.isoformat() if req.created_at else None,
+        },
+    }
+
+
+@router.get("/withdrawal/my", summary="Seller: Lịch sử yêu cầu rút ký quỹ")
+async def get_my_deposit_withdrawals(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(15, ge=1, le=50),
+    status: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Seller xem danh sách yêu cầu rút ký quỹ của mình."""
+    _require_seller(current_user)
+
+    q = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.seller_id == current_user.id
+    )
+    if status:
+        try:
+            q = q.filter(DepositWithdrawalRequest.status == DepositWithdrawalStatus(status))
+        except ValueError:
+            pass
+
+    total = q.count()
+    items = q.order_by(DepositWithdrawalRequest.created_at.desc()) \
+             .offset((page - 1) * per_page).limit(per_page).all()
+
+    wallet = _get_or_create_deposit_wallet(current_user.id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+    max_withdrawable = max(Decimal("0"), balance - MIN_DEPOSIT_REQUIRED)
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": r.id,
+                "amount": str(r.amount),
+                "balance_snapshot": str(r.balance_snapshot) if r.balance_snapshot else None,
+                "bank_name": r.bank_name,
+                "bank_account_number": r.bank_account_number,
+                "bank_account_name": r.bank_account_name,
+                "status": r.status.value,
+                "note": r.note,
+                "admin_note": r.admin_note,
+                "transaction_ref": r.transaction_ref,
+                "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in items
+        ],
+        "meta": {
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "current_balance": str(balance),
+            "max_withdrawable": str(max_withdrawable),
+        },
+    }
+
+
+@router.post("/admin/withdrawal/{req_id}/approve", summary="Admin: Duyệt yêu cầu rút ký quỹ")
+async def admin_approve_deposit_withdrawal(
+    req_id: int,
+    body: AdminReviewWithdrawalBody = AdminReviewWithdrawalBody(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin duyệt yêu cầu rút ký quỹ:
+      - Kiểm tra lại balance đủ (deposit_balance - amount >= 500K)
+      - Trừ deposit_balance
+      - Cộng total_deducted
+      - Ghi DepositTransaction (tx_type=REFUND)
+      - Cập nhật status → APPROVED
+    """
+    _require_admin(current_user)
+
+    req = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.id == req_id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại")
+
+    if req.status != DepositWithdrawalStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Yêu cầu đã ở trạng thái {req.status.value}, không thể duyệt lại"
+        )
+
+    amount = Decimal(str(req.amount))
+    wallet = _get_or_create_deposit_wallet(req.seller_id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+
+    if balance - amount < MIN_DEPOSIT_REQUIRED:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Số dư ký quỹ ({int(balance):,}đ) không đủ để rút {int(amount):,}đ "
+                f"trong khi vẫn giữ tối thiểu {int(MIN_DEPOSIT_REQUIRED):,}đ"
+            ),
+        )
+
+    # Trừ deposit_balance
+    new_balance = balance - amount
+    wallet.deposit_balance = new_balance
+    wallet.total_deducted = Decimal(str(wallet.total_deducted)) + amount
+
+    # Ghi lịch sử
+    tx = DepositTransaction(
+        seller_id=req.seller_id,
+        amount=amount,
+        tx_type=DepositTransactionType.REFUND,
+        status=DepositStatus.CONFIRMED,
+        payment_method="WITHDRAWAL",
+        bank_ref=body.transaction_ref,
+        note=f"Rút ký quỹ — duyệt bởi admin #{current_user.id}. {body.admin_note or ''}".strip(),
+        reviewed_by=current_user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    db.add(tx)
+
+    # Cập nhật request
+    req.status = DepositWithdrawalStatus.APPROVED
+    req.transaction_ref = body.transaction_ref
+    req.admin_note = body.admin_note
+    req.reviewed_by = current_user.id
+    req.reviewed_at = datetime.now(timezone.utc)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Đã duyệt yêu cầu rút {int(amount):,}đ. Số dư còn lại: {int(new_balance):,}đ",
+        "data": {
+            "req_id": req_id,
+            "amount": str(amount),
+            "new_balance": str(new_balance),
+            "status": "APPROVED",
+        },
+    }
+
+
+@router.post("/admin/withdrawal/{req_id}/reject", summary="Admin: Từ chối yêu cầu rút ký quỹ")
+async def admin_reject_deposit_withdrawal(
+    req_id: int,
+    body: AdminRejectWithdrawalBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Admin từ chối yêu cầu rút ký quỹ (không trừ ví)."""
+    _require_admin(current_user)
+
+    req = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.id == req_id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại")
+
+    if req.status != DepositWithdrawalStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Yêu cầu đã ở trạng thái {req.status.value}, không thể từ chối"
+        )
+
+    req.status = DepositWithdrawalStatus.REJECTED
+    req.admin_note = body.admin_note
+    req.reviewed_by = current_user.id
+    req.reviewed_at = datetime.now(timezone.utc)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã từ chối yêu cầu rút ký quỹ",
+        "data": {"req_id": req_id, "status": "REJECTED"},
+    }
+
+
+@router.get("/admin/withdrawal/list", summary="Admin: Danh sách yêu cầu rút ký quỹ")
+async def admin_list_deposit_withdrawals(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    seller_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Admin xem danh sách tất cả yêu cầu rút ký quỹ."""
+    _require_admin(current_user)
+
+    q = db.query(DepositWithdrawalRequest)
+    if status:
+        try:
+            q = q.filter(DepositWithdrawalRequest.status == DepositWithdrawalStatus(status))
+        except ValueError:
+            pass
+    if seller_id:
+        q = q.filter(DepositWithdrawalRequest.seller_id == seller_id)
+
+    total = q.count()
+    items = q.order_by(DepositWithdrawalRequest.created_at.desc()) \
+             .offset((page - 1) * per_page).limit(per_page).all()
+
+    result = []
+    for r in items:
+        seller = db.query(User).filter(User.id == r.seller_id).first()
+        result.append({
+            "id": r.id,
+            "seller_id": r.seller_id,
+            "seller_name": seller.name if seller else None,
+            "seller_email": seller.email if seller else None,
+            "amount": str(r.amount),
+            "balance_snapshot": str(r.balance_snapshot) if r.balance_snapshot else None,
+            "bank_name": r.bank_name,
+            "bank_account_number": r.bank_account_number,
+            "bank_account_name": r.bank_account_name,
+            "status": r.status.value,
+            "note": r.note,
+            "admin_note": r.admin_note,
+            "transaction_ref": r.transaction_ref,
+            "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": result,
+        "meta": {"total": total, "page": page, "per_page": per_page},
+    }
+

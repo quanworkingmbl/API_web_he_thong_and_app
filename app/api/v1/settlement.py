@@ -272,7 +272,11 @@ async def approve_settlement(
     db: Session = Depends(get_db)
 ):
     """
-    Duyệt kỳ đối soát → chuyển tiền từ pending sang available trong ví seller.
+    Duyệt kỳ đối soát (CHỈ đánh dấu trạng thái — KHÔNG thao tác ví).
+
+    Lý do: Tiền (pending → available) đã được release_matured_holds() xử lý
+    tự động theo từng đơn hàng đủ 7 ngày. Settlement là báo cáo tổng hợp,
+    không trực tiếp dịch chuyển số dư để tránh double-credit.
     """
     _require_admin(current_user)
 
@@ -290,22 +294,22 @@ async def approve_settlement(
     settlement.approved_by = current_user.id
     settlement.approved_at = datetime.utcnow()
 
-    # Chuyển tiền từ pending → available
-    wallet = _get_or_create_wallet(settlement.seller_id, db)
-    wallet.pending_balance -= settlement.total_seller_amount
-    wallet.available_balance += settlement.total_seller_amount
+    # ⚠️ KHÔNG thao tác ví tại đây!
+    # pending → available được xử lý tự động bởi release_matured_holds()
+    # (scheduler hàng ngày hoặc admin bấm "Giải phóng Reserve")
+    # Thao tác tại đây sẽ gây double-credit.
 
     db.commit()
 
     return {
         "success": True,
-        "message": "Đã duyệt kỳ đối soát",
+        "message": "Đã duyệt kỳ đối soát (xem ví tại trang Đối Soát & Chi Trả)",
         "settlement_id": settlement_id,
         "status": "APPROVED"
     }
 
 
-@router.post("/{settlement_id}/payout", summary="Admin chi trả cho seller")
+@router.post("/{settlement_id}/payout", summary="Admin ghi nhận chi trả (audit-only)")
 async def create_payout(
     settlement_id: int,
     payout_data: PayoutRequest,
@@ -313,8 +317,11 @@ async def create_payout(
     db: Session = Depends(get_db)
 ):
     """
-    Tạo payout từ kỳ đối soát đã duyệt.
-    Trừ available_balance, cộng total_withdrawn.
+    Ghi nhận chi trả kỳ đối soát (CHỈ audit — KHÔNG thao tác ví).
+
+    Luồng chi trả thực tế đã chuyển sang WithdrawalRequest:
+    Seller tự tạo yêu cầu rút → Admin duyệt → trừ available_balance.
+    Endpoint này chỉ lưu record Payout để tham chiếu lịch sử.
     """
     _require_admin(current_user)
 
@@ -325,12 +332,8 @@ async def create_payout(
     if settlement.status != SettlementStatus.APPROVED:
         raise HTTPException(
             status_code=400,
-            detail="Chỉ có thể chi trả kỳ đối soát đã được duyệt"
+            detail="Chỉ có thể ghi nhận chi trả kỳ đối soát đã được duyệt"
         )
-
-    wallet = _get_or_create_wallet(settlement.seller_id, db)
-    if wallet.available_balance < settlement.total_seller_amount:
-        raise HTTPException(status_code=400, detail="Số dư khả dụng không đủ")
 
     # Lấy thông tin ngân hàng từ seller profile
     seller_profile = db.query(SellerProfile).filter(
@@ -352,11 +355,11 @@ async def create_payout(
     )
     db.add(payout)
 
-    # Cập nhật ví
-    wallet.available_balance -= settlement.total_seller_amount
-    wallet.total_withdrawn += settlement.total_seller_amount
+    # ⚠️ KHÔNG thao tác ví tại đây!
+    # Việc trừ available_balance / cộng total_withdrawn được thực hiện
+    # bởi approve_withdrawal() khi admin duyệt WithdrawalRequest.
 
-    # Cập nhật settlement
+    # Cập nhật settlement → COMPLETED
     settlement.status = SettlementStatus.COMPLETED
 
     db.commit()
@@ -364,7 +367,7 @@ async def create_payout(
 
     return {
         "success": True,
-        "message": "Đã chi trả thành công",
+        "message": "Đã ghi nhận chi trả (luồng rút tiền thực tế qua Yêu cầu rút tiền)",
         "data": {
             "payout_id": payout.id,
             "amount": str(payout.amount),
@@ -685,8 +688,7 @@ async def get_reserve_schedule(
     now = datetime.utcnow()
     from decimal import Decimal as D
 
-    RESERVE_RATIO = D("0.20")
-
+    # Luồng mới: 100% seller_amount nằm trong pending_balance (không còn 20% reserve)
     upcoming = db.query(Order).filter(
         Order.seller_id == current_user.id,
         Order.status == OrderStatus.DELIVERED,
@@ -698,7 +700,8 @@ async def get_reserve_schedule(
     items = []
     total_pending = D("0")
     for o in upcoming:
-        reserve_amt = (D(str(o.seller_amount or 0)) * RESERVE_RATIO).quantize(D("0.01"))
+        # 100% seller_amount đang giữ (không phải 20% như phiên bản cũ)
+        reserve_amt = D(str(o.seller_amount or 0)).quantize(D("0.01"))
         total_pending += reserve_amt
         release_dt = o.reserve_release_at
         # Tính số ngày còn lại (có thể âm nếu đã quá hạn nhưng chưa được giải phóng)
