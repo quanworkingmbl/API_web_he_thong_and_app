@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "onboarding@resend.dev"   # Đổi thành domain thật khi production
     EMAIL_FROM_NAME: str = "MBL CMS"
 
+    # --- CMS / Frontend URL (dùng trong email KYC) ---
+    CMS_URL: str = "https://cms.yourdomain.com"  # Đổi thành URL thật khi production
+
     # --- Redis / Upstash (OTP Cache) ---
     REDIS_URL: str = "redis://localhost:6379/0"  # Upstash: rediss://default:TOKEN@host:6379
 

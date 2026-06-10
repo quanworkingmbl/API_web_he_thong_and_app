@@ -235,3 +235,193 @@ def _html_template(otp: str, purpose: str, expire_min: int) -> str:
   </table>
 </body>
 </html>"""
+
+
+# ─── GỬI EMAIL KYC SELLER ─────────────────────────────────────────────────────
+
+def send_kyc_approved_email(
+    email: str,
+    seller_name: str,
+    business_name: str,
+    temp_password: str | None = None,
+) -> dict:
+    """Gửi email thông báo duyệt hồ sơ KYC seller thành công.
+    
+    Args:
+        email:         Email người nhận (seller)
+        seller_name:   Tên seller
+        business_name: Tên hộ kinh doanh
+        temp_password: Mật khẩu tạm do admin cấp (None = không gửi MK)
+    """
+    try:
+        resp = resend.Emails.send({
+            "from":    f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>",
+            "to":      [email],
+            "subject": "🎉 Hồ sơ Seller đã được duyệt — MBL CMS",
+            "html":    _kyc_approved_html(seller_name, business_name, email, temp_password),
+        })
+        logger.info("[KYC Email] Approved sent to %s | id=%s", email, resp.get("id"))
+        return {"success": True}
+    except Exception as exc:
+        logger.error("[KYC Email] Failed approved email to %s: %s", email, exc)
+        raise
+
+
+def send_kyc_rejected_email(
+    email: str,
+    seller_name: str,
+    rejection_reason: str,
+) -> dict:
+    """Gửi email thông báo từ chối hồ sơ KYC seller."""
+    try:
+        resp = resend.Emails.send({
+            "from":    f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>",
+            "to":      [email],
+            "subject": "❌ Hồ sơ Seller chưa được duyệt — MBL CMS",
+            "html":    _kyc_rejected_html(seller_name, rejection_reason),
+        })
+        logger.info("[KYC Email] Rejected sent to %s | id=%s", email, resp.get("id"))
+        return {"success": True}
+    except Exception as exc:
+        logger.error("[KYC Email] Failed rejected email to %s: %s", email, exc)
+        raise
+
+
+# ─── HTML TEMPLATES KYC ───────────────────────────────────────────────────────
+
+def _kyc_approved_html(
+    seller_name: str,
+    business_name: str,
+    email: str,
+    temp_password: str | None,
+) -> str:
+    cms_url = settings.CMS_URL
+    login_url = f"{cms_url}/login"
+    reset_url = f"{cms_url}/reset-password"
+
+    if temp_password:
+        login_block = f"""
+        <div style="background:#f6ffed;border:1.5px solid #b7eb8f;border-radius:12px;
+                    padding:20px 24px;margin:20px 0;text-align:left;">
+          <p style="font-size:13px;color:#555;margin:0 0 10px;font-weight:600;">🔐 Thông tin đăng nhập CMS</p>
+          <table style="width:100%;font-size:14px;">
+            <tr><td style="color:#888;padding:4px 0;width:140px;">Tài khoản (Email):</td>
+                <td style="color:#111;font-weight:600;">{email}</td></tr>
+            <tr><td style="color:#888;padding:4px 0;">Mật khẩu tạm:</td>
+                <td><code style="background:#fff;border:1px solid #d9d9d9;border-radius:6px;
+                               padding:3px 10px;font-size:15px;color:#4f46e5;font-weight:700;
+                               letter-spacing:2px;">{temp_password}</code></td></tr>
+          </table>
+          <p style="font-size:12px;color:#d46b08;margin:10px 0 0;">
+            ⚠️ Vui lòng đổi mật khẩu ngay sau khi đăng nhập lần đầu tiên.
+          </p>
+        </div>"""
+    else:
+        login_block = f"""
+        <div style="background:#f6ffed;border:1.5px solid #b7eb8f;border-radius:12px;
+                    padding:20px 24px;margin:20px 0;text-align:left;">
+          <p style="font-size:13px;color:#555;margin:0 0 10px;font-weight:600;">🔐 Thông tin đăng nhập CMS</p>
+          <table style="width:100%;font-size:14px;">
+            <tr><td style="color:#888;padding:4px 0;width:140px;">Tài khoản (Email):</td>
+                <td style="color:#111;font-weight:600;">{email}</td></tr>
+            <tr><td style="color:#888;padding:4px 0;">Mật khẩu:</td>
+                <td style="color:#555;font-size:13px;">Dùng mật khẩu ứng dụng hiện tại của bạn</td></tr>
+          </table>
+          <p style="font-size:12px;color:#1677ff;margin:10px 0 0;">
+            🔑 Quên mật khẩu? <a href="{reset_url}" style="color:#1677ff;">Cập nhật tại đây</a>.
+          </p>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="vi"><head><meta charset="UTF-8">
+<title>Hồ sơ Seller được duyệt</title></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:40px 0;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0"
+           style="background:#fff;border-radius:16px;overflow:hidden;
+                  box-shadow:0 8px 32px rgba(0,0,0,.10);">
+      <tr><td style="background:linear-gradient(135deg,#16a34a,#15803d);
+                     padding:36px 40px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:8px;">🎉</div>
+        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;">MBL CMS</h1>
+        <p style="color:rgba(255,255,255,.85);margin:6px 0 0;font-size:14px;">Hệ thống quản lý bán hàng</p>
+      </td></tr>
+      <tr><td style="padding:36px 40px 28px;text-align:center;">
+        <h2 style="color:#16a34a;font-size:20px;margin:0 0 8px;">Chúc mừng, {seller_name}!</h2>
+        <p style="color:#374151;font-size:15px;margin:0 0 6px;">
+          Hồ sơ đăng ký Seller của bạn đã <strong style="color:#16a34a;">được phê duyệt thành công</strong>!
+        </p>
+        <p style="color:#6b7280;font-size:14px;margin:0 0 20px;">
+          Cơ sở kinh doanh: <strong style="color:#111;">{business_name}</strong>
+        </p>
+        {login_block}
+        <a href="{login_url}"
+           style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);
+                  color:#fff;font-size:15px;font-weight:700;text-decoration:none;
+                  padding:14px 36px;border-radius:10px;margin:8px 0 20px;
+                  box-shadow:0 4px 12px rgba(79,70,229,.35);">
+          🚀 Vào Trang Quản Lý Ngay
+        </a>
+        <p style="color:#6b7280;font-size:13px;margin:0 0 4px;">
+          Hoặc truy cập: <a href="{cms_url}" style="color:#4f46e5;">{cms_url}</a>
+        </p>
+        <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0 16px;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;text-align:left;">
+          Bạn có thể bắt đầu đăng sản phẩm và bán hàng ngay tại CMS.
+        </p>
+      </td></tr>
+      <tr><td style="padding:16px 40px 24px;text-align:center;background:#f9fafb;">
+        <p style="color:#d1d5db;font-size:12px;margin:0;">Email tự động từ MBL CMS. Vui lòng không trả lời.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
+
+
+def _kyc_rejected_html(seller_name: str, rejection_reason: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="vi"><head><meta charset="UTF-8">
+<title>Hồ sơ Seller chưa được duyệt</title></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:40px 0;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0"
+           style="background:#fff;border-radius:16px;overflow:hidden;
+                  box-shadow:0 8px 32px rgba(0,0,0,.10);">
+      <tr><td style="background:linear-gradient(135deg,#dc2626,#b91c1c);
+                     padding:36px 40px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:8px;">📋</div>
+        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;">MBL CMS</h1>
+        <p style="color:rgba(255,255,255,.85);margin:6px 0 0;font-size:14px;">Thông báo kết quả hồ sơ</p>
+      </td></tr>
+      <tr><td style="padding:36px 40px 28px;text-align:center;">
+        <h2 style="color:#dc2626;font-size:20px;margin:0 0 8px;">Xin chào {seller_name},</h2>
+        <p style="color:#374151;font-size:15px;margin:0 0 20px;">
+          Hồ sơ đăng ký Seller của bạn <strong style="color:#dc2626;">chưa được phê duyệt</strong>.
+        </p>
+        <div style="background:#fff7f7;border:1.5px solid #fca5a5;border-radius:12px;
+                    padding:20px 24px;text-align:left;margin-bottom:20px;">
+          <p style="font-size:13px;color:#dc2626;font-weight:700;margin:0 0 8px;">❌ Lý do từ chối:</p>
+          <p style="font-size:14px;color:#374151;margin:0;line-height:1.6;">{rejection_reason}</p>
+        </div>
+        <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:12px;
+                    padding:20px 24px;text-align:left;margin-bottom:20px;">
+          <p style="font-size:13px;color:#92400e;font-weight:700;margin:0 0 8px;">💡 Bước tiếp theo:</p>
+          <p style="font-size:14px;color:#374151;margin:0;line-height:1.6;">
+            Mở ứng dụng và vào phần <strong>Hồ sơ Seller</strong> để bổ sung thông tin và nộp lại.
+          </p>
+        </div>
+        <hr style="border:none;border-top:1px solid #f3f4f6;margin:20px 0 16px;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;text-align:left;">
+          Liên hệ đội ngũ nếu cần hỗ trợ.
+        </p>
+      </td></tr>
+      <tr><td style="padding:16px 40px 24px;text-align:center;background:#f9fafb;">
+        <p style="color:#d1d5db;font-size:12px;margin:0;">© MBL CMS — Hệ thống quản lý bán hàng nông sản</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""

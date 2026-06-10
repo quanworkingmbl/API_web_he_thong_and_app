@@ -19,11 +19,16 @@ from app.models.seller_profile import SellerProfile, VerificationStatus
 from app.models.user import User, UserRole
 from app.models.role import Role
 from app.api.v1.auth import get_current_user, get_current_user_allow_inactive
+from app.core.security import get_password_hash
 from pydantic import BaseModel, Field
 from app.services.notification import (
     notify_kyc_pending_to_admin,
     notify_kyc_verified_to_seller,
     notify_kyc_rejected_to_seller,
+)
+from app.services.email_otp import (
+    send_kyc_approved_email,
+    send_kyc_rejected_email,
 )
 
 router = APIRouter()
@@ -70,6 +75,12 @@ class SellerRegisterRequest(BaseModel):
 class VerifySellerRequest(BaseModel):
     status: str = Field(..., pattern="^(VERIFIED|REJECTED)$")
     rejection_reason: Optional[str] = None
+    temp_password: Optional[str] = Field(
+        None,
+        min_length=6,
+        max_length=64,
+        description="Mật khẩu tạm admin cấp cho seller (tùy chọn). Nếu để trống, seller dùng mật khẩu cũ."
+    )
 
 
 class AdminUpdateSellerProfileRequest(BaseModel):
@@ -371,6 +382,9 @@ async def verify_seller(
             seller_type = (seller_user.type or "").strip().lower()
             if seller_type not in {"seller", "producer"}:
                 seller_user.type = "seller"
+            # Admin cấp mật khẩu tạm nếu có
+            if data.temp_password:
+                seller_user.password_hash = get_password_hash(data.temp_password)
             _sync_verified_seller_role(db, user_id)
     elif data.status == "REJECTED":
         profile.rejection_reason = data.rejection_reason
@@ -392,6 +406,28 @@ async def verify_seller(
         db.commit()
     except Exception as _e:
         logger.warning("[KYC] Không gửi được notification KYC verify/reject cho seller: %s", _e)
+
+    # [EMAIL K2/K3] Gửi email cho Seller (bất đồng bộ, lỗi không block response)
+    if seller_user and seller_user.email:
+        _seller_email = seller_user.email
+        _seller_name  = seller_user.name or "Bạn"
+        _biz_name     = profile.business_name or _seller_name
+        try:
+            if data.status == "VERIFIED":
+                send_kyc_approved_email(
+                    email=_seller_email,
+                    seller_name=_seller_name,
+                    business_name=_biz_name,
+                    temp_password=data.temp_password or None,
+                )
+            else:
+                send_kyc_rejected_email(
+                    email=_seller_email,
+                    seller_name=_seller_name,
+                    rejection_reason=data.rejection_reason or "Không đáp ứng yêu cầu",
+                )
+        except Exception as _email_err:
+            logger.warning("[KYC Email] Gửi email thất bại cho %s: %s", _seller_email, _email_err)
 
     return {
         "success": True,
