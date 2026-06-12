@@ -685,8 +685,11 @@ async def get_reserve_schedule(
     """
     _require_seller(current_user)
 
-    now = datetime.utcnow()
+    from datetime import timezone as _tz
     from decimal import Decimal as D
+
+    # Dùng aware datetime để tránh TypeError khi trừ naive vs aware
+    now = datetime.now(_tz.utc)
 
     # Luồng mới: 100% seller_amount nằm trong pending_balance (không còn 20% reserve)
     upcoming = db.query(Order).filter(
@@ -704,6 +707,9 @@ async def get_reserve_schedule(
         reserve_amt = D(str(o.seller_amount or 0)).quantize(D("0.01"))
         total_pending += reserve_amt
         release_dt = o.reserve_release_at
+        # Normalize: nếu release_dt naive (không có tzinfo) thì gắn UTC để tính đúng
+        if release_dt.tzinfo is None:
+            release_dt = release_dt.replace(tzinfo=_tz.utc)
         # Tính số ngày còn lại (có thể âm nếu đã quá hạn nhưng chưa được giải phóng)
         delta = (release_dt - now).total_seconds()
         days_left = max(0, int(delta // 86400))
