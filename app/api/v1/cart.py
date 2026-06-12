@@ -262,7 +262,7 @@ async def update_cart_item(
         get_variant_for_product(db, product.id, item.variant_id) if item.variant_id else None
     )
     item.quantity = item_data.quantity
-    item.unit_price = get_unit_price(product, variant)
+    item.unit_price = get_unit_price(product, variant, db=db)
     db.commit()
     db.refresh(cart)
 

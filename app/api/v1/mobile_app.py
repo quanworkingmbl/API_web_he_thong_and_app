@@ -1283,9 +1283,15 @@ async def get_product_detail(
         ProductOrigin.product_id == product.id,
         ProductOrigin.verification_status == OriginStatus.VERIFIED,
     ).first()
+    # Lấy tất cả certificates trừ REJECTED để mobile hiển thị cả PENDING
+    # với badge "Đang xác minh" — tránh user nhầm tưởng SP không có chứng nhận
     certificates = db.query(ProductCertificate).filter(
         ProductCertificate.product_id == product.id,
-        ProductCertificate.verification_status == CertificateStatus.VERIFIED,
+        ProductCertificate.verification_status != CertificateStatus.REJECTED,
+    ).order_by(
+        # VERIFIED lên trước, PENDING xuống sau
+        ProductCertificate.verification_status.asc(),
+        ProductCertificate.id.asc(),
     ).all()
 
     origin_payload = None
@@ -1318,6 +1324,10 @@ async def get_product_detail(
             "issue_date": cert.issue_date.isoformat() if cert.issue_date else None,
             "expiry_date": cert.expiry_date.isoformat() if cert.expiry_date else None,
             "document_url": cert.document_url,
+            # Mobile app dùng field này để hiện badge "Đã xác minh" / "Đang xác minh"
+            "verification_status": cert.verification_status.value
+            if hasattr(cert.verification_status, "value")
+            else str(cert.verification_status),
         }
         for cert in certificates
     ]

@@ -475,9 +475,14 @@ async def get_product_traceability(
         ProductOrigin.product_id == product_id,
         ProductOrigin.verification_status == OriginStatus.VERIFIED,
     ).first()
+    # Trả tất cả certificates trừ REJECTED (VERIFIED + PENDING),
+    # mobile app sẽ dùng verification_status để hiện badge phù hợp
     certs = db.query(ProductCertificate).filter(
         ProductCertificate.product_id == product_id,
-        ProductCertificate.verification_status == CertificateStatus.VERIFIED
+        ProductCertificate.verification_status != CertificateStatus.REJECTED,
+    ).order_by(
+        ProductCertificate.verification_status.asc(),
+        ProductCertificate.id.asc(),
     ).all()
     producer = db.query(User).filter(User.id == product.seller_id).first()
 
@@ -505,7 +510,11 @@ async def get_product_traceability(
                     "issued_by": c.issued_by,
                     "issue_date": c.issue_date.isoformat() if c.issue_date else None,
                     "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
-                    "document_url": c.document_url
+                    "document_url": c.document_url,
+                    # Mobile app dùng để hiện badge "Đã xác minh" / "Đang xác minh"
+                    "verification_status": c.verification_status.value
+                    if hasattr(c.verification_status, "value")
+                    else str(c.verification_status),
                 }
                 for c in certs
             ]

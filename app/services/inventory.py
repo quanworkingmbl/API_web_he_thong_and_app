@@ -10,6 +10,7 @@ Quy ước:
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import datetime, timezone as dt_timezone
 from typing import Optional, Tuple
 
 from fastapi import HTTPException
@@ -90,17 +91,98 @@ def get_available_stock(db: Session, product: Product, variant_id: Optional[int]
     return int(v.stock_quantity) if v else 0
 
 
-def get_unit_price(product: Product, variant: Optional[ProductVariant]) -> Decimal:
+def get_unit_price(
+    product: Product,
+    variant: Optional[ProductVariant],
+    db: Optional[Session] = None,
+) -> Decimal:
+    """Trả về đơn giá áp dụng thực tế.
+
+    Nếu `db` được truyền vào, hàm sẽ tra cứu Flash Sale promotion đang active
+    cho sản phẩm và trả về giá sau giảm nếu có.
+    Đối với sản phẩm có biến thể, giá variant được dùng làm base price.
+    """
     if variant is not None:
-        return Decimal(str(variant.price))
-    return Decimal(str(product.price))
+        base = Decimal(str(variant.price))
+    else:
+        base = Decimal(str(product.price))
+
+    if db is None:
+        return base
+
+    # Tra cứu Flash Sale promotion đang active áp dụng cho sản phẩm này
+    try:
+        from app.models.promotion import Promotion  # noqa: PLC0415
+        import json as _json  # noqa: PLC0415
+
+        now_utc = datetime.now(dt_timezone.utc)
+        active_flash_promos = (
+            db.query(Promotion)
+            .filter(
+                Promotion.is_flash_sale.is_(True),
+                Promotion.status == "ACTIVE",
+                Promotion.start_date <= now_utc,
+                Promotion.end_date >= now_utc,
+            )
+            .all()
+        )
+
+        best_discount = Decimal("0")
+        for promo in active_flash_promos:
+            # Kiểm tra phạm vi áp dụng (seller / product / category / ALL)
+            if promo.seller_id and promo.seller_id != product.seller_id:
+                continue
+
+            scope = str(getattr(promo, "applicable_to", "ALL") or "ALL").upper()
+
+            if scope == "PRODUCT":
+                try:
+                    scoped_ids = {int(x) for x in _json.loads(promo.applicable_product_ids or "[]")}
+                except Exception:
+                    scoped_ids = set()
+                if product.id not in scoped_ids:
+                    continue
+            elif scope == "CATEGORY":
+                try:
+                    scoped_ids = {int(x) for x in _json.loads(promo.applicable_category_ids or "[]")}
+                except Exception:
+                    scoped_ids = set()
+                if product.category_id is None or product.category_id not in scoped_ids:
+                    continue
+            elif scope == "SELLER":
+                if not (promo.seller_id and promo.seller_id == product.seller_id):
+                    continue
+            # scope == "ALL": tiếp tục
+
+            # Kiểm tra min_order_amount
+            if base < (promo.min_order_amount or Decimal("0")):
+                continue
+
+            # Tính discount
+            promo_type = promo.promotion_type.value if hasattr(promo.promotion_type, "value") else str(promo.promotion_type)
+            if promo_type == "PERCENTAGE":
+                discount = base * promo.discount_value / Decimal("100")
+            else:
+                discount = Decimal(str(promo.discount_value))
+
+            if promo.max_discount_amount and discount > promo.max_discount_amount:
+                discount = promo.max_discount_amount
+
+            if discount > best_discount:
+                best_discount = discount
+
+        final_price = base - best_discount
+        return max(final_price, Decimal("0"))
+    except Exception:  # noqa: BLE001
+        # Fallback an toàn: không để lỗi promotion phá luồng giỏ hàng
+        return base
 
 
 def validate_line_for_sale(
     db: Session, product: Product, quantity: int, variant_id: Optional[int]
 ) -> Tuple[Optional[ProductVariant], Decimal]:
     """
-    Kiểm tra đủ tồn và trả về (variant hoặc None, đơn giá).
+    Kiểm tra đủ tồn và trả về (variant hoặc None, đơn giá sau flash sale/khuyến mãi).
     Raises HTTPException 400 nếu không hợp lệ.
     """
     if variant_id is not None and not get_variant_for_product(db, product.id, variant_id):
@@ -115,7 +197,8 @@ def validate_line_for_sale(
         v = get_variant_for_product(db, product.id, variant_id)
         assert v is not None
         avail = int(v.stock_quantity)
-        price = get_unit_price(product, v)
+        # Truyền db để hàm tự tra cứu flash sale promotion
+        price = get_unit_price(product, v, db=db)
     else:
         if variant_id is not None:
             raise HTTPException(
@@ -124,7 +207,8 @@ def validate_line_for_sale(
             )
         v = None
         avail = int(product.stock_quantity or 0)
-        price = get_unit_price(product, None)
+        # Truyền db để hàm tự tra cứu flash sale promotion
+        price = get_unit_price(product, None, db=db)
 
     if quantity > avail:
         raise HTTPException(
