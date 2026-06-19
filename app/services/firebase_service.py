@@ -183,11 +183,13 @@ def add_message_to_firestore(
     sender_id: int,
     sender_type: str,  # "buyer" | "seller"
     content: str,
-    msg_type: str = "text",  # "text" | "image"
+    msg_type: str = "text",  # "text" | "image" | "video" | "product_card" | "order_card"
+    metadata: Optional[dict] = None,
 ) -> str:
     """
     Ghi tin nhắn vào Firestore.
     Trả về message document ID.
+    metadata: dict tuỳ chọn cho rich card (product_card, order_card)
     """
     import datetime
     db = get_firestore()
@@ -196,15 +198,19 @@ def add_message_to_firestore(
 
     now = datetime.datetime.utcnow()
 
-    # Thêm tin nhắn
-    _, msg_ref = messages_ref.add({
+    doc_data: dict = {
         "sender_id": sender_id,
         "sender_type": sender_type,
         "content": content,
         "type": msg_type,
         "created_at": now,
         "read": False,
-    })
+        "recalled_at": None,
+    }
+    if metadata:
+        doc_data["metadata"] = metadata
+
+    _, msg_ref = messages_ref.add(doc_data)
 
     # Cập nhật last_message trên room
     unread_field = "unread_buyer" if sender_type == "seller" else "unread_seller"
@@ -215,6 +221,84 @@ def add_message_to_firestore(
     })
 
     return msg_ref.id
+
+
+def recall_message(chat_id: str, message_id: str, sender_id: int) -> dict:
+    """
+    Thu hồi tin nhắn: cập nhật type→'recalled', xoá content.
+    Trả về dict với file_url nếu message cũ là ảnh/video (để caller xoá GCS).
+    Raises ValueError nếu không có quyền hoặc không tìm thấy.
+    """
+    import datetime
+    db = get_firestore()
+    msg_ref = (
+        db.collection("chats")
+        .document(chat_id)
+        .collection("messages")
+        .document(message_id)
+    )
+    doc = msg_ref.get()
+    if not doc.exists:
+        raise ValueError("Tin nhắn không tồn tại")
+
+    d = doc.to_dict()
+    if d.get("sender_id") != sender_id:
+        raise PermissionError("Không có quyền thu hồi tin nhắn này")
+
+    old_type = d.get("type", "text")
+    old_content = d.get("content", "")
+
+    msg_ref.update({
+        "type": "recalled",
+        "content": "",
+        "recalled_at": datetime.datetime.utcnow(),
+        "metadata": None,
+    })
+
+    return {
+        "old_type": old_type,
+        "old_content": old_content,  # URL nếu là ảnh/video
+    }
+
+
+def add_media_messages_to_firestore(
+    chat_id: str,
+    sender_id: int,
+    sender_type: str,
+    media_urls: list[str],
+    msg_type: str = "image",  # "image" | "video"
+) -> list[str]:
+    """
+    Ghi nhiều tin nhắn media (tối đa 3 ảnh) vào Firestore.
+    Trả về list message IDs.
+    """
+    import datetime
+    db = get_firestore()
+    chat_ref = db.collection("chats").document(chat_id)
+    messages_ref = chat_ref.collection("messages")
+    now = datetime.datetime.utcnow()
+    msg_ids = []
+
+    for url in media_urls:
+        _, msg_ref = messages_ref.add({
+            "sender_id": sender_id,
+            "sender_type": sender_type,
+            "content": url,
+            "type": msg_type,
+            "created_at": now,
+            "read": False,
+            "recalled_at": None,
+        })
+        msg_ids.append(msg_ref.id)
+
+    unread_field = "unread_buyer" if sender_type == "seller" else "unread_seller"
+    label = "📷 Đã gửi ảnh" if msg_type == "image" else "🎬 Đã gửi video"
+    chat_ref.update({
+        "last_message": label,
+        "last_at": now,
+        unread_field: firestore.Increment(len(media_urls)),
+    })
+    return msg_ids
 
 
 def mark_messages_as_read(chat_id: str, reader_type: str) -> None:

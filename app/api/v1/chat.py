@@ -3,17 +3,23 @@ Chat API — v1
 Endpoints cho real-time chat giữa User (buyer) và Seller
 Data lưu trong Firestore, metadata trong PostgreSQL
 """
+import json
 import logging
+import os
+import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from google.cloud import storage as gcs
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.models.product import Product
+from app.models.order import Order, OrderItem
 from app.services import firebase_service
 
 logger = logging.getLogger(__name__)
@@ -21,6 +27,15 @@ router = APIRouter()
 
 SELLER_TYPES = {"seller", "producer"}
 ADMIN_TYPES  = {"admin", "superadmin"}
+
+# GCS config cho chat media
+_GCS_BUCKET      = os.getenv("GCS_BUCKET_NAME", "mbl-cms-media-bucket")
+_GCS_PUBLIC_BASE = f"https://storage.googleapis.com/{_GCS_BUCKET}"
+_IMAGE_TYPES     = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_VIDEO_TYPES     = {"video/mp4", "video/quicktime"}
+_MAX_IMAGE_SIZE  = 5  * 1024 * 1024   # 5 MB/ảnh
+_MAX_VIDEO_SIZE  = 20 * 1024 * 1024   # 20 MB/video
+_MAX_IMAGES      = 3                   # tối đa 3 ảnh/lần
 
 
 # ── Pydantic Schemas ──────────────────────────────────────────────────────────
@@ -33,7 +48,15 @@ class CreateRoomRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str
-    type: str = "text"   # "text" | "image"
+    type: str = "text"   # "text"
+
+
+class SendProductRequest(BaseModel):
+    product_id: int
+
+
+class SendOrderRequest(BaseModel):
+    order_id: int
 
 
 class MarkReadRequest(BaseModel):
@@ -307,3 +330,307 @@ async def mark_as_read(
     except Exception as e:
         logger.error(f"[Chat] mark_read error: {e}")
         raise HTTPException(status_code=503, detail="Không thể cập nhật trạng thái đọc")
+
+
+# ── GCS upload helper (internal) ─────────────────────────────────────────────
+
+def _upload_chat_media(content: bytes, ext: str, content_type: str) -> str:
+    """Upload file vào chat-media/ prefix trên GCS, trả về public URL."""
+    key = f"chat-media/{uuid.uuid4()}{ext}"
+    client = gcs.Client()
+    bucket = client.bucket(_GCS_BUCKET)
+    blob   = bucket.blob(key)
+    blob.upload_from_string(content, content_type=content_type)
+    return f"{_GCS_PUBLIC_BASE}/{key}"
+
+
+def _delete_chat_media(url: str) -> None:
+    """Xoá file GCS từ URL (dùng khi thu hồi ảnh/video)."""
+    try:
+        prefix = f"{_GCS_PUBLIC_BASE}/"
+        if url.startswith(prefix):
+            key = url[len(prefix):]
+            gcs.Client().bucket(_GCS_BUCKET).blob(key).delete()
+    except Exception as e:
+        logger.warning(f"[Chat] GCS delete failed: {e}")
+
+
+def _parse_participants(chat_id: str) -> tuple[int, int]:
+    """Parse buyer_id, seller_id từ chat_id dạng user{n}_seller{m}."""
+    try:
+        parts  = chat_id.split("_")
+        buyer  = int(parts[0].replace("user", ""))
+        seller = int(parts[1].replace("seller", ""))
+        return buyer, seller
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="chat_id không hợp lệ")
+
+
+# ── Endpoint: Gửi ảnh/video (tối đa 3 ảnh, 1 video) ─────────────────────────
+
+@router.post("/rooms/{chat_id}/messages/media", summary="Gửi ảnh hoặc video trong chat")
+async def send_media(
+    chat_id: str,
+    files: List[UploadFile] = File(..., description="Tối đa 3 ảnh (≤5MB/ảnh) hoặc 1 video (≤20MB)"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload ảnh/video lên GCS → ghi messages vào Firestore.
+    - Ảnh: tối đa 3 file, mỗi file ≤ 5MB
+    - Video: chỉ 1 file, ≤ 20MB
+    """
+    if current_user.type in ADMIN_TYPES:
+        raise HTTPException(status_code=403, detail="Admin không tham gia chat")
+
+    buyer_id, seller_id = _parse_participants(chat_id)
+    is_seller   = current_user.type in SELLER_TYPES
+    sender_type = "seller" if is_seller else "buyer"
+    if is_seller and current_user.id != seller_id:
+        raise HTTPException(status_code=403, detail="Không có quyền")
+    if not is_seller and current_user.id != buyer_id:
+        raise HTTPException(status_code=403, detail="Không có quyền")
+
+    if not files:
+        raise HTTPException(status_code=422, detail="Chưa chọn file")
+
+    # Xác định loại: ảnh hay video
+    first_ct = (files[0].content_type or "").lower()
+    is_video  = first_ct in _VIDEO_TYPES
+
+    if is_video:
+        if len(files) > 1:
+            raise HTTPException(status_code=422, detail="Chỉ gửi 1 video mỗi lần")
+        file = files[0]
+        ct   = (file.content_type or "").lower()
+        if ct not in _VIDEO_TYPES:
+            raise HTTPException(status_code=400, detail=f"Loại video không hỗ trợ: {ct}")
+        content = await file.read()
+        if len(content) > _MAX_VIDEO_SIZE:
+            raise HTTPException(status_code=400, detail="Video vượt quá 20MB")
+        ext = os.path.splitext(file.filename or "video")[1].lower() or ".mp4"
+        url = _upload_chat_media(content, ext, ct)
+        msg_ids = firebase_service.add_media_messages_to_firestore(
+            chat_id=chat_id, sender_id=current_user.id,
+            sender_type=sender_type, media_urls=[url], msg_type="video",
+        )
+        return {"success": True, "data": {"message_ids": msg_ids, "urls": [url], "type": "video"}}
+
+    # ── Ảnh ──
+    if len(files) > _MAX_IMAGES:
+        raise HTTPException(status_code=422, detail=f"Chỉ được gửi tối đa {_MAX_IMAGES} ảnh cùng lúc")
+
+    urls: list[str] = []
+    for file in files:
+        ct = (file.content_type or "").lower()
+        if ct not in _IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail=f"Loại ảnh không hỗ trợ: {ct}")
+        content = await file.read()
+        if len(content) > _MAX_IMAGE_SIZE:
+            raise HTTPException(status_code=400, detail=f"Ảnh {file.filename!r} vượt quá 5MB")
+        ext = os.path.splitext(file.filename or "img")[1].lower() or ".jpg"
+        urls.append(_upload_chat_media(content, ext, ct))
+
+    msg_ids = firebase_service.add_media_messages_to_firestore(
+        chat_id=chat_id, sender_id=current_user.id,
+        sender_type=sender_type, media_urls=urls, msg_type="image",
+    )
+
+    # FCM push cho người nhận
+    recipient_id     = buyer_id if is_seller else seller_id
+    recipient_tokens = _get_fcm_tokens(db, recipient_id)
+    if recipient_tokens:
+        sender_name = current_user.name or ("Shop" if is_seller else "Khách")
+        firebase_service.send_fcm_multicast(
+            tokens=recipient_tokens,
+            title=f"Ảnh mới từ {sender_name}",
+            body=f"Đã gửi {len(urls)} ảnh",
+            data={"category": "chat", "chat_id": chat_id},
+        )
+
+    return {"success": True, "data": {"message_ids": msg_ids, "urls": urls, "type": "image"}}
+
+
+# ── Endpoint: Thu hồi tin nhắn ─────────────────────────────────────────────
+
+@router.delete("/rooms/{chat_id}/messages/{message_id}", summary="Thu hồi tin nhắn")
+async def recall_message(
+    chat_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Thu hồi tin nhắn (vô thời hạn). Chỉ người gửi mới thu hồi được."""
+    if current_user.type in ADMIN_TYPES:
+        raise HTTPException(status_code=403, detail="Admin không tham gia chat")
+    try:
+        result = firebase_service.recall_message(
+            chat_id=chat_id,
+            message_id=message_id,
+            sender_id=current_user.id,
+        )
+        # Nếu là ảnh/video → xoá file GCS
+        if result["old_type"] in ("image", "video") and result["old_content"]:
+            _delete_chat_media(result["old_content"])
+        return {"success": True, "message": "Tin nhắn đã được thu hồi"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"[Chat] recall_message error: {e}")
+        raise HTTPException(status_code=503, detail="Không thể thu hồi tin nhắn")
+
+
+# ── Endpoint: Gửi sản phẩm (App only) ────────────────────────────────────────
+
+@router.post("/rooms/{chat_id}/messages/product", summary="Gửi sản phẩm vào chat")
+async def send_product(
+    chat_id: str,
+    body: SendProductRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Gửi product card vào chat. Buyer hoặc Seller đều dùng được."""
+    if current_user.type in ADMIN_TYPES:
+        raise HTTPException(status_code=403, detail="Admin không tham gia chat")
+
+    buyer_id, seller_id = _parse_participants(chat_id)
+    is_seller   = current_user.type in SELLER_TYPES
+    sender_type = "seller" if is_seller else "buyer"
+    if is_seller and current_user.id != seller_id:
+        raise HTTPException(status_code=403, detail="Không có quyền")
+    if not is_seller and current_user.id != buyer_id:
+        raise HTTPException(status_code=403, detail="Không có quyền")
+
+    # Lấy product — phải thuộc seller của chat này
+    product = db.query(Product).filter(
+        Product.id == body.product_id,
+        Product.seller_id == seller_id,
+        Product.is_active == True,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc không thuộc shop này")
+
+    # Lấy ảnh đầu tiên
+    import json
+    images = []
+    try:
+        images = json.loads(product.images or "[]")
+    except Exception:
+        pass
+    thumb = images[0] if images else ""
+
+    # Số đã bán (nếu có field sold_count, fallback = 0)
+    sold = getattr(product, "sold_count", 0) or 0
+
+    metadata = {
+        "product_id":  product.id,
+        "name":        product.name,
+        "price":       float(product.price),
+        "image_url":   thumb,
+        "sold_count":  sold,
+        "seller_id":   seller_id,
+    }
+
+    try:
+        msg_id = firebase_service.add_message_to_firestore(
+            chat_id=chat_id,
+            sender_id=current_user.id,
+            sender_type=sender_type,
+            content=f"Sản phẩm: {product.name}",
+            msg_type="product_card",
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.error(f"[Chat] send_product error: {e}")
+        raise HTTPException(status_code=503, detail="Không thể gửi sản phẩm")
+
+    return {"success": True, "data": {"message_id": msg_id}}
+
+
+# ── Endpoint: Gửi đơn hàng (App only) ────────────────────────────────────────
+
+@router.post("/rooms/{chat_id}/messages/order", summary="Gửi đơn hàng vào chat")
+async def send_order(
+    chat_id: str,
+    body: SendOrderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Gửi order card vào chat. Buyer hoặc Seller đều dùng được."""
+    if current_user.type in ADMIN_TYPES:
+        raise HTTPException(status_code=403, detail="Admin không tham gia chat")
+
+    buyer_id, seller_id = _parse_participants(chat_id)
+    is_seller   = current_user.type in SELLER_TYPES
+    sender_type = "seller" if is_seller else "buyer"
+    if is_seller and current_user.id != seller_id:
+        raise HTTPException(status_code=403, detail="Không có quyền")
+    if not is_seller and current_user.id != buyer_id:
+        raise HTTPException(status_code=403, detail="Không có quyền")
+
+    # Lấy order — phải liên quan tới buyer+seller của chat này
+    order = db.query(Order).filter(
+        Order.id == body.order_id,
+        Order.customer_id == buyer_id,
+        Order.seller_id == seller_id,
+        Order.is_active == True,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại hoặc không thuộc cuộc trò chuyện này")
+
+    # Lấy items
+    items_data = []
+    for item in order.items:
+        items_data.append({
+            "product_name":  item.product_name,
+            "product_image": item.product_image or "",
+            "quantity":      item.quantity,
+            "unit_price":    float(item.unit_price),
+        })
+
+    # Ảnh đại diện = ảnh item đầu tiên
+    thumb = items_data[0]["product_image"] if items_data else ""
+
+    # Label trạng thái tiếng Việt
+    status_labels = {
+        "PENDING":    "Chờ xác nhận",
+        "CONFIRMED":  "Đã xác nhận",
+        "PROCESSING": "Đang xử lý",
+        "SHIPPING":   "Đang giao",
+        "DELIVERED":  "Đã giao",
+        "CANCELLED":  "Đã hủy",
+        "REFUNDED":   "Đã hoàn tiền",
+    }
+    status_label = status_labels.get(order.status.value if hasattr(order.status, 'value') else str(order.status), str(order.status))
+
+    metadata = {
+        "order_id":     order.id,
+        "order_number": order.order_number,
+        "status":       str(order.status.value if hasattr(order.status, 'value') else order.status),
+        "status_label": status_label,
+        "total_amount": float(order.total_amount),
+        "items_count":  len(items_data),
+        "thumb":        thumb,
+        "items":        items_data[:3],   # tối đa 3 items trong card
+        "customer_name": order.customer_name,
+        "customer_phone": order.customer_phone,
+        "shipping_address": order.shipping_address,
+    }
+
+    content_preview = f"Đơn hàng #{order.order_number} · {len(items_data)} sản phẩm · {int(order.total_amount):,}₫"
+
+    try:
+        msg_id = firebase_service.add_message_to_firestore(
+            chat_id=chat_id,
+            sender_id=current_user.id,
+            sender_type=sender_type,
+            content=content_preview,
+            msg_type="order_card",
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.error(f"[Chat] send_order error: {e}")
+        raise HTTPException(status_code=503, detail="Không thể gửi đơn hàng")
+
+    return {"success": True, "data": {"message_id": msg_id}}
