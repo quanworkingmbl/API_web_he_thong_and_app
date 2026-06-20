@@ -201,6 +201,9 @@ class CreateSellerProductRequest(BaseModel):
     images: Optional[str] = None   # JSON array of image URLs
     videos: Optional[str] = None   # URL hoặc JSON array URL video sản phẩm
     stock_quantity: int = Field(default=0, ge=0)
+    # Chính sách đổi trả (Seller tự cấu hình)
+    return_days: Optional[int] = Field(None, ge=0, description="Số ngày được đổi trả. NULL/0 = không hỗ trợ")
+    return_fee_paid: bool = Field(False, description="True = có phí đổi trả")
     origin: CreateSellerOriginRequest
 
 
@@ -220,6 +223,9 @@ class UpdateSellerProductRequest(BaseModel):
     videos: Optional[str] = None
     stock_quantity: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
+    # Chính sách đổi trả (optional khi update)
+    return_days: Optional[int] = Field(None, ge=0)
+    return_fee_paid: Optional[bool] = None
     origin: Optional[UpdateSellerOriginRequest] = None
 
 
@@ -916,6 +922,9 @@ async def get_seller_products(
             "sold_quantity": sold_quantity_map.get(p.id, 0),
             "images": p.images,
             "videos": p.videos,
+            # Chính sách đổi trả
+            "return_days": p.return_days,
+            "return_fee_paid": p.return_fee_paid,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         })
@@ -968,6 +977,9 @@ async def create_seller_product(
         stock_quantity=product_data.stock_quantity,
         vat_rate=10,   # mặc định 10% VAT – Seller không thể thay đổi
         is_active=True,
+        # Chính sách đổi trả
+        return_days=product_data.return_days,
+        return_fee_paid=product_data.return_fee_paid,
     )
     db.add(new_product)
     db.flush()
@@ -1009,6 +1021,8 @@ async def create_seller_product(
             "unit": new_product.unit,
             "weight": new_product.weight,
             "packaging_type": new_product.packaging_type,
+            "return_days": new_product.return_days,
+            "return_fee_paid": new_product.return_fee_paid,
             "status": "PENDING",
             "origin_status": origin.verification_status.value if hasattr(origin.verification_status, "value") else str(origin.verification_status),
             "images": new_product.images,
@@ -1153,6 +1167,8 @@ async def update_seller_product(
             "is_active": product.is_active,
             "label": product.label,
             "status": product.status.value if hasattr(product.status, "value") else str(product.status),
+            "return_days": product.return_days,
+            "return_fee_paid": product.return_fee_paid,
             "origin_status": (
                 origin_record.verification_status.value
                 if origin_record and hasattr(origin_record.verification_status, "value")

@@ -1075,6 +1075,9 @@ async def get_mobile_home(
             "stock_quantity": p.stock_quantity,
             "avg_rating": review_stats["avg_rating"],
             "review_count": review_stats["total_reviews"],
+            # Chính sách đổi trả — App dùng để hiển thị badge
+            "return_days": p.return_days,
+            "return_fee_paid": p.return_fee_paid,
         }
 
     # Promotions (active, public)
@@ -1362,6 +1365,9 @@ async def get_product_detail(
                 "origin": origin_payload,
                 "certificates": certificates_payload,
             },
+            # Chính sách đổi trả — App hiển thị badge dưới tên sản phẩm
+            "return_days": product.return_days,
+            "return_fee_paid": product.return_fee_paid,
             "created_at": product.created_at.isoformat() if product.created_at else None
         }
     }
@@ -2137,6 +2143,8 @@ async def get_my_orders(
             "item_count": len(items),
             "first_item_image": first_image,
             "has_reviewed": has_reviewed,  # ← Flutter dùng field này để hiển thị nút
+            # delivered_at — Flutter dùng để tính deadline đánh giá (30 ngày) và đổi trả (7 ngày)
+            "delivered_at": o.delivered_at.isoformat() if o.delivered_at else None,
             "items": [
                 {
                     "id": item.id,

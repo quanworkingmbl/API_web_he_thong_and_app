@@ -70,6 +70,12 @@ class Product(Base):
     # Inventory management
     stock_quantity = Column(Integer, default=0, nullable=False)
 
+    # Return policy – Seller cấu hình chính sách đổi trả
+    # return_days: số ngày được phép đổi trả (NULL / 0 = không hỗ trợ)
+    # return_fee_paid: True = có phí, False = miễn phí (chỉ có ý nghĩa khi return_days > 0)
+    return_days = Column(Integer, nullable=True, default=None)
+    return_fee_paid = Column(Boolean, default=False, nullable=False)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
