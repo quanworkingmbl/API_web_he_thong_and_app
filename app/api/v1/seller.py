@@ -29,6 +29,7 @@ Endpoints:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from typing import Optional, List
@@ -804,6 +805,75 @@ async def mark_order_shipping(
         "order_id": order_id,
         "status": "SHIPPING"
     }
+
+
+@router.get(
+    "/orders/{order_id}/qr-label",
+    summary="Tạo mã QR truy xuất nguồn gốc cho đơn hàng",
+)
+async def generate_order_qr_label(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Seller tạo mã QR PNG để in dán lên thùng hàng.
+    QR chứa URL: {FRONTEND_URL}/#/trace/{product_id}
+
+    - Chỉ được gọi khi đơn ở trạng thái PROCESSING, SHIPPING hoặc DELIVERED
+    - Trả về file PNG để browser tự động tải về
+    """
+    import os
+    from app.models.traceability import ProductOrigin
+    from app.services.qr_code import QRCodeService
+
+    _require_seller(current_user)
+
+    # Kiểm tra đơn hàng thuộc seller
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.seller_id == current_user.id,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    # Chỉ tạo QR khi đang đóng gói trở đi
+    allowed_statuses = {OrderStatus.PROCESSING, OrderStatus.SHIPPING, OrderStatus.DELIVERED}
+    if order.status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ tạo mã QR khi đơn hàng đang ở trạng thái Đóng gói (PROCESSING) trở đi",
+        )
+
+    # Lấy sản phẩm đầu tiên trong đơn
+    first_item = db.query(OrderItem).filter(OrderItem.order_id == order.id).first()
+    if not first_item:
+        raise HTTPException(status_code=400, detail="Đơn hàng không có sản phẩm")
+
+    product_id = first_item.product_id
+
+    # Lấy batch_number từ ProductOrigin (nếu có)
+    origin = db.query(ProductOrigin).filter(
+        ProductOrigin.product_id == product_id
+    ).first()
+    batch_number = origin.batch_number if origin else None
+
+    # Lấy base URL frontend từ biến môi trường
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    # Tạo QR image
+    qr_buffer = QRCodeService.generate_product_trace_qr(
+        product_id=product_id,
+        base_url=base_url,
+        batch_number=batch_number,
+    )
+
+    filename = f"qr_{order.order_number}_product_{product_id}.png"
+    return StreamingResponse(
+        qr_buffer,
+        media_type="image/png",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/products", summary="Sản phẩm của seller")

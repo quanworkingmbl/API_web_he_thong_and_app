@@ -48,3 +48,6 @@ redis>=5.0.0
 
 # --- Firebase Admin (Firestore chat + FCM push notification) ---
 firebase-admin>=6.5.0
+
+# --- QR Code (tạo mã QR truy xuất nguồn gốc sản phẩm) ---
+qrcode[pil]>=7.4
