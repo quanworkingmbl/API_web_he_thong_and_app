@@ -28,6 +28,12 @@ _VNPAY_CALLBACK_PREFIXES = (
     "/api/deposit/vnpay/return",
 )
 
+# Public API paths – accessed by end-users without app credentials
+# (e.g. customers scanning QR codes to view product traceability)
+_PUBLIC_API_PREFIXES = (
+    "/api/v1/traceability/",
+)
+
 class ApiSecretMiddleware(BaseHTTPMiddleware):
     """Middleware that validates the X-Quan-Secret header on every request.
     
@@ -50,6 +56,10 @@ class ApiSecretMiddleware(BaseHTTPMiddleware):
         # Skip check for VNPAY callback paths (IPN + return URL)
         # VNPAY Gateway never sends custom headers – exempting these prevents 403
         if any(path.startswith(prefix) for prefix in _VNPAY_CALLBACK_PREFIXES):
+            return await call_next(request)
+
+        # Skip check for public API paths (e.g. traceability for QR scan customers)
+        if any(path.startswith(prefix) for prefix in _PUBLIC_API_PREFIXES):
             return await call_next(request)
 
         secret = request.headers.get("X-Quan-Secret")
