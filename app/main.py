@@ -20,7 +20,7 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan: khởi động và dừng các background services."""
+    # """FastAPI lifespan: khởi động và dừng các background services."""
     # ── Startup ────────────────────────────────────────────────────────────
     start_scheduler()
     yield
