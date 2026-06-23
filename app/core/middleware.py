@@ -31,7 +31,7 @@ _VNPAY_CALLBACK_PREFIXES = (
 # Public API paths – accessed by end-users without app credentials
 # (e.g. customers scanning QR codes to view product traceability)
 _PUBLIC_API_PREFIXES = (
-    "/api/v1/traceability/",
+    "/api/traceability/",
 )
 
 class ApiSecretMiddleware(BaseHTTPMiddleware):
