@@ -47,6 +47,7 @@ from app.models.category import Category
 from app.models.region import Region
 from app.models.user import User
 from app.api.v1.auth import get_current_user
+from app.api.v1.deposit import _deduct_cod_deposit_for_order
 from app.core.permissions import check_seller_kyc_verified
 from app.services.order_state import log_status_change
 from app.services.inventory import increment_stock
@@ -272,7 +273,7 @@ async def get_seller_dashboard(
 
     # Thống kê 30 ngày gần nhất
     last_30_days = datetime.utcnow() - timedelta(days=30)
-    recent_orders = db.query(Order).filter(
+    recent_orders_count = db.query(Order).filter(
         Order.seller_id == seller_id,
         Order.created_at >= last_30_days
     ).count()
@@ -282,6 +283,22 @@ async def get_seller_dashboard(
         Order.created_at >= last_30_days
     ).all()
     recent_revenue = sum(o.seller_amount for o in recent_revenue_orders)
+
+    # 10 đơn hàng mới nhất (cho bảng "Đơn hàng gần đây" trên dashboard)
+    recent_orders_list_raw = db.query(Order).filter(
+        Order.seller_id == seller_id
+    ).order_by(Order.created_at.desc()).limit(10).all()
+    recent_orders_list = [
+        {
+            "id": o.id,
+            "order_number": o.order_number,
+            "customer_name": o.customer_name,
+            "total_amount": _to_vnd_int(o.total_amount),
+            "status": o.status.value if hasattr(o.status, "value") else str(o.status),
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        }
+        for o in recent_orders_list_raw
+    ]
 
     # Sản phẩm
     total_products = db.query(Product).filter(Product.seller_id == seller_id).count()
@@ -308,8 +325,9 @@ async def get_seller_dashboard(
             },
             "orders": {
                 "total": total_orders,
-                "last_30_days": recent_orders,
-                "by_status": orders_by_status
+                "last_30_days": recent_orders_count,
+                "by_status": orders_by_status,
+                "recent_orders": recent_orders_list,
             },
             "revenue": {
                 "total_gross":         _to_vnd_int(total_gross),        # Doanh thu gộp (trước phí + thuế)
@@ -454,6 +472,9 @@ async def get_seller_orders(
             "total_amount": _to_vnd_int(o.total_amount),
             "seller_amount": _to_vnd_int(o.seller_amount),
             "platform_fee_amount": _to_vnd_int(o.platform_fee_amount),
+            "cod_deposit_amount": _to_vnd_int(o.cod_deposit_amount),
+            "cod_deposit_deducted": bool(o.cod_deposit_deducted),
+            "cod_deposit_deducted_at": o.cod_deposit_deducted_at.isoformat() if o.cod_deposit_deducted_at else None,
             "status": o.status.value if hasattr(o.status, "value") else str(o.status),
             "payment_method": o.payment_method.value if hasattr(o.payment_method, "value") else str(o.payment_method),
             "payment_status": o.payment_status,
@@ -539,6 +560,9 @@ async def get_seller_order_detail(
             "total_amount": _to_vnd_int(order.total_amount),
             "seller_amount": _to_vnd_int(order.seller_amount),
             "platform_fee_amount": _to_vnd_int(order.platform_fee_amount),
+            "cod_deposit_amount": _to_vnd_int(order.cod_deposit_amount),
+            "cod_deposit_deducted": bool(order.cod_deposit_deducted),
+            "cod_deposit_deducted_at": order.cod_deposit_deducted_at.isoformat() if order.cod_deposit_deducted_at else None,
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "confirmed_at": order.confirmed_at.isoformat() if order.confirmed_at else None,
             "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
@@ -588,11 +612,19 @@ async def confirm_order(
         )
 
     # Tồn kho đã trừ khi khách đặt hàng (checkout). Xác nhận đơn không trừ thêm để tránh double-deduct.
+    cod_deposit_deducted, cod_deposit_amount = _deduct_cod_deposit_for_order(
+        order=order,
+        actor_id=current_user.id,
+        db=db,
+    )
 
     order.status = OrderStatus.CONFIRMED
     order.confirmed_at = datetime.utcnow()
 
     # [AUDIT] Ghi log xác nhận đơn
+    audit_note = "Seller xác nhận đơn hàng"
+    if cod_deposit_deducted:
+        audit_note += f" – đã khấu trừ ký quỹ COD {int(cod_deposit_amount):,}đ"
     log_status_change(
         db=db,
         order_id=order_id,
@@ -600,7 +632,7 @@ async def confirm_order(
         new_status=OrderStatus.CONFIRMED.value,
         actor_id=current_user.id,
         role="seller",
-        note="Seller xác nhận đơn hàng",
+        note=audit_note,
         auto_flush=True,
     )
 
@@ -618,7 +650,9 @@ async def confirm_order(
         "success": True,
         "message": "Đã xác nhận đơn hàng",
         "order_id": order_id,
-        "status": "CONFIRMED"
+        "status": "CONFIRMED",
+        "cod_deposit_deducted": cod_deposit_deducted,
+        "cod_deposit_amount": str(cod_deposit_amount),
     }
 
 

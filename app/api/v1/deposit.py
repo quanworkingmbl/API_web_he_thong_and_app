@@ -28,7 +28,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -98,6 +98,93 @@ def _confirm_deposit_tx(tx: DepositTransaction, db: Session):
     wallet.total_deposited = Decimal(str(wallet.total_deposited)) + amount
     tx.status = DepositStatus.CONFIRMED
     tx.reviewed_at = datetime.now(timezone.utc)
+
+
+def _deduct_cod_deposit_for_order(order, actor_id: int, db: Session) -> tuple[bool, Decimal]:
+    """
+    Trừ 10% giá trị đơn COD từ ví ký quỹ khi seller xác nhận đơn.
+
+    Returns:
+        (deducted, amount)
+        - deducted=False nếu không phải COD hoặc đơn đã trừ trước đó.
+        - amount là số tiền COD deposit tương ứng.
+    """
+    from app.models.order import Order
+
+    payment_method = order.payment_method.value if hasattr(order.payment_method, "value") else str(order.payment_method)
+    if payment_method != "COD":
+        return False, Decimal("0")
+
+    locked_order = (
+        db.query(Order)
+        .filter(Order.id == order.id)
+        .with_for_update()
+        .first()
+    )
+    if not locked_order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    if locked_order.cod_deposit_deducted:
+        return False, Decimal(str(locked_order.cod_deposit_amount or 0))
+
+    base_amount = Decimal(str(locked_order.total_amount or 0))
+    deduct_amount = (base_amount * Decimal("0.10")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if deduct_amount <= 0:
+        return False, Decimal("0")
+
+    wallet = (
+        db.query(SellerDepositWallet)
+        .filter(SellerDepositWallet.seller_id == locked_order.seller_id)
+        .with_for_update()
+        .first()
+    )
+    if not wallet:
+        raise HTTPException(
+            status_code=400,
+            detail="Seller chưa có ví ký quỹ. Vui lòng nạp ký quỹ trước khi xác nhận đơn COD.",
+        )
+
+    current_balance = Decimal(str(wallet.deposit_balance or 0))
+    if current_balance < deduct_amount:
+        needed = deduct_amount - current_balance
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Ví ký quỹ không đủ để xác nhận đơn COD. "
+                f"Cần {int(deduct_amount):,}đ, hiện có {int(current_balance):,}đ, "
+                f"cần nạp thêm {int(needed):,}đ."
+            ),
+        )
+
+    wallet.deposit_balance = current_balance - deduct_amount
+    wallet.total_deducted = Decimal(str(wallet.total_deducted or 0)) + deduct_amount
+
+    tx = DepositTransaction(
+        seller_id=locked_order.seller_id,
+        order_id=locked_order.id,
+        amount=deduct_amount,
+        tx_type=DepositTransactionType.DEDUCT,
+        status=DepositStatus.CONFIRMED,
+        payment_method="COD",
+        note=f"Khấu trừ 10% ký quỹ COD cho đơn {locked_order.order_number}",
+        reviewed_by=actor_id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    db.add(tx)
+
+    locked_order.cod_deposit_amount = deduct_amount
+    locked_order.cod_deposit_deducted = True
+    locked_order.cod_deposit_deducted_at = datetime.now(timezone.utc)
+
+    logger.info(
+        "[Deposit][COD] Deduct %s VND from seller #%s for order #%s. Balance: %s -> %s",
+        deduct_amount,
+        locked_order.seller_id,
+        locked_order.id,
+        current_balance,
+        wallet.deposit_balance,
+    )
+    return True, deduct_amount
 
 
 # ── Pydantic Schemas ──────────────────────────────────────────────────────────
@@ -183,6 +270,8 @@ async def get_my_deposit_history(
         "data": [
             {
                 "id":             t.id,
+                "order_id":       t.order_id,
+                "order_number":   t.order.order_number if t.order else None,
                 "amount":         str(t.amount),
                 "tx_type":        t.tx_type,
                 "status":         t.status,
@@ -681,6 +770,8 @@ async def admin_list_deposits(
         seller = db.query(User).filter(User.id == t.seller_id).first()
         result.append({
             "id":             t.id,
+            "order_id":       t.order_id,
+            "order_number":   t.order.order_number if t.order else None,
             "seller_id":      t.seller_id,
             "seller_name":    seller.name if seller else None,
             "seller_email":   seller.email if seller else None,

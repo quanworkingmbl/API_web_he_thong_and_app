@@ -59,6 +59,11 @@ class Order(Base):
     platform_fee_percentage = Column(Numeric(5, 2), nullable=False, default=10.0)
     platform_fee_amount = Column(Numeric(10, 2), nullable=False, default=0)
     seller_amount = Column(Numeric(15, 2), nullable=False, default=0)
+
+    # COD deposit collateral: trừ 10% từ ví ký quỹ khi seller xác nhận đơn COD
+    cod_deposit_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    cod_deposit_deducted = Column(Boolean, default=False, nullable=False, index=True)
+    cod_deposit_deducted_at = Column(DateTime(timezone=True), nullable=True)
     
     # Status and payment
     status = Column(SQLEnum(OrderStatus), default=OrderStatus.PENDING)

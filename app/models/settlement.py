@@ -181,6 +181,7 @@ class DepositTransaction(Base):
 
     id        = Column(Integer, primary_key=True, index=True)
     seller_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    order_id  = Column(Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
 
     amount  = Column(Numeric(15, 2), nullable=False)
     tx_type = Column(SQLEnum(DepositTransactionType), nullable=False, default=DepositTransactionType.TOP_UP)
@@ -206,6 +207,7 @@ class DepositTransaction(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     seller   = relationship("User", foreign_keys=[seller_id])
+    order    = relationship("Order", foreign_keys=[order_id])
     reviewer = relationship("User", foreign_keys=[reviewed_by])
 
 
