@@ -378,6 +378,42 @@ def _promotion_matches_product_scope(promo: Promotion, product: Product) -> bool
     return False
 
 
+def _build_flash_sale_info(product: Product, active_promotions: List[Promotion], now_utc) -> Dict[str, Any]:
+    """Trả dict flash-sale cho 1 sản phẩm.  Không có flash sale → tất cả None / False."""
+    from decimal import Decimal as _Dec
+    for promo in active_promotions:
+        if not promo.is_flash_sale:
+            continue
+        if not _promotion_matches_product_scope(promo, product):
+            continue
+        ends_in = None
+        if promo.end_date:
+            end_aware = promo.end_date
+            if end_aware.tzinfo is None:
+                from datetime import timezone as _tz
+                end_aware = end_aware.replace(tzinfo=_tz.utc)
+            delta = end_aware - now_utc
+            ends_in = max(0, int(delta.total_seconds()))
+        ptype = promo.promotion_type.value if hasattr(promo.promotion_type, "value") else str(promo.promotion_type)
+        dv = float(promo.discount_value or 0)
+        if ptype == "PERCENTAGE":
+            label = f"-{int(dv)}%"
+        else:
+            label = f"-{int(dv):,}đ".replace(",", ".")
+        return {
+            "is_flash_sale": True,
+            "flash_sale_code": promo.code,
+            "flash_sale_ends_in_seconds": ends_in,
+            "flash_sale_discount": label,
+        }
+    return {
+        "is_flash_sale": False,
+        "flash_sale_code": None,
+        "flash_sale_ends_in_seconds": None,
+        "flash_sale_discount": None,
+    }
+
+
 def _build_product_pricing(product: Product, active_promotions: List[Promotion]) -> Dict[str, Any]:
     base_price = Decimal(str(product.price or 0))
     best_promo: Optional[Promotion] = None
@@ -1053,11 +1089,15 @@ async def get_mobile_home(
         Promotion.end_date >= now,
     ).all()
 
+    from datetime import timezone as _tz_home
+    now_utc_home = now.replace(tzinfo=_tz_home.utc)
+
     def _build_product_card(p):
         producer = db.query(User).filter(User.id == p.seller_id).first()
         category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
         review_stats = _get_product_review_stats(db, p.id)
         pricing = _build_product_pricing(p, active_promotions)
+        flash = _build_flash_sale_info(p, active_promotions, now_utc_home)
         return {
             "id": p.id,
             "name": p.name,
@@ -1078,6 +1118,11 @@ async def get_mobile_home(
             # Chính sách đổi trả — App dùng để hiển thị badge
             "return_days": p.return_days,
             "return_fee_paid": p.return_fee_paid,
+            # Flash Sale per-product
+            "is_flash_sale": flash["is_flash_sale"],
+            "flash_sale_code": flash["flash_sale_code"],
+            "flash_sale_ends_in_seconds": flash["flash_sale_ends_in_seconds"],
+            "flash_sale_discount": flash["flash_sale_discount"],
         }
 
     # Promotions (active, public)
@@ -1168,12 +1213,16 @@ async def get_public_products(
         Promotion.end_date >= now,
     ).all()
 
+    from datetime import timezone as _tz_products
+    now_utc_products = now.replace(tzinfo=_tz_products.utc)
+
     product_list = []
     for p in products:
         producer = db.query(User).filter(User.id == p.seller_id).first()
         category = db.query(Category).filter(Category.id == p.category_id).first() if p.category_id else None
         review_stats = _get_product_review_stats(db, p.id)
         pricing = _build_product_pricing(p, active_promotions)
+        flash = _build_flash_sale_info(p, active_promotions, now_utc_products)
         product_list.append({
             "id": p.id,
             "name": p.name,
@@ -1191,6 +1240,11 @@ async def get_public_products(
             "stock_quantity": p.stock_quantity,
             "avg_rating": review_stats["avg_rating"],
             "review_count": review_stats["total_reviews"],
+            # Flash Sale per-product
+            "is_flash_sale": flash["is_flash_sale"],
+            "flash_sale_code": flash["flash_sale_code"],
+            "flash_sale_ends_in_seconds": flash["flash_sale_ends_in_seconds"],
+            "flash_sale_discount": flash["flash_sale_discount"],
         })
 
     return {
@@ -1280,6 +1334,8 @@ async def get_product_detail(
         Promotion.end_date >= now,
     ).all()
     pricing = _build_product_pricing(product, active_promotions)
+    from datetime import timezone as _tz_detail
+    flash = _build_flash_sale_info(product, active_promotions, now.replace(tzinfo=_tz_detail.utc))
 
     # Traceability
     origin = db.query(ProductOrigin).filter(
@@ -1368,7 +1424,12 @@ async def get_product_detail(
             # Chính sách đổi trả — App hiển thị badge dưới tên sản phẩm
             "return_days": product.return_days,
             "return_fee_paid": product.return_fee_paid,
-            "created_at": product.created_at.isoformat() if product.created_at else None
+            "created_at": product.created_at.isoformat() if product.created_at else None,
+            # Flash Sale per-product
+            "is_flash_sale": flash["is_flash_sale"],
+            "flash_sale_code": flash["flash_sale_code"],
+            "flash_sale_ends_in_seconds": flash["flash_sale_ends_in_seconds"],
+            "flash_sale_discount": flash["flash_sale_discount"],
         }
     }
 
@@ -1456,10 +1517,14 @@ async def get_shop_page(
         Promotion.end_date >= now,
     ).all()
 
+    from datetime import timezone as _tz_shop
+    now_utc_shop = now.replace(tzinfo=_tz_shop.utc)
+
     product_list = []
     for p in products:
         r_stats = _get_product_review_stats(db, p.id)
         pricing = _build_product_pricing(p, active_promotions)
+        flash = _build_flash_sale_info(p, active_promotions, now_utc_shop)
         product_list.append({
             "id": p.id,
             "name": p.name,
@@ -1472,6 +1537,11 @@ async def get_shop_page(
             "stock_quantity": p.stock_quantity,
             "avg_rating": r_stats["avg_rating"],
             "review_count": r_stats["total_reviews"],
+            # Flash Sale per-product
+            "is_flash_sale": flash["is_flash_sale"],
+            "flash_sale_code": flash["flash_sale_code"],
+            "flash_sale_ends_in_seconds": flash["flash_sale_ends_in_seconds"],
+            "flash_sale_discount": flash["flash_sale_discount"],
         })
 
     return {
