@@ -500,10 +500,28 @@ async def verify_origin(
     if not origin:
         raise HTTPException(status_code=404, detail="Nguồn gốc không tồn tại")
 
-    origin.verification_status = OriginStatus(data.status)
+    new_status = OriginStatus(data.status)
+    origin.verification_status = new_status
     origin.verified_by = current_user.id
     origin.verified_at = datetime.utcnow()
     origin.rejection_reason = data.rejection_reason if data.status == "REJECTED" else None
+
+    # ── Cascade status sang certificates của cùng product ────────────────────
+    # Admin UI hiển thị cert status kế thừa từ origin → cần đồng bộ DB
+    # để QR page (đọc cert.verification_status trực tiếp) hiển thị đúng.
+    if data.status in ("VERIFIED", "REJECTED"):
+        cert_new_status = (
+            CertificateStatus.VERIFIED if data.status == "VERIFIED"
+            else CertificateStatus.REJECTED
+        )
+        pending_certs = db.query(ProductCertificate).filter(
+            ProductCertificate.product_id == origin.product_id,
+            ProductCertificate.verification_status == CertificateStatus.PENDING,
+        ).all()
+        for cert in pending_certs:
+            cert.verification_status = cert_new_status
+            cert.verified_by = current_user.id
+            cert.verified_at = datetime.utcnow()
 
     db.commit()
     db.refresh(origin)
@@ -592,10 +610,16 @@ async def get_product_traceability(
                     "issue_date": c.issue_date.isoformat() if c.issue_date else None,
                     "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
                     "document_url": c.document_url,
-                    # Mobile app dùng để hiện badge "Đã xác minh" / "Đang xác minh"
-                    "verification_status": c.verification_status.value
-                    if hasattr(c.verification_status, "value")
-                    else str(c.verification_status),
+                    # Nếu origin đã VERIFIED → cert kế thừa VERIFIED (đồng bộ với admin UI)
+                    # Xử lý dữ liệu cũ (cert PENDING nhưng origin đã duyệt)
+                    "verification_status": (
+                        "VERIFIED" if origin is not None
+                        else (
+                            c.verification_status.value
+                            if hasattr(c.verification_status, "value")
+                            else str(c.verification_status)
+                        )
+                    ),
                 }
                 for c in certs
             ]
