@@ -12,7 +12,7 @@ Endpoints:
 - GET  /traceability/product/{id}                   – Xem tất cả (public)
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, date
