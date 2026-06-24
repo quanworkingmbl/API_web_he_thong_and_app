@@ -390,6 +390,38 @@ async def topup_vnpay(
     }
 
 
+@router.get("/vnpay/status/{transaction_id}", summary="Seller: Kiểm tra trạng thái nạp VNPay")
+async def get_vnpay_deposit_status(
+    transaction_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Trả trạng thái giao dịch VNPay để CMS biết đã cộng ví hay còn chờ callback."""
+    _require_seller(current_user)
+    tx = db.query(DepositTransaction).filter(
+        DepositTransaction.id == transaction_id,
+        DepositTransaction.seller_id == current_user.id,
+        DepositTransaction.payment_method == "VNPAY",
+        DepositTransaction.tx_type == DepositTransactionType.TOP_UP,
+    ).first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Giao dịch VNPay không tồn tại")
+
+    wallet = _get_or_create_deposit_wallet(current_user.id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+    return {
+        "success": True,
+        "data": {
+            "transaction_id": tx.id,
+            "status": tx.status.value if hasattr(tx.status, "value") else str(tx.status),
+            "amount": str(tx.amount),
+            "reviewed_at": tx.reviewed_at.isoformat() if tx.reviewed_at else None,
+            "deposit_balance": str(balance),
+            "is_sufficient": balance >= MIN_DEPOSIT_REQUIRED,
+        },
+    }
+
+
 def _build_result_html(success: bool, amount: int = 0, tx_id: int = 0,
                         title: str = "", subtitle: str = "",
                         redirect_url: str = "/seller/wallet?tab=topup") -> str:
@@ -640,7 +672,8 @@ async def vnpay_return(
 
     # Lấy VNPAY_WEB_URL để build redirect link về UI
     web_url = os.getenv("VNPAY_WEB_URL", "").rstrip("/")
-    wallet_url = f"{web_url}/seller/wallet?tab=history" if web_url else "/seller/wallet?tab=history"
+    wallet_base_url = f"{web_url}/seller/wallet" if web_url else "/seller/wallet"
+    wallet_url = f"{wallet_base_url}?tab=topup"
 
     tx = db.query(DepositTransaction).filter(
         DepositTransaction.vnpay_txn_ref == txn_ref
@@ -655,6 +688,9 @@ async def vnpay_return(
             status_code=404,
         )
 
+    success_wallet_url = f"{wallet_base_url}?tab=overview&vnpay=success&tx_id={tx.id}"
+    failed_wallet_url = f"{wallet_base_url}?tab=topup&vnpay=failed&tx_id={tx.id}"
+
     # Đã xử lý rồi → vẫn hiện trang success đẹp
     if tx.status == DepositStatus.CONFIRMED:
         return HTMLResponse(
@@ -662,7 +698,7 @@ async def vnpay_return(
                 success=True,
                 amount=int(tx.amount),
                 tx_id=tx.id,
-                redirect_url=wallet_url,
+                redirect_url=success_wallet_url,
             )
         )
 
@@ -679,7 +715,7 @@ async def vnpay_return(
                 success=True,
                 amount=int(tx.amount),
                 tx_id=tx.id,
-                redirect_url=wallet_url,
+                redirect_url=success_wallet_url,
             )
         )
     else:
@@ -692,7 +728,7 @@ async def vnpay_return(
                 success=False,
                 amount=int(tx.amount) if tx.amount else 0,
                 tx_id=tx.id,
-                redirect_url=wallet_url,
+                redirect_url=failed_wallet_url,
             )
         )
 

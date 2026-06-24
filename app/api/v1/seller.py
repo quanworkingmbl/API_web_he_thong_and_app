@@ -2057,6 +2057,13 @@ async def get_seller_returns(
     for r in requests:
         user = db.query(User).filter(User.id == r.user_id).first()
         order = db.query(Order).filter(Order.id == r.order_id).first()
+        import json as _json
+        try:
+            images = _json.loads(r.images) if r.images else []
+            if not isinstance(images, list):
+                images = []
+        except Exception:
+            images = []
         result.append({
             "id": r.id,
             "order_id": r.order_id,
@@ -2064,10 +2071,18 @@ async def get_seller_returns(
             "customer_name": user.name if user else None,
             "return_type": r.return_type.value if hasattr(r.return_type, "value") else r.return_type,
             "reason": r.reason,
+            "images": images,
             "status": r.status.value if hasattr(r.status, "value") else r.status,
+            "seller_note": r.seller_note,
+            "seller_handled_at": r.seller_handled_at.isoformat() if r.seller_handled_at else None,
             "admin_note": r.admin_note,
+            "refund_amount": r.refund_amount,
             "created_at": r.created_at.isoformat(),
             "handled_at": r.handled_at.isoformat() if r.handled_at else None,
+            "next_handler": (
+                "ADMIN" if (r.status.value if hasattr(r.status, "value") else str(r.status))
+                           in ("SELLER_REJECTED", "SELLER_APPROVED", "PENDING") else "DONE"
+            ),
         })
 
     return {
@@ -2079,7 +2094,8 @@ async def get_seller_returns(
 
 class SellerReturnUpdateRequest(BaseModel):
     note: Optional[str] = Field(None, max_length=500)
-    action: str = Field(..., pattern="^(ACCEPT|REJECT)$")
+    notes: Optional[str] = Field(None, max_length=500)
+    action: str = Field(...)
 
 
 @router.put("/returns/{return_id}", summary="Seller xử lý yêu cầu đổi trả")
@@ -2110,16 +2126,26 @@ async def update_seller_return(
     if return_req.status != ReturnStatus.PENDING:
         raise HTTPException(status_code=400, detail="Chỉ xử lý yêu cầu ở trạng thái PENDING")
 
-    if return_data.action == "ACCEPT":
-        return_req.status = ReturnStatus.APPROVED
+    action = return_data.action.upper()
+    if action in {"APPROVE", "APPROVED"}:
+        action = "ACCEPT"
+    elif action in {"REJECTED"}:
+        action = "REJECT"
+
+    if action not in {"ACCEPT", "REJECT"}:
+        raise HTTPException(status_code=422, detail="action phải là ACCEPT/REJECT hoặc approve/reject")
+
+    if action == "ACCEPT":
+        return_req.status = ReturnStatus.SELLER_APPROVED
         message = "Đã chấp nhận yêu cầu đổi trả"
     else:
-        return_req.status = ReturnStatus.REJECTED
+        return_req.status = ReturnStatus.SELLER_REJECTED
         message = "Đã từ chối yêu cầu đổi trả"
 
-    return_req.admin_note = return_data.note
-    return_req.handled_by = current_user.id
-    return_req.handled_at = datetime.utcnow()
+    seller_note = return_data.note if return_data.note is not None else return_data.notes
+    return_req.seller_note = seller_note
+    return_req.seller_handled_by = current_user.id
+    return_req.seller_handled_at = datetime.utcnow()
 
     db.commit()
 
