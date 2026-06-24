@@ -11,13 +11,15 @@ class ReturnType(str, enum.Enum):
 
 
 class ReturnStatus(str, enum.Enum):
-    PENDING = "PENDING"           # Chờ xét duyệt
-    APPROVED = "APPROVED"         # Đã duyệt – cần gửi hàng về
-    REJECTED = "REJECTED"         # Từ chối
-    CANCELLED = "CANCELLED"       # Khách hàng đã hủy
-    RECEIVED = "RECEIVED"         # Đã nhận hàng trả về
-    REFUNDED = "REFUNDED"         # Đã hoàn tiền (cho RETURN)
-    EXCHANGED = "EXCHANGED"       # Đã gửi hàng đổi (cho EXCHANGE)
+    PENDING = "PENDING"                   # Chờ seller xét duyệt
+    SELLER_APPROVED = "SELLER_APPROVED"   # Seller đồng ý → chờ admin xác nhận nhận hàng
+    SELLER_REJECTED = "SELLER_REJECTED"   # Seller từ chối → escalate lên admin
+    APPROVED = "APPROVED"                 # Admin duyệt (override seller từ chối)
+    REJECTED = "REJECTED"                 # Admin từ chối (cuối cùng)
+    CANCELLED = "CANCELLED"               # Khách hàng đã hủy
+    RECEIVED = "RECEIVED"                 # Đã nhận hàng trả về
+    REFUNDED = "REFUNDED"                 # Đã hoàn tiền (cho RETURN)
+    EXCHANGED = "EXCHANGED"               # Đã gửi hàng đổi (cho EXCHANGE)
 
 
 
@@ -47,7 +49,12 @@ class ReturnRequest(Base):
     status = Column(SQLEnum(ReturnStatus), default=ReturnStatus.PENDING, index=True)
     admin_note = Column(Text, nullable=True)
 
-    # Approval tracking
+    # Seller handling (bước 1: seller xử lý trước)
+    seller_note = Column(Text, nullable=True)
+    seller_handled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    seller_handled_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Admin handling (bước 2: admin xác nhận hoặc override)
     handled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     handled_at = Column(DateTime(timezone=True), nullable=True)
     approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)

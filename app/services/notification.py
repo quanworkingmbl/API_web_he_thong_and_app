@@ -689,3 +689,100 @@ def notify_return_received_to_buyer(
         ref_id=return_id,
         action_url=f"/orders?highlight={return_id}",
     )
+
+
+# ==============================================================================
+# PHASE 4B – RETURN SELLER FLOW NOTIFICATIONS (luồng mới)
+# ==============================================================================
+
+def notify_return_request_to_seller(
+    db,
+    seller_id: int,
+    return_id: int,
+    order_number: str,
+    customer_name: str,
+    return_type: str,
+    reason: str,
+):
+    """[R-S1] Seller nhận thông báo có yêu cầu đổi/trả mới cần xử lý."""
+    type_label = "đổi hàng" if str(return_type).upper() == "EXCHANGE" else "trả hàng"
+    short_reason = reason[:100] + ("..." if len(reason) > 100 else "")
+    return create_notification(
+        db=db,
+        user_id=seller_id,
+        category="SYSTEM",
+        title=f"↩️ Khách yêu cầu {type_label} #{return_id}",
+        message=f"{customer_name} yêu cầu {type_label} đơn #{order_number}: {short_reason}",
+        ref_type="return",
+        ref_id=return_id,
+        action_url=f"/seller/returns?highlight={return_id}",
+    )
+
+
+def notify_return_seller_approved_to_buyer(
+    db,
+    buyer_id: int,
+    return_id: int,
+    return_type: str,
+    note=None,
+):
+    """[R-S2] Buyer nhận thông báo seller đã chấp nhận yêu cầu đổi/trả."""
+    type_label = "đổi hàng" if str(return_type).upper() == "EXCHANGE" else "trả hàng"
+    detail = f" Ghi chú từ người bán: {note}" if note else ""
+    return create_notification(
+        db=db,
+        user_id=buyer_id,
+        category="SYSTEM",
+        title=f"✅ Người bán chấp nhận yêu cầu {type_label} #{return_id}",
+        message=f"Người bán đã đồng ý với yêu cầu {type_label} của bạn.{detail} Hệ thống sẽ tiến hành xác nhận.",
+        ref_type="return",
+        ref_id=return_id,
+        action_url=f"/orders?highlight={return_id}",
+    )
+
+
+def notify_return_seller_rejected_to_buyer(
+    db,
+    buyer_id: int,
+    return_id: int,
+    return_type: str,
+    note=None,
+):
+    """[R-S3] Buyer nhận thông báo seller từ chối, đang escalate lên Admin."""
+    type_label = "đổi hàng" if str(return_type).upper() == "EXCHANGE" else "trả hàng"
+    detail = f" Lý do người bán: {note}" if note else ""
+    return create_notification(
+        db=db,
+        user_id=buyer_id,
+        category="SYSTEM",
+        title=f"⚠️ Người bán từ chối – Đang chờ Admin xét #{return_id}",
+        message=f"Người bán chưa chấp nhận yêu cầu {type_label}.{detail} Quản trị viên sẽ xem xét lại để bảo vệ quyền lợi của bạn.",
+        ref_type="return",
+        ref_id=return_id,
+        action_url=f"/orders?highlight={return_id}",
+    )
+
+
+def notify_return_escalated_to_admin(
+    db,
+    admin_user_ids: list,
+    return_id: int,
+    order_number: str,
+    customer_name: str,
+    seller_note=None,
+):
+    """[R-S4] Admin nhận thông báo yêu cầu đổi/trả bị seller từ chối, cần xem xét."""
+    detail = f" Lý do seller từ chối: {seller_note}" if seller_note else ""
+    notifs = []
+    for uid in admin_user_ids:
+        notifs.append(create_notification(
+            db=db,
+            user_id=uid,
+            category="SYSTEM",
+            title=f"🚨 Cần xét duyệt: Seller từ chối yêu cầu trả hàng #{return_id}",
+            message=f"Khách {customer_name} – Đơn #{order_number} bị seller từ chối.{detail} Bạn cần xem xét lại để quyết định cuối cùng.",
+            ref_type="return",
+            ref_id=return_id,
+            action_url=f"/returns?highlight={return_id}",
+        ))
+    return notifs
