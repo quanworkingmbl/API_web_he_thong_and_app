@@ -194,6 +194,86 @@ async def get_product_certificates(
     }
 
 
+@router.get("/certificates/admin", summary="[Admin] Xem tất cả chứng nhận cần duyệt")
+async def admin_list_certificates(
+    status: Optional[str] = Query(None, description="PENDING | VERIFIED | REJECTED"),
+    product_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Admin xem toàn bộ chứng nhận, lọc theo trạng thái hoặc sản phẩm."""
+    _require_admin(current_user)
+
+    query = db.query(ProductCertificate)
+    if status:
+        query = query.filter(ProductCertificate.verification_status == status)
+    if product_id:
+        query = query.filter(ProductCertificate.product_id == product_id)
+
+    certs = query.order_by(ProductCertificate.id.desc()).all()
+
+    result = []
+    for c in certs:
+        product = db.query(Product).filter(Product.id == c.product_id).first()
+        result.append({
+            "id": c.id,
+            "product_id": c.product_id,
+            "product_name": product.name if product else None,
+            "certificate_name": c.certificate_name,
+            "certificate_number": c.certificate_number,
+            "issued_by": c.issued_by,
+            "issue_date": c.issue_date.isoformat() if c.issue_date else None,
+            "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
+            "document_url": c.document_url,
+            "verification_status": c.verification_status.value if hasattr(c.verification_status, "value") else c.verification_status,
+            "rejection_reason": c.rejection_reason,
+            "verified_at": c.verified_at.isoformat() if c.verified_at else None,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+
+    return {"success": True, "data": result, "total": len(result)}
+
+
+@router.get("/origins/admin", summary="[Admin] Xem tất cả thông tin nguồn gốc cần duyệt")
+async def admin_list_origins(
+    status: Optional[str] = Query(None, description="PENDING | VERIFIED | REJECTED"),
+    product_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Admin xem toàn bộ thông tin nguồn gốc."""
+    _require_admin(current_user)
+
+    query = db.query(ProductOrigin)
+    if status:
+        query = query.filter(ProductOrigin.verification_status == status)
+    if product_id:
+        query = query.filter(ProductOrigin.product_id == product_id)
+
+    origins = query.order_by(ProductOrigin.id.desc()).all()
+
+    result = []
+    for o in origins:
+        product = db.query(Product).filter(Product.id == o.product_id).first()
+        result.append({
+            "id": o.id,
+            "product_id": o.product_id,
+            "product_name": product.name if product else None,
+            "village_name": o.village_name,
+            "facility_name": o.facility_name,
+            "batch_number": o.batch_number,
+            "production_date": o.production_date.isoformat() if o.production_date else None,
+            "expiry_date": o.expiry_date.isoformat() if o.expiry_date else None,
+            "verification_status": o.verification_status.value if hasattr(o.verification_status, "value") else o.verification_status,
+            "rejection_reason": o.rejection_reason,
+            "verified_at": o.verified_at.isoformat() if o.verified_at else None,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        })
+
+    return {"success": True, "data": result, "total": len(result)}
+
+
+
 @router.put("/certificates/{cert_id}/verify", summary="Admin xác minh chứng nhận")
 async def verify_certificate(
     cert_id: int,
@@ -201,6 +281,7 @@ async def verify_certificate(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+
     _require_admin(current_user)
 
     cert = db.query(ProductCertificate).filter(ProductCertificate.id == cert_id).first()

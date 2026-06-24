@@ -21,11 +21,16 @@ _PUBLIC_PATHS = {
 
 # VNPAY callback paths – VNPAY Gateway and browser never send X-Quan-Secret
 # Covers both /payments/ and /deposit/ VNPAY callbacks
+# NOTE: Include both /api/ and /api/v1/ variants since router uses /api/v1/ prefix
 _VNPAY_CALLBACK_PREFIXES = (
     "/api/payments/vnpay/ipn",
     "/api/payments/vnpay/return",
+    "/api/v1/payments/vnpay/ipn",
+    "/api/v1/payments/vnpay/return",
     "/api/deposit/vnpay/ipn",
     "/api/deposit/vnpay/return",
+    "/api/v1/deposit/vnpay/ipn",
+    "/api/v1/deposit/vnpay/return",
 )
 
 # Public API paths – accessed by end-users without app credentials
