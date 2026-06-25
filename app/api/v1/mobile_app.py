@@ -1857,7 +1857,10 @@ async def create_order(
 
     items_of_seller = sellers_map[detected_seller_id]
 
-    # ── Bước 1.5: Validate coupon hoặc auto-apply mã tốt nhất ──
+    # ── Bước 1.5: Validate coupon user nhập ────────────────────────────────
+    # Lưu ý: unit_price ở items_of_seller đã là giá bán sau flash sale/auto product promo
+    # từ validate_line_for_sale(). Không auto-apply thêm promotion ở checkout,
+    # nếu không VNPay/COD sẽ bị giảm giá lần 2 trên subtotal đã giảm.
     coupon_discount = Decimal("0")
     applied_promo = None
 
@@ -1895,36 +1898,6 @@ async def create_order(
             raise HTTPException(status_code=400, detail="Mã khuyến mãi không mang lại giảm giá cho giỏ hàng")
 
         applied_promo = promo
-    else:
-        now = datetime.utcnow()
-        active_promotions = db.query(Promotion).filter(
-            Promotion.is_public == True,
-            Promotion.status == PromotionStatus.ACTIVE,
-            Promotion.start_date <= now,
-            Promotion.end_date >= now,
-        ).all()
-
-        best_discount = Decimal("0")
-        best_promo = None
-        for promo in active_promotions:
-            can_use, _ = _can_user_use_promotion(db, promo, current_user.id)
-            if not can_use:
-                continue
-
-            if not _promotion_matches_cart_scope(promo, items_of_seller):
-                continue
-
-            eligible_subtotal = _eligible_subtotal_for_cart_promotion(promo, items_of_seller)
-            if eligible_subtotal < promo.min_order_amount:
-                continue
-
-            discount = _calculate_discount(promo, eligible_subtotal)
-            if discount > best_discount:
-                best_discount = discount
-                best_promo = promo
-
-        coupon_discount = best_discount
-        applied_promo = best_promo
 
     # ── Bước 2: Tạo 1 đơn hàng duy nhất cho 1 seller (Kiểu A) ───────────────
     platform_fee_percentage = Decimal("10.0")  # Phí nền tảng 10% trên subtotal

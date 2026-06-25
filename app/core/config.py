@@ -63,11 +63,13 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
 
     # AI Operation Settings
-    AI_MODERATION_TIMEOUT: int = 6          # seconds
-    AI_DESCRIPTION_TIMEOUT: int = 15        # seconds
-    AI_BLOG_TIMEOUT: int = 30               # seconds
+    # 20s per LLM call — Gemini 2.5 Flash multimodal thường cần 7-15s với ảnh
+    AI_MODERATION_TIMEOUT: int = 20         # seconds (was 6 — too short for multimodal)
+    AI_DESCRIPTION_TIMEOUT: int = 30        # seconds
+    AI_BLOG_TIMEOUT: int = 45               # seconds
     AI_EMBEDDING_TIMEOUT: int = 5           # seconds
-    AI_MAX_RETRIES: int = 2
+    # 1 retry (2 total attempts) — giảm từ 2 retry để tổng worst-case ≤ 50s
+    AI_MAX_RETRIES: int = 1
     AI_DAILY_BUDGET_USD: float = 5.0        # Cost guardrail - auto-downgrade khi vượt
     AI_CACHE_TTL_HOURS: int = 24            # Cache expiration
 
