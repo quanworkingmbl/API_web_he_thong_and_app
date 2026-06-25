@@ -218,7 +218,7 @@ class AdminDeductRequest(BaseModel):
 # ==============================================================================
 
 @router.get("/my/balance", summary="Seller: Xem số dư ký quỹ")
-async def get_my_deposit_balance(
+def get_my_deposit_balance(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -244,7 +244,7 @@ async def get_my_deposit_balance(
 
 
 @router.get("/my/history", summary="Seller: Lịch sử giao dịch ký quỹ")
-async def get_my_deposit_history(
+def get_my_deposit_history(
     page:     int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     status:   Optional[str] = Query(None, description="PENDING | CONFIRMED | REJECTED"),
@@ -289,7 +289,7 @@ async def get_my_deposit_history(
 
 
 @router.post("/topup/bank", summary="Seller: Nạp tiền qua chuyển khoản ngân hàng")
-async def topup_bank_transfer(
+def topup_bank_transfer(
     body: BankTopupRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -329,7 +329,7 @@ async def topup_bank_transfer(
 
 
 @router.post("/topup/vnpay", summary="Seller: Nạp tiền qua VNPay (test sandbox)")
-async def topup_vnpay(
+def topup_vnpay(
     body: VNPayTopupRequest,
     request: Request,
     current_user: User = Depends(get_current_user),
@@ -391,7 +391,7 @@ async def topup_vnpay(
 
 
 @router.get("/vnpay/status/{transaction_id}", summary="Seller: Kiểm tra trạng thái nạp VNPay")
-async def get_vnpay_deposit_status(
+def get_vnpay_deposit_status(
     transaction_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -658,7 +658,7 @@ def _build_result_html(success: bool, amount: int = 0, tx_id: int = 0,
 
 
 @router.get("/vnpay/return", summary="VNPay: Redirect callback sau khi thanh toán")
-async def vnpay_return(
+def vnpay_return(
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -738,7 +738,7 @@ async def vnpay_return(
 
 
 @router.get("/vnpay/ipn", summary="VNPay: IPN server-to-server callback")
-async def vnpay_ipn(
+def vnpay_ipn(
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -782,7 +782,7 @@ async def vnpay_ipn(
 # ==============================================================================
 
 @router.get("/admin/list", summary="Admin: Danh sách yêu cầu nạp ký quỹ")
-async def admin_list_deposits(
+def admin_list_deposits(
     page:      int = Query(1, ge=1),
     per_page:  int = Query(20, ge=1, le=100),
     status:    Optional[str] = Query(None, description="PENDING | CONFIRMED | REJECTED"),
@@ -833,7 +833,7 @@ async def admin_list_deposits(
 
 
 @router.post("/admin/{tx_id}/confirm", summary="Admin: Xác nhận yêu cầu nạp tiền")
-async def admin_confirm_deposit(
+def admin_confirm_deposit(
     tx_id: int,
     body:  AdminConfirmRequest,
     current_user: User = Depends(get_current_user),
@@ -856,7 +856,7 @@ async def admin_confirm_deposit(
 
 
 @router.post("/admin/{tx_id}/reject", summary="Admin: Từ chối yêu cầu nạp tiền")
-async def admin_reject_deposit(
+def admin_reject_deposit(
     tx_id: int,
     body:  AdminRejectRequest,
     current_user: User = Depends(get_current_user),
@@ -880,7 +880,7 @@ async def admin_reject_deposit(
 
 
 @router.post("/admin/deduct", summary="Admin: Khấu trừ ký quỹ seller (xử lý gian lận)")
-async def admin_deduct_deposit(
+def admin_deduct_deposit(
     body: AdminDeductRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -937,7 +937,7 @@ async def admin_deduct_deposit(
 
 
 @router.get("/admin/wallets", summary="Admin: Danh sách ví ký quỹ tất cả seller")
-async def admin_list_wallets(
+def admin_list_wallets(
     page:     int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     low_balance: bool = Query(False, description="Chỉ lấy seller thiếu ký quỹ"),
@@ -998,7 +998,7 @@ class AdminRejectWithdrawalBody(BaseModel):
 
 
 @router.post("/withdrawal/request", summary="Seller: Tạo yêu cầu rút ký quỹ")
-async def create_deposit_withdrawal(
+def create_deposit_withdrawal(
     body: DepositWithdrawalRequestBody,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1074,7 +1074,7 @@ async def create_deposit_withdrawal(
 
 
 @router.get("/withdrawal/my", summary="Seller: Lịch sử yêu cầu rút ký quỹ")
-async def get_my_deposit_withdrawals(
+def get_my_deposit_withdrawals(
     page: int = Query(1, ge=1),
     per_page: int = Query(15, ge=1, le=50),
     status: Optional[str] = Query(None),
@@ -1131,7 +1131,7 @@ async def get_my_deposit_withdrawals(
 
 
 @router.post("/admin/withdrawal/{req_id}/approve", summary="Admin: Duyệt yêu cầu rút ký quỹ")
-async def admin_approve_deposit_withdrawal(
+def admin_approve_deposit_withdrawal(
     req_id: int,
     body: AdminReviewWithdrawalBody = AdminReviewWithdrawalBody(),
     current_user: User = Depends(get_current_user),
@@ -1213,7 +1213,7 @@ async def admin_approve_deposit_withdrawal(
 
 
 @router.post("/admin/withdrawal/{req_id}/reject", summary="Admin: Từ chối yêu cầu rút ký quỹ")
-async def admin_reject_deposit_withdrawal(
+def admin_reject_deposit_withdrawal(
     req_id: int,
     body: AdminRejectWithdrawalBody,
     current_user: User = Depends(get_current_user),
@@ -1249,7 +1249,7 @@ async def admin_reject_deposit_withdrawal(
 
 
 @router.get("/admin/withdrawal/list", summary="Admin: Danh sách yêu cầu rút ký quỹ")
-async def admin_list_deposit_withdrawals(
+def admin_list_deposit_withdrawals(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),

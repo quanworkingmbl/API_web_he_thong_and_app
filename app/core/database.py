@@ -21,9 +21,9 @@ except Exception as e:
 engine = create_engine(
     clean_url,
     pool_pre_ping=True,
-    pool_size=3,
-    max_overflow=5,
-    pool_timeout=30,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=20,
     pool_recycle=1800,
 )
 
