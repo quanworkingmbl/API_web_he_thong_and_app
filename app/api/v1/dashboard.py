@@ -134,6 +134,7 @@ async def get_dashboard_overview(
             "order_number": o.order_number,
             "customer_name": o.customer_name,
             "total_amount": _to_vnd_int(o.total_amount),
+            "payment_method": o.payment_method.value if hasattr(o.payment_method, "value") else str(o.payment_method),
             "status": o.status.value if hasattr(o.status, "value") else str(o.status),
             "created_at": o.created_at.isoformat() if o.created_at else None,
         }

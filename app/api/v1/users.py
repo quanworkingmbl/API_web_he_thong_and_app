@@ -7,8 +7,12 @@ from app.models.user import User, UserStatus
 from app.models.seller_profile import SellerProfile
 from app.api.v1.auth import get_current_user
 from app.core.permissions import check_user_manage_access
+from app.services.email_otp import send_user_status_change_email
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime, date
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -436,7 +440,20 @@ async def update_user_status(
     
     db.commit()
     db.refresh(user)
-    
+
+    # Gửi email thông báo cho user (fire-and-forget, không block response)
+    try:
+        expire_str = user.status_expire_at.isoformat() if user.status_expire_at else None
+        send_user_status_change_email(
+            email=user.email,
+            user_name=user.name,
+            new_status=new_status.value,
+            reason=status_data.status_reason,
+            expire_at=expire_str,
+        )
+    except Exception as exc:
+        logger.warning("[UpdateStatus] Email notification failed for user %s: %s", user.id, exc)
+
     return {
         "success": True,
         "message": f"User status updated to {new_status.value}",

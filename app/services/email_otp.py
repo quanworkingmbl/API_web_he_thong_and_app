@@ -380,6 +380,148 @@ def _kyc_approved_html(
 </body></html>"""
 
 
+# ─── GỬI EMAIL THAY ĐỔI TRẠNG THÁI TÀI KHOẢN ────────────────────────────────
+
+def send_user_status_change_email(
+    email: str,
+    user_name: str,
+    new_status: str,
+    reason: str | None = None,
+    expire_at: str | None = None,
+) -> dict:
+    """Gửi email thông báo khi admin thay đổi trạng thái tài khoản (SUSPENDED/BANNED/ACTIVE).
+
+    Args:
+        email:      Email người nhận
+        user_name:  Tên người dùng
+        new_status: ACTIVE | SUSPENDED | BANNED
+        reason:     Lý do thay đổi (bắt buộc với SUSPENDED/BANNED)
+        expire_at:  Thời hạn tạm khóa (ISO string, chỉ dùng với SUSPENDED)
+    """
+    status_upper = (new_status or "").upper()
+    if status_upper == "ACTIVE":
+        subject = "✅ Tài khoản của bạn đã được mở khóa — MBL CMS"
+    elif status_upper == "SUSPENDED":
+        subject = "⚠️ Tài khoản của bạn bị tạm khóa — MBL CMS"
+    else:
+        subject = "🚫 Tài khoản của bạn bị khóa vĩnh viễn — MBL CMS"
+
+    try:
+        resp = resend.Emails.send({
+            "from":    f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>",
+            "to":      [email],
+            "subject": subject,
+            "html":    _user_status_change_html(user_name, status_upper, reason, expire_at),
+        })
+        logger.info("[Status Email] Sent to %s | status=%s | id=%s", email, new_status, resp.get("id"))
+        return {"success": True}
+    except Exception as exc:
+        logger.error("[Status Email] Failed to send to %s: %s", email, exc)
+        raise
+
+
+def _user_status_change_html(
+    user_name: str,
+    status: str,
+    reason: str | None,
+    expire_at: str | None,
+) -> str:
+    cms_url = settings.CMS_URL
+
+    if status == "ACTIVE":
+        header_bg = "linear-gradient(135deg,#16a34a,#15803d)"
+        icon = "✅"
+        header_title = "Tài khoản đã được mở khóa"
+        main_color = "#16a34a"
+        body_msg = f"Tài khoản của bạn (<strong>{user_name}</strong>) đã được <strong style='color:#16a34a;'>mở khóa</strong> và có thể sử dụng bình thường."
+        extra_block = f"""
+        <div style="background:#f6ffed;border:1.5px solid #b7eb8f;border-radius:12px;
+                    padding:18px 22px;text-align:left;margin:20px 0;">
+          <p style="font-size:14px;color:#374151;margin:0;line-height:1.7;">
+            Bạn có thể đăng nhập lại vào hệ thống ngay bây giờ.
+          </p>
+        </div>
+        <a href="{cms_url}"
+           style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);
+                  color:#fff;font-size:15px;font-weight:700;text-decoration:none;
+                  padding:14px 36px;border-radius:10px;margin:8px 0 20px;
+                  box-shadow:0 4px 12px rgba(79,70,229,.35);">
+          Đăng nhập ngay
+        </a>"""
+    elif status == "SUSPENDED":
+        header_bg = "linear-gradient(135deg,#d97706,#b45309)"
+        icon = "⚠️"
+        header_title = "Tài khoản bị tạm khóa"
+        main_color = "#d97706"
+        expire_info = f"<br><strong>Thời hạn khóa:</strong> {expire_at}" if expire_at else ""
+        body_msg = f"Tài khoản của bạn (<strong>{user_name}</strong>) đã bị <strong style='color:#d97706;'>tạm khóa</strong>."
+        reason_display = reason or "Không có lý do cụ thể"
+        extra_block = f"""
+        <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:12px;
+                    padding:18px 22px;text-align:left;margin:20px 0;">
+          <p style="font-size:13px;color:#92400e;font-weight:700;margin:0 0 8px;">📋 Chi tiết:</p>
+          <p style="font-size:14px;color:#374151;margin:0;line-height:1.7;">
+            <strong>Lý do:</strong> {reason_display}{expire_info}
+          </p>
+        </div>
+        <div style="background:#fefce8;border:1.5px solid #fde047;border-radius:12px;
+                    padding:14px 18px;text-align:left;margin-bottom:20px;">
+          <p style="font-size:13px;color:#713f12;margin:0;line-height:1.6;">
+            💡 Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ quản trị viên qua email này.
+          </p>
+        </div>"""
+    else:
+        header_bg = "linear-gradient(135deg,#dc2626,#b91c1c)"
+        icon = "🚫"
+        header_title = "Tài khoản bị khóa vĩnh viễn"
+        main_color = "#dc2626"
+        body_msg = f"Tài khoản của bạn (<strong>{user_name}</strong>) đã bị <strong style='color:#dc2626;'>khóa vĩnh viễn</strong>."
+        reason_display = reason or "Không có lý do cụ thể"
+        extra_block = f"""
+        <div style="background:#fff2f0;border:1.5px solid #fca5a5;border-radius:12px;
+                    padding:18px 22px;text-align:left;margin:20px 0;">
+          <p style="font-size:13px;color:#dc2626;font-weight:700;margin:0 0 8px;">❌ Lý do khóa:</p>
+          <p style="font-size:14px;color:#374151;margin:0;line-height:1.7;">{reason_display}</p>
+        </div>
+        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:12px;
+                    padding:14px 18px;text-align:left;margin-bottom:20px;">
+          <p style="font-size:13px;color:#9a3412;margin:0;line-height:1.6;">
+            💡 Nếu bạn cần khiếu nại, vui lòng phản hồi email này để liên hệ với quản trị viên.
+          </p>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="vi"><head><meta charset="UTF-8">
+<title>Thông báo trạng thái tài khoản</title></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:40px 0;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0"
+           style="background:#fff;border-radius:16px;overflow:hidden;
+                  box-shadow:0 8px 32px rgba(0,0,0,.10);">
+      <tr><td style="background:{header_bg};padding:36px 40px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:8px;">{icon}</div>
+        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;">MBL CMS</h1>
+        <p style="color:rgba(255,255,255,.85);margin:6px 0 0;font-size:14px;">Thông báo tài khoản</p>
+      </td></tr>
+      <tr><td style="padding:36px 40px 28px;text-align:center;">
+        <h2 style="color:{main_color};font-size:20px;margin:0 0 12px;">{header_title}</h2>
+        <p style="color:#374151;font-size:15px;margin:0 0 4px;">{body_msg}</p>
+        {extra_block}
+        <hr style="border:none;border-top:1px solid #f3f4f6;margin:20px 0 14px;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;text-align:left;">
+          Email này được gửi tự động từ hệ thống MBL CMS. Vui lòng không trả lời trực tiếp.
+        </p>
+      </td></tr>
+      <tr><td style="padding:16px 40px 24px;text-align:center;background:#f9fafb;">
+        <p style="color:#d1d5db;font-size:12px;margin:0;">© MBL CMS — Hệ thống quản lý bán hàng nông sản</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
+
+
 def _kyc_rejected_html(seller_name: str, rejection_reason: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="vi"><head><meta charset="UTF-8">
