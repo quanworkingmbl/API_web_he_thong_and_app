@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from datetime import datetime, timezone as dt_timezone
+import json
 from typing import Optional, Tuple
 
 from fastapi import HTTPException
@@ -110,17 +111,15 @@ def get_unit_price(
     if db is None:
         return base
 
-    # Tra cứu Flash Sale promotion đang active áp dụng cho sản phẩm này
+    # Áp dụng mọi khuyến mãi ACTIVE (flash + thường) — cùng logic với _build_product_pricing
     try:
-        from app.models.promotion import Promotion  # noqa: PLC0415
-        import json as _json  # noqa: PLC0415
+        from app.models.promotion import Promotion, PromotionStatus
 
         now_utc = datetime.now(dt_timezone.utc)
-        active_flash_promos = (
+        active_promos = (
             db.query(Promotion)
             .filter(
-                Promotion.is_flash_sale.is_(True),
-                Promotion.status == "ACTIVE",
+                Promotion.status == PromotionStatus.ACTIVE,
                 Promotion.start_date <= now_utc,
                 Promotion.end_date >= now_utc,
             )
@@ -128,8 +127,7 @@ def get_unit_price(
         )
 
         best_discount = Decimal("0")
-        for promo in active_flash_promos:
-            # Kiểm tra phạm vi áp dụng (seller / product / category / ALL)
+        for promo in active_promos:
             if promo.seller_id and promo.seller_id != product.seller_id:
                 continue
 
@@ -137,14 +135,14 @@ def get_unit_price(
 
             if scope == "PRODUCT":
                 try:
-                    scoped_ids = {int(x) for x in _json.loads(promo.applicable_product_ids or "[]")}
+                    scoped_ids = {int(x) for x in json.loads(promo.applicable_product_ids or "[]")}
                 except Exception:
                     scoped_ids = set()
                 if product.id not in scoped_ids:
                     continue
             elif scope == "CATEGORY":
                 try:
-                    scoped_ids = {int(x) for x in _json.loads(promo.applicable_category_ids or "[]")}
+                    scoped_ids = {int(x) for x in json.loads(promo.applicable_category_ids or "[]")}
                 except Exception:
                     scoped_ids = set()
                 if product.category_id is None or product.category_id not in scoped_ids:
@@ -152,13 +150,10 @@ def get_unit_price(
             elif scope == "SELLER":
                 if not (promo.seller_id and promo.seller_id == product.seller_id):
                     continue
-            # scope == "ALL": tiếp tục
 
-            # Kiểm tra min_order_amount
             if base < (promo.min_order_amount or Decimal("0")):
                 continue
 
-            # Tính discount
             promo_type = promo.promotion_type.value if hasattr(promo.promotion_type, "value") else str(promo.promotion_type)
             if promo_type == "PERCENTAGE":
                 discount = base * promo.discount_value / Decimal("100")
@@ -174,7 +169,6 @@ def get_unit_price(
         final_price = base - best_discount
         return max(final_price, Decimal("0"))
     except Exception:  # noqa: BLE001
-        # Fallback an toàn: không để lỗi promotion phá luồng giỏ hàng
         return base
 
 

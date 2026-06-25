@@ -35,6 +35,7 @@ from app.models.promotion_usage import PromotionUsage
 from app.models.complaint import Review
 from app.models.review_image import ReviewImage
 from app.models.shipment import Shipment
+from app.models.return_request import ReturnRequest, ReturnStatus
 from app.models.seller_profile import SellerProfile, VerificationStatus
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.permissions import check_seller_kyc_verified
@@ -44,7 +45,7 @@ from app.services.order_state import (
     log_status_change,
     resolve_payment_status,
 )
-from app.services.inventory import validate_line_for_sale, decrement_stock, increment_stock
+from app.services.inventory import validate_line_for_sale, decrement_stock, increment_stock, get_unit_price
 from app.services.inventory import get_available_stock
 from app.services.notification import (
     notify_new_order_to_seller,
@@ -622,7 +623,16 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
         category = db.query(Category).filter(Category.id == product.category_id).first() if product.category_id else None
 
         stock_quantity = get_available_stock(db, product, item.variant_id)
-        line_subtotal = item.unit_price * item.quantity
+
+        variant = None
+        if item.variant_id is not None:
+            variant = db.query(ProductVariant).filter(
+                ProductVariant.id == item.variant_id,
+                ProductVariant.product_id == product.id,
+            ).first()
+
+        current_unit_price = get_unit_price(product, variant, db=db)
+        line_subtotal = current_unit_price * item.quantity
         subtotal += line_subtotal
 
         # ── Xác định Flash Sale áp dụng cho sản phẩm này ─────────────────────
@@ -654,7 +664,7 @@ def _build_mobile_cart_response(cart: Cart, db: Session) -> dict:
                 "product_image": _extract_primary_image(product.images),
                 "unit_label": product.unit if hasattr(product, "unit") and product.unit else "1 sản phẩm",
                 "location_label": category.name if category else "Nông trại Việt",
-                "unit_price": str(item.unit_price),
+                "unit_price": str(current_unit_price),
                 "original_price": str(product.price),  # Giá gốc trước khuyến mãi
                 "quantity": item.quantity,
                 "subtotal": str(line_subtotal),
@@ -2125,6 +2135,52 @@ async def create_order(
 # ORDERS API – Enriched (items, seller, timeline)
 # ==============================================================================
 
+_RETURN_TERMINAL_STATUSES = {ReturnStatus.CANCELLED, ReturnStatus.REJECTED}
+
+
+def _serialize_return_request_mobile(r: ReturnRequest) -> dict:
+    """Serialize return request cho mobile app (đơn hàng + yêu cầu của tôi)."""
+    return {
+        "id": r.id,
+        "order_id": r.order_id,
+        "return_type": r.return_type.value if hasattr(r.return_type, "value") else str(r.return_type),
+        "reason": r.reason,
+        "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+        "seller_note": r.seller_note,
+        "seller_handled_at": r.seller_handled_at.isoformat() if r.seller_handled_at else None,
+        "admin_note": r.admin_note,
+        "handled_at": r.handled_at.isoformat() if r.handled_at else None,
+        "refund_amount": r.refund_amount,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def _is_active_return_status(status) -> bool:
+    if hasattr(status, "value"):
+        status = status.value
+    return str(status).upper() not in {s.value for s in _RETURN_TERMINAL_STATUSES}
+
+
+def _get_latest_returns_for_orders(db: Session, user_id: int, order_ids: list) -> dict:
+    """Lấy yêu cầu đổi/trả mới nhất theo order_id (một đơn một bản ghi hiển thị)."""
+    if not order_ids:
+        return {}
+    returns = (
+        db.query(ReturnRequest)
+        .filter(
+            ReturnRequest.user_id == user_id,
+            ReturnRequest.order_id.in_(order_ids),
+        )
+        .order_by(ReturnRequest.created_at.desc())
+        .all()
+    )
+    result: dict = {}
+    for r in returns:
+        if r.order_id not in result:
+            result[r.order_id] = r
+    return result
+
+
 @router.get("/orders/my")
 async def get_my_orders(
     page: int = Query(1, ge=1),
@@ -2160,6 +2216,8 @@ async def get_my_orders(
     # order_item_id gắn với đơn cụ thể nên chính xác hơn.
     reviewed_order_item_ids = {row[0] for row in _rev_result.fetchall()}
 
+    return_map = _get_latest_returns_for_orders(db, current_user.id, [o.id for o in orders])
+
     for o in orders:
         items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
         seller = db.query(User).filter(User.id == o.seller_id).first()
@@ -2175,6 +2233,10 @@ async def get_my_orders(
             and bool(set(order_item_ids_in_order) & reviewed_order_item_ids)
         )
 
+        ret_req = return_map.get(o.id)
+        return_payload = _serialize_return_request_mobile(ret_req) if ret_req else None
+        has_return_request = ret_req is not None and _is_active_return_status(ret_req.status)
+
         order_list.append({
             "id": o.id,
             "order_number": o.order_number,
@@ -2186,6 +2248,8 @@ async def get_my_orders(
             "item_count": len(items),
             "first_item_image": first_image,
             "has_reviewed": has_reviewed,  # ← Flutter dùng field này để hiển thị nút
+            "has_return_request": has_return_request,
+            "return_request": return_payload,
             # delivered_at — Flutter dùng để tính deadline đánh giá (30 ngày) và đổi trả (7 ngày)
             "delivered_at": o.delivered_at.isoformat() if o.delivered_at else None,
             "items": [
@@ -2367,6 +2431,18 @@ async def get_my_order_detail(
             # Coi là "đã review" nếu ít nhất 1 sản phẩm đã được review
             has_reviewed = len(reviewed_ids) > 0
 
+    ret_req = (
+        db.query(ReturnRequest)
+        .filter(
+            ReturnRequest.order_id == order.id,
+            ReturnRequest.user_id == current_user.id,
+        )
+        .order_by(ReturnRequest.created_at.desc())
+        .first()
+    )
+    return_payload = _serialize_return_request_mobile(ret_req) if ret_req else None
+    has_return_request = ret_req is not None and _is_active_return_status(ret_req.status)
+
     return {
         "success": True,
         "data": {
@@ -2390,6 +2466,8 @@ async def get_my_order_detail(
             "can_cancel": can_cancel,
             "can_review": can_review,
             "has_reviewed": has_reviewed,
+            "has_return_request": has_return_request,
+            "return_request": return_payload,
             "created_at": order.created_at.isoformat(),
             "confirmed_at": order.confirmed_at.isoformat() if order.confirmed_at else None,
             "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
