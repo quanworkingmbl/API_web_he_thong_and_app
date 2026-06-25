@@ -671,8 +671,10 @@ async def vnpay_return(
     txn_ref = params.get("vnp_TxnRef", "")
 
     # Lấy VNPAY_WEB_URL để build redirect link về UI
+    # VNPAY_WEB_URL phải là: https://mbl-cms.store/# (có /#/ vì dùng HashRouter)
     web_url = os.getenv("VNPAY_WEB_URL", "").rstrip("/")
-    wallet_base_url = f"{web_url}/seller/wallet" if web_url else "/seller/wallet"
+    # wallet_base_url sẽ là: https://mbl-cms.store/#/seller/wallet
+    wallet_base_url = f"{web_url}/seller/wallet" if web_url else "/#/seller/wallet"
     wallet_url = f"{wallet_base_url}?tab=topup"
 
     tx = db.query(DepositTransaction).filter(
@@ -688,8 +690,9 @@ async def vnpay_return(
             status_code=404,
         )
 
-    success_wallet_url = f"{wallet_base_url}?tab=overview&vnpay=success&tx_id={tx.id}"
-    failed_wallet_url = f"{wallet_base_url}?tab=topup&vnpay=failed&tx_id={tx.id}"
+    # Sau khi nạp thành công → về tab=topup và hiển thị banner success
+    success_wallet_url = f"{wallet_base_url}?tab=topup&vnpay=success&tx_id={tx.id}"
+    failed_wallet_url  = f"{wallet_base_url}?tab=topup&vnpay=failed&tx_id={tx.id}"
 
     # Đã xử lý rồi → vẫn hiện trang success đẹp
     if tx.status == DepositStatus.CONFIRMED:
