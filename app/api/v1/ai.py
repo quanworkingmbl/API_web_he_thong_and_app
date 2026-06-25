@@ -118,7 +118,7 @@ async def moderate_product(
 ):
     """
     Kiểm duyệt sản phẩm bằng AI.
-    Pipeline: Rule Engine -> Gemini Flash -> (creative model escalation nếu cần)
+    Pipeline 3 tầng: Rule Engine → kiểm tra giấy chứng nhận (DB) → Gemini multimodal.
     Quyền: admin, content_manager
     """
     if current_user.type not in ("admin", "content_manager"):

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.services.ai.vertex_client import vertex_ai_client, VertexAIClientError
 from app.services.ai.rule_engine import RuleEngine
-from app.services.ai.cost_tracker import log_ai_cost, is_budget_exceeded
+from app.services.ai.cost_tracker import log_ai_cost
 from app.services.ai.prompts import (
     MODERATION_SYSTEM_PROMPT,
     MODERATION_USER_TEMPLATE,
@@ -149,6 +149,26 @@ def _extract_image_urls_from_content(db: Session, content_id: int) -> List[str]:
     return urls[:MAX_IMAGES_PER_REQUEST]
 
 
+def _has_product_certificate(db: Session, product_id: int) -> tuple[bool, int]:
+    """
+  Kiểm tra sản phẩm đã upload giấy chứng nhận (ảnh) chưa.
+  Đếm chứng nhận có document_url và chưa bị từ chối (PENDING/VERIFIED đều tính).
+    """
+    from app.models.traceability import ProductCertificate, CertificateStatus
+
+    cert_count = (
+        db.query(ProductCertificate)
+        .filter(
+            ProductCertificate.product_id == product_id,
+            ProductCertificate.document_url.isnot(None),
+            ProductCertificate.document_url != "",
+            ProductCertificate.verification_status != CertificateStatus.REJECTED,
+        )
+        .count()
+    )
+    return cert_count > 0, cert_count
+
+
 # ==============================================================================
 # MODERATION SERVICE
 # ==============================================================================
@@ -157,8 +177,8 @@ class ModerationService:
     """
     Kiểm duyệt product/content theo pipeline:
     1. Rule Engine (regex + blacklist) → REJECT ngay nếu vi phạm rõ
-    2. Gemini Flash multimodal (text + ảnh, temperature=0) → APPROVE/REVIEW/REJECT
-    3. Escalate premium model nếu: REVIEW + sản phẩm ưu tiên doanh thu
+    2. Product: kiểm tra giấy chứng nhận (DB) + Gemini multimodal (text + ảnh)
+    3. Content: Gemini Flash multimodal (text + ảnh)
     """
 
     @classmethod
@@ -198,10 +218,16 @@ class ModerationService:
             cls._save_log(db, result, product_id=product_id, rule_engine_result="REJECT")
             return result
 
-        # Step 2: Fetch ảnh từ DB
+        # Step 2: Giấy chứng nhận (DB) + ảnh sản phẩm
+        has_cert, cert_count = _has_product_certificate(db, product_id)
         image_urls = _extract_image_urls_from_product(db, product_id)
+        cert_status = (
+            f"Đã có {cert_count} giấy chứng nhận (ảnh) trên hồ sơ"
+            if has_cert
+            else "Chưa có giấy chứng nhận (ảnh) — hệ thống sẽ không cho APPROVE dù AI đề xuất"
+        )
 
-        # Step 3: Gọi Gemini Flash multimodal
+        # Step 3: Gemini multimodal — lớp AI trong báo cáo
         try:
             flash_result = await cls._call_product_moderation_llm(
                 name=name,
@@ -210,6 +236,7 @@ class ModerationService:
                 price=price,
                 label=label,
                 region=region,
+                certificate_status=cert_status,
                 image_urls=image_urls,
                 model_id=settings.VERTEX_MODERATION_MODEL_ID,
                 timeout=settings.AI_MODERATION_TIMEOUT + (5 if image_urls else 0),
@@ -218,50 +245,50 @@ class ModerationService:
             logger.error("Moderation LLM failed: %s", e)
             if _is_vertex_permission_denied(e):
                 raise
-            result = ModerationResult(
-                decision="REVIEW",
-                confidence=0.0,
-                reasons=[f"AI moderation failed: {str(e)}"],
-                flags=rule_result.reasons,
-                source="fallback",
-                processing_time_ms=int((time.monotonic() - start_time) * 1000),
-            )
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            if not has_cert:
+                result = ModerationResult(
+                    decision="REVIEW",
+                    confidence=0.9,
+                    reasons=[
+                        "Sản phẩm chưa có giấy chứng nhận (ảnh). Seller cần upload trong form thêm/chỉnh sửa sản phẩm.",
+                        f"AI tạm thời không phản hồi: {str(e)}",
+                    ],
+                    flags=["Thiếu giấy chứng nhận"],
+                    source="certificate_check",
+                    processing_time_ms=elapsed_ms,
+                )
+            else:
+                result = ModerationResult(
+                    decision="REVIEW",
+                    confidence=0.0,
+                    reasons=[f"AI moderation failed: {str(e)}"],
+                    flags=rule_result.reasons,
+                    source="fallback",
+                    processing_time_ms=elapsed_ms,
+                )
             cls._save_log(db, result, product_id=product_id, rule_engine_result=rule_result.decision)
             return result
 
-        # Merge flags từ rule engine
         if rule_result.decision == "FLAG":
             flash_result.flags.extend(rule_result.reasons)
 
-        # Step 4: Escalate to creative model nếu cần
-        if flash_result.decision == "REVIEW" and is_high_value:
-            if not is_budget_exceeded(db):
-                try:
-                    creative_result = await cls._call_product_moderation_llm(
-                        name=name,
-                        description=description,
-                        category=category,
-                        price=price,
-                        label=label,
-                        region=region,
-                        image_urls=image_urls,
-                        model_id=settings.VERTEX_CREATIVE_MODEL_ID,
-                        timeout=settings.AI_MODERATION_TIMEOUT + 10,
-                    )
-                    creative_result.escalated = True
-                    creative_result.source = "creative_model"
-                    creative_result.processing_time_ms = int((time.monotonic() - start_time) * 1000)
-
-                    log_ai_cost(
-                        db, settings.VERTEX_CREATIVE_MODEL_ID, "moderation",
-                        creative_result.input_tokens, creative_result.output_tokens,
-                        creative_result.estimated_cost_usd,
-                    )
-                    cls._save_log(db, creative_result, product_id=product_id, rule_engine_result=rule_result.decision)
-                    return creative_result
-
-                except VertexAIClientError:
-                    logger.warning("Creative escalation failed, keeping flash result")
+        # Ràng buộc nghiệp vụ: không APPROVE nếu chưa có giấy chứng nhận
+        if not has_cert:
+            if flash_result.decision == "APPROVE":
+                flash_result.decision = "REVIEW"
+                flash_result.confidence = min(flash_result.confidence, 0.85)
+            if "Thiếu giấy chứng nhận" not in flash_result.flags:
+                flash_result.flags.append("Thiếu giấy chứng nhận")
+            cert_reason = (
+                "Sản phẩm chưa có giấy chứng nhận (ảnh). Seller cần upload trong form thêm/chỉnh sửa sản phẩm."
+            )
+            if cert_reason not in flash_result.reasons:
+                flash_result.reasons.insert(0, cert_reason)
+        else:
+            cert_note = f"Đã có {cert_count} giấy chứng nhận (ảnh) trên hồ sơ sản phẩm"
+            if cert_note not in flash_result.reasons:
+                flash_result.reasons.append(cert_note)
 
         flash_result.processing_time_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -371,6 +398,7 @@ class ModerationService:
         price: float,
         label: str,
         region: str,
+        certificate_status: str,
         image_urls: List[str],
         model_id: str,
         timeout: int,
@@ -383,6 +411,7 @@ class ModerationService:
             price=f"{price:,.0f}",
             label=label or "Không có",
             region=region or "Không rõ",
+            certificate_status=certificate_status,
             image_count=len(image_urls),
         )
 
