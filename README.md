@@ -250,4 +250,4 @@ gcloud builds submit --config=cloudbuild.yaml .
 | `app/core/config.py` | Toàn bộ env vars |
 | `md_du_an/03_API_FLOW_VA_REQUEST_LIFECYCLE.md` | Request / auth flow |
 | `md_du_an/07_DEPLOYMENT_DEBUG_VA_READING_ORDER.md` | Deploy & debug |
-| `md_du_an/11_HUONG_DAN_BAT_LAI_GCP.md` | Bật lại GCP sau shutdown |
+| `SECURITY.md` | Dọn git history + rotate secret |

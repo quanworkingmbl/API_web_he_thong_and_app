@@ -28,9 +28,13 @@ wheels/
 .env.local
 .env.*.local
 
-# Google Cloud service account keys
+# Google Cloud / Firebase service account keys
 project-f3e21dd2-0270-45f3-91c-392a0d4991a3.json
+project-*.json
 *service-account*.json
+app/firebase-service-account.json
+credentials*.json
+*.pem
 # IDE
 .vscode/
 .idea/

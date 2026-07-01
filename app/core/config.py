@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     DEBUG: Union[bool, str] = True
     SHOW_DOCS: Union[bool, str] = True  # Hiển thị /docs, /redoc độc lập với DEBUG
 
-    # API Secret Header (X-Quan-Secret)
-    API_SECRET_KEY: str = "VLU15122004"
+    # API Secret Header (X-Quan-Secret) — bắt buộc trong .env, không default trong code
+    API_SECRET_KEY: str
 
     # Google Cloud Storage (thay thế AWS S3)
     GCS_BUCKET_NAME: str = "mbl-cms-media-bucket"

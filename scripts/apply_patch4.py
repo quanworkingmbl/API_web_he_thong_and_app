@@ -1,13 +1,22 @@
-import psycopg2
+"""
+One-off migration helper — kết nối DB qua DATABASE_URL (.env), không hardcode credential.
+"""
+import os
+import sys
+from pathlib import Path
 
-conn = psycopg2.connect(
-    host="35.240.182.133",
-    port=5432,
-    dbname="cms_db",
-    user="cms_user",
-    password="QuanCMS2026@Secure",
-    sslmode="require"
-)
+import psycopg2
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+load_dotenv(ROOT / ".env")
+
+database_url = os.environ.get("DATABASE_URL", "").strip()
+if not database_url:
+    raise SystemExit("DATABASE_URL is required. Set it in Du_an_cms_API/.env")
+
+conn = psycopg2.connect(database_url)
 cur = conn.cursor()
 
 statements = [
@@ -28,11 +37,10 @@ for stmt in statements:
 
 conn.commit()
 
-# Verify
 cur.execute("""
-    SELECT column_name, data_type, is_nullable 
-    FROM information_schema.columns 
-    WHERE table_name = 'orders' 
+    SELECT column_name, data_type, is_nullable
+    FROM information_schema.columns
+    WHERE table_name = 'orders'
       AND column_name IN ('wallet_credited', 'seller_amount', 'platform_fee', 'settlement_status', 'settled_at')
     ORDER BY column_name
 """)
