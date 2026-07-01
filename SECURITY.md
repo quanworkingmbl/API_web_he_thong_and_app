@@ -8,7 +8,7 @@
 - [ ] Generate `API_SECRET_KEY` mới → cập nhật `.env` backend + GitHub Secrets CMS + `--dart-define` App
 - [ ] Tạo GCP SA key Gemini **mới** (key cũ Google đã disable)
 
-## 2. GitHub Secrets (repo `UI_web_he_thong_and`)
+## 2. GitHub Secrets (repo `UI_web_he_thong_CMS`)
 
 Settings → Secrets → Actions → thêm:
 
@@ -35,7 +35,7 @@ git filter-repo --path project-f3e21dd2-0270-45f3-91c-392a0d4991a3.json --invert
 git push origin main --force
 ```
 
-### Repo UI (`UI_web_he_thong_and`)
+### Repo UI (`UI_web_he_thong_CMS`)
 
 ```bash
 git filter-repo --path .env --path .env.development --path .env.production --invert-paths --force

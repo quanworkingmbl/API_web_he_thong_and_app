@@ -8,7 +8,7 @@ REST API backend cho **Agrarian Platform** — nền tảng thương mại đi�
 |---|---|
 | Production API | `https://api.quancmsbe.site` |
 | Swagger | `https://api.quancmsbe.site/docs` |
-| CMS Web (client) | `UI_CMS/UI_web_he_thong_and` |
+| CMS Web (client) | `https://github.com/quanworkingmbl/UI_web_he_thong_CMS` |
 | Mobile App (client) | `App/agrarian_app` |
 
 > **Bảo mật:** Không commit file `.env`, service account JSON, hay password DB. Xin giá trị thật từ team lead.
