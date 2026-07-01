@@ -1,52 +1,39 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+from sqlalchemy.orm import sessionmaker, declarative_base
 from app.core.config import settings
+from app.core.url_utils import build_safe_database_url
+import logging
 
-def clean_database_url(url: str) -> str:
-    """Remove pgbouncer parameter from connection string"""
-    if not url:
-        return url
-    # Remove ?pgbouncer=true if present
-    if '?pgbouncer=true' in url:
-        url = url.replace('?pgbouncer=true', '')
-    elif '&pgbouncer=true' in url:
-        url = url.replace('&pgbouncer=true', '')
-    # Parse and clean query parameters
-    parsed = urlparse(url)
-    if parsed.query:
-        params = parse_qs(parsed.query)
-        # Remove pgbouncer from params
-        params.pop('pgbouncer', None)
-        # Rebuild URL
-        new_query = urlencode(params, doseq=True) if params else ''
-        parsed = parsed._replace(query=new_query)
-        url = urlunparse(parsed)
-    return url
+logger = logging.getLogger(__name__)
 
-# Clean DATABASE_URL
-clean_url = clean_database_url(settings.DATABASE_URL)
+# Re-export để alembic/env.py cũ không bị lỗi nếu còn import từ đây
+__all__ = ["engine", "SessionLocal", "Base", "get_db", "build_safe_database_url"]
 
-# Create engine
+# Build safe URL
+try:
+    clean_url = build_safe_database_url(settings.DATABASE_URL)
+    logger.info("Database URL built successfully.")
+except Exception as e:
+    logger.error(f"FATAL: Cannot build DATABASE_URL: {e}")
+    raise
+
+# Engine — pool nhỏ phù hợp Cloud Run (stateless, scale-to-0)
 engine = create_engine(
     clean_url,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=20,
+    pool_recycle=1800,
 )
 
-# Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create Base class for models
 Base = declarative_base()
 
-# Dependency to get DB session
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-

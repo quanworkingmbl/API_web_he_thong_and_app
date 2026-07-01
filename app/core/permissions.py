@@ -1,232 +1,547 @@
 """
-Permission and Role-Based Access Control (RBAC) utilities
+Centralized Permission Management System
+
+This module provides reusable permission check functions for API endpoints.
+Replaces scattered inline permission checks with consistent, maintainable helpers.
+
+Usage:
+    from app.core.permissions import require_admin, require_seller, check_ownership
+
+    @router.get("/admin/users")
+    async def get_users(current_user: User = Depends(get_current_user)):
+        require_admin(current_user)
+        # ... rest of endpoint logic
 """
-from typing import List, Optional
+
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
-from app.models.user import User, UserRole
-from app.models.role import Role, RolePermission
-from app.models.permission import Permission
+from app.models.user import User
+from typing import Optional
 
-# Role constants based on permission matrix
-class RoleType:
-    ADMIN = "admin"  # Admin hệ thống
-    OPERATION_COORDINATOR = "operation_coordinator"  # Điều phối vận hành
-    CONTENT_MANAGER = "content_manager"  # Quản lý nội dung
-    COOPERATIVE_STAFF = "cooperative_staff"  # Cán bộ Hợp tác xã
 
-# Permission constants
-class PermissionName:
-    # Product Management
-    PRODUCT_VIEW = "product_view"
-    PRODUCT_APPROVE = "product_approve"
-    PRODUCT_EDIT = "product_edit"
-    PRODUCT_LABEL = "product_label"
+# ==============================================================================
+# ROLE-BASED PERMISSION CHECKS
+# ==============================================================================
+
+def require_admin(user: User) -> None:
+    """
+    Requires user type to be 'admin'.
+
+    Raises:
+        HTTPException 403: If user is not an admin
+
+    Usage:
+        require_admin(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+
+def require_seller(user: User, allow_admin: bool = False) -> None:
+    """
+    Requires user type to be 'producer' or 'seller'.
+
+    Args:
+        user: Current authenticated user
+        allow_admin: If True, also allows admin users (default: False)
+
+    Raises:
+        HTTPException 403: If user is not a seller/producer (or admin if allowed)
+
+    Usage:
+        require_seller(current_user)  # Only seller/producer
+        require_seller(current_user, allow_admin=True)  # Seller/producer/admin
+    """
+    allowed_types = {"producer", "seller"}
+    if allow_admin:
+        allowed_types.add("admin")
+
+    if user.type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seller access required"
+        )
+
+
+def require_seller_or_admin(user: User) -> None:
+    """
+    Allows both sellers (producer/seller) and admin users.
+    Commonly used when admin needs to access seller endpoints for support.
+
+    Raises:
+        HTTPException 403: If user is neither seller nor admin
+
+    Usage:
+        require_seller_or_admin(current_user)
+    """
+    if user.type not in {"producer", "seller", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seller or admin access required"
+        )
+
+
+def require_consumer(user: User) -> None:
+    """
+    Requires user type to be 'consumer'.
+
+    Raises:
+        HTTPException 403: If user is not a consumer
+
+    Usage:
+        require_consumer(current_user)
+    """
+    if user.type != "consumer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Consumer access required"
+        )
+
+
+def require_content_manager(user: User, allow_admin: bool = True) -> None:
+    """
+    Requires user to be a content manager (or admin if allowed).
+    Used for content approval endpoints.
+
+    Args:
+        user: Current authenticated user
+        allow_admin: If True, also allows admin users (default: True)
+
+    Raises:
+        HTTPException 403: If user is not content_manager (or admin if allowed)
+
+    Usage:
+        require_content_manager(current_user)  # Content manager or admin
+        require_content_manager(current_user, allow_admin=False)  # Only content manager
+    """
+    allowed_types = {"content_manager"}
+    if allow_admin:
+        allowed_types.add("admin")
+
+    if user.type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Content manager access required"
+        )
+
+
+# ==============================================================================
+# OWNERSHIP CHECKS
+# ==============================================================================
+
+def check_ownership(
+    resource_user_id: int,
+    current_user: User,
+    allow_admin: bool = True
+) -> None:
+    """
+    Check if user owns the resource or is admin.
+
+    Args:
+        resource_user_id: The user_id who owns the resource
+        current_user: Current authenticated user
+        allow_admin: If True, admin can access any resource (default: True)
+
+    Raises:
+        HTTPException 403: If user doesn't own the resource and is not admin
+
+    Usage:
+        check_ownership(product.seller_id, current_user)
+        check_ownership(order.customer_id, current_user, allow_admin=False)
+    """
+    is_owner = resource_user_id == current_user.id
+    is_admin = (current_user.type == "admin") and allow_admin
+
+    if not (is_owner or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this resource"
+        )
+
+
+def check_seller_ownership(
+    seller_id: int,
+    current_user: User,
+    allow_admin: bool = True
+) -> None:
+    """
+    Check if seller owns the resource (product, order, etc.).
+    Specifically for seller/producer resources.
+
+    Args:
+        seller_id: The seller_id or seller_id who owns the resource
+        current_user: Current authenticated user
+        allow_admin: If True, admin can access any resource (default: True)
+
+    Raises:
+        HTTPException 403: If user is not the seller and not admin
+
+    Usage:
+        check_seller_ownership(order.seller_id, current_user)
+    """
+    # First check if user is a seller
+    if current_user.type not in {"producer", "seller", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seller access required"
+        )
+
+    # Then check ownership
+    is_owner = seller_id == current_user.id
+    is_admin = (current_user.type == "admin") and allow_admin
+
+    if not (is_owner or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this seller's resource"
+        )
+
+
+# ==============================================================================
+# CONTENT APPROVAL PERMISSIONS
+# ==============================================================================
+
+def check_content_approve_access(user: User) -> None:
+    """
+    Check if user can approve content (posts, articles).
+    Allows: admin, content_manager
+
+    Raises:
+        HTTPException 403: If user cannot approve content
+
+    Usage:
+        check_content_approve_access(current_user)
+    """
+    if user.type not in {"admin", "content_manager"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Content approval permission required"
+        )
+
+
+def check_product_approve_access(user: User) -> None:
+    """
+    Check if user can approve products.
+    Allows: admin, content_manager
+
+    Raises:
+        HTTPException 403: If user cannot approve products
+
+    Usage:
+        check_product_approve_access(current_user)
+    """
+    if user.type not in {"admin", "content_manager"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Product approval permission required"
+        )
+
+
+# ==============================================================================
+# FINANCIAL/SETTLEMENT PERMISSIONS
+# ==============================================================================
+
+def check_settlement_manage_access(user: User) -> None:
+    """
+    Check if user can manage settlements (create, approve, payout).
+    Only admin should have this permission.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_settlement_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Settlement management permission required (admin only)"
+        )
+
+
+def check_payment_config_access(user: User) -> None:
+    """
+    Check if user can modify payment configurations (fees, cycles, etc.).
+    Only admin should have this permission.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_payment_config_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Payment configuration permission required (admin only)"
+        )
+
+
+# ==============================================================================
+# COMPLAINT & CONTRACT MANAGEMENT
+# ==============================================================================
+
+def check_complaint_handle_access(user: User) -> None:
+    """
+    Check if user can handle/resolve complaints.
+    Allows: admin
+
+    Raises:
+        HTTPException 403: If user cannot handle complaints
+
+    Usage:
+        check_complaint_handle_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Complaint handling permission required (admin only)"
+        )
+
+
+def check_contract_manage_access(user: User) -> None:
+    """
+    Check if user can manage contracts (approve, verify).
+    Allows: admin
+
+    Raises:
+        HTTPException 403: If user cannot manage contracts
+
+    Usage:
+        check_contract_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Contract management permission required (admin only)"
+        )
+
+
+# ==============================================================================
+# SYSTEM CONFIGURATION & MANAGEMENT
+# ==============================================================================
+
+def check_category_manage_access(user: User) -> None:
+    """
+    Check if user can create/update/delete categories.
+    Only admin should manage categories.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_category_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Category management permission required (admin only)"
+        )
+
+
+def check_region_manage_access(user: User) -> None:
+    """
+    Check if user can create/update/delete regions.
+    Only admin should manage regions.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_region_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Region management permission required (admin only)"
+        )
+
+
+def check_user_manage_access(user: User) -> None:
+    """
+    Check if user can create/update/delete other users.
+    Only admin should manage users.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_user_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User management permission required (admin only)"
+        )
+
+
+def check_dashboard_access(user: User) -> None:
+    """
+    Check if user can access admin dashboard with analytics.
+    Only admin should see full system analytics.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_dashboard_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dashboard access permission required (admin only)"
+        )
+
+
+def check_product_label_access(user: User) -> None:
+    """
+    Check if user can assign product labels (HOT, BEST_SELLER, TRENDING).
+    Only admin should assign labels manually.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_product_label_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Product label management permission required (admin only)"
+        )
+
+
+def check_role_manage_access(user: User) -> None:
+    """
+    Check if user can create/update/delete roles.
+    Only admin should manage roles.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_role_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Role management permission required (admin only)"
+        )
+
+
+def check_organization_manage_access(user: User) -> None:
+    """
+    Check if user can create/update/delete organizations.
+    Only admin should manage organizations.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_organization_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization management permission required (admin only)"
+        )
+
+
+def check_media_manage_access(user: User) -> None:
+    """
+    Check if user can delete media files.
+    Only admin or the uploader should delete media.
+
+    Raises:
+        HTTPException 403: If user is not admin
+
+    Usage:
+        check_media_manage_access(current_user)
+    """
+    if user.type != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Media management permission required (admin only)"
+        )
+
+
+# ==============================================================================
+# HELPER UTILITIES
+# ==============================================================================
+
+def is_admin(user: User) -> bool:
+    """Check if user is admin (non-raising version)"""
+    return user.type == "admin"
+
+
+def is_seller(user: User) -> bool:
+    """Check if user is seller/producer (non-raising version)"""
+    return user.type in {"producer", "seller"}
+
+
+def is_consumer(user: User) -> bool:
+    """Check if user is consumer (non-raising version)"""
+    return user.type == "consumer"
+
+
+def is_content_manager(user: User) -> bool:
+    """Check if user is content manager (non-raising version)"""
+    return user.type == "content_manager"
+
+
+# ==============================================================================
+# KYC VERIFICATION CHECK
+# ==============================================================================
+
+def check_seller_kyc_verified(user: User, db) -> None:
+    """
+    Check if seller has completed KYC verification.
+    Blocks unverified sellers from creating/publishing products.
     
-    # Payment Management
-    PAYMENT_VIEW = "payment_view"
-    PAYMENT_CONFIG = "payment_config"
-    PAYMENT_RECONCILIATION = "payment_reconciliation"
-    PAYMENT_REFUND = "payment_refund"
+    Args:
+        user: Current authenticated user
+        db: Database session
     
-    # Content Management
-    CONTENT_VIEW = "content_view"
-    CONTENT_APPROVE = "content_approve"
+    Raises:
+        HTTPException 403: If seller is not KYC verified
     
-    # Contract Management
-    CONTRACT_VIEW = "contract_view"
-    CONTRACT_MANAGE = "contract_manage"
+    Usage:
+        check_seller_kyc_verified(current_user, db)
+    """
+    # Admin bypasses KYC check
+    if user.type == "admin":
+        return
     
-    # Complaint Management
-    COMPLAINT_VIEW = "complaint_view"
-    COMPLAINT_HANDLE = "complaint_handle"
+    # Only check for seller/producer types
+    if user.type not in {"producer", "seller"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only sellers can perform this action"
+        )
     
-    # System Control
-    SYSTEM_CONTROL = "system_control"
-
-def get_user_roles(user: User, db: Session) -> List[str]:
-    """Get list of role names for a user"""
-    user_roles = db.query(UserRole).filter(UserRole.user_id == user.id).all()
-    roles = []
-    for user_role in user_roles:
-        role = db.query(Role).filter(Role.id == user_role.role_id).first()
-        if role:
-            roles.append(role.role_name.lower())
-    return roles
-
-def get_user_permissions(user: User, db: Session) -> List[str]:
-    """Get list of permission names for a user"""
-    user_roles = db.query(UserRole).filter(UserRole.user_id == user.id).all()
-    permission_ids = set()
+    # Import here to avoid circular import
+    from app.models.seller_profile import SellerProfile, VerificationStatus
     
-    for user_role in user_roles:
-        role_permissions = db.query(RolePermission).filter(
-            RolePermission.role_id == user_role.role_id
-        ).all()
-        for rp in role_permissions:
-            permission_ids.add(rp.permission_id)
+    seller_profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == user.id
+    ).first()
     
-    permissions = []
-    for perm_id in permission_ids:
-        perm = db.query(Permission).filter(Permission.id == perm_id).first()
-        if perm:
-            permissions.append(perm.name.lower())
+    if not seller_profile:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn chưa có hồ sơ kinh doanh. Vui lòng hoàn tất đăng ký seller trước khi tạo sản phẩm hoặc nội dung."
+        )
     
-    return permissions
-
-def has_role(user: User, role_name: str, db: Session) -> bool:
-    """Check if user has a specific role"""
-    roles = get_user_roles(user, db)
-    return role_name.lower() in roles
-
-def has_permission(user: User, permission_name: str, db: Session) -> bool:
-    """Check if user has a specific permission"""
-    permissions = get_user_permissions(user, db)
-    return permission_name.lower() in permissions
-
-def has_any_role(user: User, role_names: List[str], db: Session) -> bool:
-    """Check if user has any of the specified roles"""
-    user_roles = get_user_roles(user, db)
-    return any(role.lower() in user_roles for role in role_names)
-
-def has_any_permission(user: User, permission_names: List[str], db: Session) -> bool:
-    """Check if user has any of the specified permissions"""
-    user_permissions = get_user_permissions(user, db)
-    return any(perm.lower() in user_permissions for perm in permission_names)
-
-def require_role(role_name: str):
-    """Decorator to require a specific role"""
-    def decorator(func):
-        async def wrapper(*args, **kwargs):
-            # Find current_user and db in kwargs
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if not current_user or not db:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Authentication required"
-                )
-            
-            if not has_role(current_user, role_name, db):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Requires role: {role_name}"
-                )
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-def require_permission(permission_name: str):
-    """Decorator to require a specific permission"""
-    def decorator(func):
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if not current_user or not db:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Authentication required"
-                )
-            
-            if not has_permission(current_user, permission_name, db):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Requires permission: {permission_name}"
-                )
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-def require_any_role(role_names: List[str]):
-    """Decorator to require any of the specified roles"""
-    def decorator(func):
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if not current_user or not db:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Authentication required"
-                )
-            
-            if not has_any_role(current_user, role_names, db):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Requires one of these roles: {', '.join(role_names)}"
-                )
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-def require_any_permission(permission_names: List[str]):
-    """Decorator to require any of the specified permissions"""
-    def decorator(func):
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if not current_user or not db:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Authentication required"
-                )
-            
-            if not has_any_permission(current_user, permission_names, db):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Requires one of these permissions: {', '.join(permission_names)}"
-                )
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-# Permission checkers based on permission matrix
-def check_product_approve_access(user: User, db: Session) -> bool:
-    """Check if user can approve products"""
-    roles = get_user_roles(user, db)
-    # Admin, Content Manager have full access
-    return RoleType.ADMIN in roles or RoleType.CONTENT_MANAGER in roles
-
-def check_payment_config_access(user: User, db: Session) -> bool:
-    """Check if user can configure payment settings"""
-    roles = get_user_roles(user, db)
-    # Only Admin has full access
-    return RoleType.ADMIN in roles
-
-def check_payment_reconciliation_access(user: User, db: Session) -> bool:
-    """Check if user can access payment reconciliation"""
-    roles = get_user_roles(user, db)
-    # Admin can view, Operation Coordinator has full access
-    return RoleType.ADMIN in roles or RoleType.OPERATION_COORDINATOR in roles
-
-def check_content_approve_access(user: User, db: Session) -> bool:
-    """Check if user can approve content"""
-    roles = get_user_roles(user, db)
-    # Content Manager has full access
-    return RoleType.CONTENT_MANAGER in roles
-
-def check_contract_manage_access(user: User, db: Session) -> bool:
-    """Check if user can manage contracts"""
-    roles = get_user_roles(user, db)
-    # Operation Coordinator has full access
-    return RoleType.OPERATION_COORDINATOR in roles
-
-def check_complaint_handle_access(user: User, db: Session) -> bool:
-    """Check if user can handle complaints"""
-    roles = get_user_roles(user, db)
-    # Operation Coordinator has full access
-    return RoleType.OPERATION_COORDINATOR in roles
-
-def check_system_control_access(user: User, db: Session) -> bool:
-    """Check if user has system control access"""
-    roles = get_user_roles(user, db)
-    # Only Admin has full access
-    return RoleType.ADMIN in roles
-
+    if seller_profile.verification_status == VerificationStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hồ sơ kinh doanh đang chờ xét duyệt. Vui lòng chờ admin phê duyệt trước khi tạo sản phẩm hoặc nội dung."
+        )
+    
+    if seller_profile.verification_status == VerificationStatus.REJECTED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Hồ sơ kinh doanh đã bị từ chối. Lý do: {seller_profile.rejection_reason or 'Không có lý do'}. Vui lòng cập nhật hồ sơ và gửi lại."
+        )

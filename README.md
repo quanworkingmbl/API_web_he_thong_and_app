@@ -1,332 +1,253 @@
-# CMS API - FastAPI Backend
+# CMS API — FastAPI Backend
 
-API backend cho hệ thống CMS quản lý sản phẩm địa phương, được xây dựng bằng FastAPI và PostgreSQL (Supabase).
+REST API backend cho **Agrarian Platform** — nền tảng thương mại điện tử multi-seller (nông sản sạch & làng nghề Việt Nam).
 
-## 🚀 Tính năng
+**Stack:** FastAPI + SQLAlchemy + PostgreSQL (Cloud SQL) · Deploy: Cloud Run
 
-- **Authentication & Authorization**: JWT-based authentication với role-based access control
-- **User Management**: Quản lý người dùng (Consumer, Producer, Admin, etc.)
-- **Role & Permission Management**: Quản lý vai trò và quyền truy cập
-- **Product Approval**: Duyệt sản phẩm với kiểm tra mô tả, giá cả, hình ảnh
-- **Payment Management**: Quản lý thanh toán, đối soát, hoàn tiền
-- **Content Management**: Duyệt nội dung từ Producer và Cooperative
-- **Complaint & Review Management**: Quản lý đánh giá và khiếu nại
-- **Partner Contracts**: Quản lý hợp đồng đối tác vận hành
-- **Media Management**: Upload và quản lý media files
-- **Dashboard**: API cho dashboard với thống kê realtime
+| Liên kết | URL |
+|---|---|
+| Production API | `https://api.quancmsbe.site` |
+| Swagger | `https://api.quancmsbe.site/docs` |
+| CMS Web (client) | `UI_CMS/UI_web_he_thong_and` |
+| Mobile App (client) | `App/agrarian_app` |
 
-## 📋 Yêu cầu
+> **Bảo mật:** Không commit file `.env`, service account JSON, hay password DB. Xin giá trị thật từ team lead.
 
-- Python 3.11+
-- PostgreSQL (Supabase)
-- pip hoặc poetry
+---
 
-## 🔧 Cài đặt
+## Yêu cầu hệ thống
 
-### 1. Clone repository
+| Công cụ | Phiên bản |
+|---|---|
+| Python | 3.11+ |
+| PostgreSQL | 14+ (local hoặc Cloud SQL) |
+| pip + venv | — |
+| gcloud CLI | Tuỳ chọn (deploy GCP) |
+| Docker | Tuỳ chọn (build image local) |
+
+---
+
+## Bạn cần có gì trước khi setup?
+
+### 1. File & quyền truy cập (xin team lead)
+
+| Hạng mục | Mục đích |
+|---|---|
+| File `.env` hoặc danh sách biến môi trường | Chạy local |
+| PostgreSQL connection string | Database local hoặc Cloud SQL dev |
+| `API_SECRET_KEY` | Header `X-Quan-Secret` — **phải khớp CMS Web & Mobile App** |
+| `SECRET_KEY`, `REFRESH_TOKEN_SECRET_KEY` | JWT signing |
+| VNPay sandbox (`VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`) | Test thanh toán |
+| GHN token (`GHN_TOKEN`, `GHN_SHOP_ID`) | Test vận chuyển |
+| GCS bucket name + SA JSON | Upload media (`GOOGLE_APPLICATION_CREDENTIALS`) |
+| Vertex AI project + SA | AI moderation / generate (tuỳ chọn local) |
+| reCAPTCHA secret key | Login CMS (production) |
+| Resend API key + Redis URL | Email OTP (tuỳ chọn) |
+
+### 2. Quyền GCP (nếu deploy / debug production)
+
+- Project backend trên GCP (xem `cloudbuild.yaml` → `_PROJECT`)
+- Cloud SQL, Cloud Run, Secret Manager, Artifact Registry, Cloud Build
+
+---
+
+## Cài đặt local
+
+### Bước 1 — Clone & virtualenv
 
 ```bash
-git clone https://github.com/quanworkingmbl/API_web_he_thong_and_app.git
-cd API_web_he_thong_and_app
-```
-
-### 2. Tạo virtual environment
-
-```bash
+cd Du_an_cms_API
 python -m venv venv
-source venv/bin/activate  # Trên Windows: venv\Scripts\activate
-```
 
-### 3. Cài đặt dependencies
+# Windows
+venv\Scripts\activate
 
-```bash
+# macOS / Linux
+source venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
-### 4. Cấu hình environment variables
+### Bước 2 — Tạo file `.env`
 
-Tạo file `.env` từ `.env.example`:
+Tạo `.env` tại root repo. **Không commit file này.**
 
-```bash
-cp .env.example .env
-```
-
-Cập nhật các giá trị trong `.env`:
+Danh sách biến đầy đủ nằm trong `app/core/config.py`. Template mẫu:
 
 ```env
-# Database Configuration
-DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.bfzxkojszxxjbfisocwt.supabase.co:5432/postgres
-DIRECT_URL=postgresql://postgres.bfzxkojszxxjbfisocwt:[YOUR-PASSWORD]@aws-1-ap-south-1.pooler.supabase.com:5432/postgres
+# ─── Database ───
+DATABASE_URL=postgresql://<USER>:<PASSWORD>@localhost:5432/cms_db
+DIRECT_URL=postgresql://<USER>:<PASSWORD>@localhost:5432/cms_db
 
-# JWT Configuration
-SECRET_KEY=your-secret-key-here-change-in-production
+# ─── JWT / Auth ───
+SECRET_KEY=<YOUR_JWT_SECRET_MIN_32_CHARS>
+REFRESH_TOKEN_SECRET_KEY=<YOUR_REFRESH_SECRET>
 ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# CORS Configuration
+# ─── App ───
+APP_NAME=CMS API
+DEBUG=True
+SHOW_DOCS=True
+
+# ─── API Secret (header X-Quan-Secret) ───
+API_SECRET_KEY=<YOUR_API_SECRET>
+
+# ─── CORS ───
 CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 
-# Application
-APP_NAME=CMS API
-APP_VERSION=1.0.0
-DEBUG=True
+# ─── Google Cloud Storage ───
+GCS_BUCKET_NAME=<YOUR_MEDIA_BUCKET>
+
+# ─── VNPay sandbox ───
+VNPAY_TMN_CODE=<VNPAY_TMN>
+VNPAY_HASH_SECRET=<VNPAY_HASH>
+VNPAY_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+VNPAY_RETURN_URL=http://localhost:8000/api/payments/vnpay/return
+VNPAY_IPN_URL=http://localhost:8000/api/payments/vnpay/ipn
+
+# ─── GHN Shipping ───
+GHN_TOKEN=<GHN_TOKEN>
+GHN_SHOP_ID=<GHN_SHOP_ID>
+GHN_URL=https://dev-online-gateway.ghn.vn/shiip/public-api
+
+# ─── Vertex AI (tuỳ chọn) ───
+VERTEX_PROJECT_ID=<GCP_PROJECT_ID>
+VERTEX_LOCATION=asia-southeast1
+GOOGLE_APPLICATION_CREDENTIALS=<PATH_TO_SA_JSON>
+
+# ─── reCAPTCHA (dev: có thể tắt) ───
+RECAPTCHA_ENABLED=False
+RECAPTCHA_SECRET_KEY=<RECAPTCHA_SECRET>
+RECAPTCHA_BYPASS_ENABLED=True
+RECAPTCHA_BYPASS_CLIENTS=mobile,postman
+
+# ─── Email OTP / Redis (tuỳ chọn) ───
+RESEND_API_KEY=<RESEND_KEY>
+REDIS_URL=redis://localhost:6379/0
 ```
 
-### 5. Chạy database migrations
+### Bước 3 — Migration & chạy server
 
 ```bash
-# Tạo migration đầu tiên
-alembic revision --autogenerate -m "Initial migration"
-
-# Chạy migrations
 alembic upgrade head
+python run.py
 ```
 
-### 6. Chạy ứng dụng
+| Endpoint | URL |
+|---|---|
+| API | `http://localhost:8000` |
+| Swagger | `http://localhost:8000/docs` |
+| ReDoc | `http://localhost:8000/redoc` |
 
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+### Bước 4 — Test nhanh
+
+Mọi request (trừ `/`, `/health`, `/docs`, `/redoc`) cần header:
+
+```http
+X-Quan-Secret: <API_SECRET_KEY>
+Authorization: Bearer <jwt_token>   # endpoints cần auth
 ```
 
-API sẽ chạy tại: `http://localhost:8000`
+---
 
-- API Documentation: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+## Kết nối với CMS Web & Mobile App
 
-## 📁 Cấu trúc dự án
+| Client | Cấu hình cần khớp backend |
+|---|---|
+| CMS Web | `VITE_APP_API_SECRET` = `API_SECRET_KEY` |
+| Mobile App | `--dart-define=API_SECRET=<API_SECRET_KEY>` |
+| Mobile (local API) | `--dart-define=API_BASE_URL=http://10.0.2.2:8000/api` |
+
+Backend local: thêm `http://localhost:3000` vào `CORS_ORIGINS`.
+
+---
+
+## Cấu trúc dự án (rút gọn)
 
 ```
 Du_an_cms_API/
 ├── app/
-│   ├── api/
-│   │   └── v1/
-│   │       ├── auth.py          # Authentication endpoints
-│   │       ├── users.py          # User management
-│   │       ├── roles.py          # Role management
-│   │       ├── permissions.py    # Permission management
-│   │       ├── organizations.py  # Organization management
-│   │       ├── dashboard.py      # Dashboard endpoints
-│   │       ├── media.py          # Media upload/management
-│   │       ├── products.py       # Product approval
-│   │       ├── payments.py      # Payment management
-│   │       ├── content.py       # Content management
-│   │       ├── complaints.py    # Complaint & review
-│   │       └── contracts.py     # Partner contracts
-│   ├── core/
-│   │   ├── config.py            # Configuration
-│   │   ├── database.py          # Database setup
-│   │   └── security.py          # Security utilities
-│   ├── models/
-│   │   ├── user.py              # User models
-│   │   ├── role.py              # Role models
-│   │   ├── permission.py        # Permission models
-│   │   ├── product.py           # Product models
-│   │   ├── payment.py           # Payment models
-│   │   ├── content.py           # Content models
-│   │   ├── complaint.py        # Complaint models
-│   │   └── partner_contract.py  # Contract models
-│   └── main.py                  # FastAPI app
-├── alembic/                     # Database migrations
-├── requirements.txt             # Python dependencies
-├── .env.example                 # Environment variables template
-├── Procfile                     # Railway deployment
-├── railway.json                 # Railway configuration
-└── README.md                    # This file
+│   ├── main.py              Entry point
+│   ├── api/v1/              28 router modules
+│   ├── core/                config, database, security, middleware
+│   ├── models/              34+ SQLAlchemy models
+│   └── services/            business logic, VNPay, GHN, FCM, AI
+├── alembic/                 migrations
+├── cloudbuild.yaml          CI/CD Cloud Build → Cloud Run
+├── Dockerfile
+├── requirements.txt
+├── run.py                   local dev runner
+└── .env                     ← không commit
 ```
 
-## 🔐 API Endpoints
-
-### Authentication
-
-- `POST /api/auth/login` - Đăng nhập
-- `POST /api/auth/info` - Lấy thông tin user
-- `GET /api/auth/logout` - Đăng xuất
-- `POST /api/auth/refresh` - Refresh token
-
-### Users
-
-- `GET /api/users` - Danh sách users
-- `POST /api/users` - Tạo user mới
-- `PUT /api/users/{id}` - Cập nhật user
-
-### Roles & Permissions
-
-- `GET /api/admin/roles` - Danh sách roles
-- `POST /api/admin/roles` - Tạo role mới
-- `PUT /api/admin/roles/{id}` - Cập nhật role
-- `DELETE /api/admin/roles/{id}` - Xóa role
-
-- `GET /api/admin/permissions` - Danh sách permissions
-- `POST /api/admin/permissions` - Tạo permission mới
-- `PUT /api/admin/permissions/{id}` - Cập nhật permission
-- `DELETE /api/admin/permissions/{id}` - Xóa permission
-
-### Products
-
-- `GET /api/products` - Danh sách sản phẩm
-- `POST /api/products/{id}/approve` - Duyệt/từ chối sản phẩm
-- `PUT /api/products/{id}/label` - Cập nhật nhãn sản phẩm
-
-### Payments
-
-- `GET /api/payments` - Danh sách thanh toán
-- `GET /api/payments/{id}/status` - Trạng thái thanh toán
-- `GET /api/payments/reconciliation` - Đối soát thanh toán
-- `POST /api/payments/refund` - Hoàn tiền
-- `POST /api/payments/complaint` - Khiếu nại thanh toán
-- `PUT /api/payments/config/fee` - Cấu hình phí nền tảng
-- `PUT /api/payments/config/cycle` - Cấu hình chu kỳ thanh toán
-
-### Content
-
-- `GET /api/content` - Danh sách nội dung
-- `POST /api/content/{id}/approve` - Duyệt nội dung
-
-### Complaints & Reviews
-
-- `GET /api/complaints/reviews` - Danh sách đánh giá
-- `GET /api/complaints/complaints` - Danh sách khiếu nại
-- `PUT /api/complaints/complaints/{id}/handle` - Xử lý khiếu nại
-
-### Partner Contracts
-
-- `GET /api/contracts` - Danh sách hợp đồng
-- `POST /api/contracts` - Tạo hợp đồng mới
-
-### Media
-
-- `GET /api/medias` - Danh sách media
-- `POST /api/medias` - Tạo media record
-- `POST /api/medias/uploads` - Upload file
-
-### Dashboard
-
-- `GET /api/accounts` - Danh sách accounts
-- `GET /api/advertiser-private` - Advertisers private
-- `GET /api/flights` - Flights
-- `GET /api/report/flights/realtime` - Flight realtime reports
-
-## 🚂 Deploy lên Railway
-
-### 1. Chuẩn bị
-
-1. Đăng ký tài khoản Railway tại [railway.app](https://railway.app)
-2. Tạo project mới trên Railway
-3. Kết nối GitHub repository
-
-### 2. Cấu hình Environment Variables trên Railway
-
-Trong Railway dashboard, thêm các biến môi trường:
-
-```
-DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.bfzxkojszxxjbfisocwt.supabase.co:5432/postgres
-DIRECT_URL=postgresql://postgres.bfzxkojszxxjbfisocwt:[YOUR-PASSWORD]@aws-1-ap-south-1.pooler.supabase.com:5432/postgres
-SECRET_KEY=your-secret-key-here-change-in-production
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-CORS_ORIGINS=https://your-frontend-domain.com
-APP_NAME=CMS API
-APP_VERSION=1.0.0
-DEBUG=False
-```
-
-### 3. Setup Database
-
-Railway sẽ tự động detect Python project và build. Sau khi deploy:
-
-1. SSH vào Railway instance hoặc chạy migrations qua Railway CLI:
-
-```bash
-railway run alembic upgrade head
-```
-
-### 4. Cấu hình Build & Deploy
-
-Railway sẽ tự động detect:
-- `Procfile` cho start command
-- `requirements.txt` cho dependencies
-- Python version từ `runtime.txt`
-
-### 5. Custom Domain (Optional)
-
-Trong Railway dashboard:
-1. Vào Settings → Networking
-2. Thêm custom domain
-3. Cập nhật `CORS_ORIGINS` với domain mới
-
-### 6. Monitoring
-
-Railway cung cấp:
-- Logs realtime
-- Metrics (CPU, Memory, Network)
-- Deploy history
-
-## 🔒 Security Notes
-
-1. **SECRET_KEY**: Luôn sử dụng secret key mạnh trong production
-2. **CORS**: Cấu hình đúng CORS_ORIGINS cho production
-3. **Database**: Không commit credentials vào git
-4. **HTTPS**: Railway tự động cung cấp HTTPS
-5. **Rate Limiting**: Cân nhắc thêm rate limiting cho production
-
-## 🧪 Testing
-
-```bash
-# Chạy tests (nếu có)
-pytest
-
-# Chạy với coverage
-pytest --cov=app
-```
-
-## 📝 Database Migrations
-
-```bash
-# Tạo migration mới
-alembic revision --autogenerate -m "Description"
-
-# Chạy migrations
-alembic upgrade head
-
-# Rollback migration
-alembic downgrade -1
-```
-
-## 🐛 Troubleshooting
-
-### Lỗi kết nối database
-
-- Kiểm tra `DATABASE_URL` trong `.env`
-- Đảm bảo Supabase database đang chạy
-- Kiểm tra firewall/network settings
-
-### Lỗi import modules
-
-- Đảm bảo đã activate virtual environment
-- Kiểm tra `PYTHONPATH`
-- Chạy từ root directory của project
-
-### Lỗi migrations
-
-- Kiểm tra database connection
-- Đảm bảo models đã được import trong `alembic/env.py`
-
-## 📚 Tài liệu tham khảo
-
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [SQLAlchemy Documentation](https://docs.sqlalchemy.org/)
-- [Alembic Documentation](https://alembic.sqlalchemy.org/)
-- [Railway Documentation](https://docs.railway.app/)
-
-## 📄 License
-
-[Your License Here]
-
-## 👥 Contributors
-
-[Your Name/Team]
+Chi tiết từng module: xem `md_du_an/02_CAU_TRUC_FOLDER_VA_ENTRY_POINTS.md`.
 
 ---
 
-**Lưu ý**: Đảm bảo thay đổi tất cả placeholder values (passwords, secrets, etc.) trước khi deploy production!
+## API Security
 
+Middleware stack:
+
+```
+Request → CORS → Logging → ApiSecret → Router → Handler → Response
+```
+
+---
+
+## Database migrations
+
+```bash
+alembic revision --autogenerate -m "mo_ta_thay_doi"
+alembic upgrade head
+alembic downgrade -1
+alembic current
+```
+
+---
+
+## Deploy production (Google Cloud)
+
+Pipeline trong `cloudbuild.yaml`:
+
+```
+Git push → Docker build → Artifact Registry → Alembic migrate → Cloud Run deploy
+```
+
+| Resource | Tên (trong repo) |
+|---|---|
+| Cloud Run service | `api-web-he-thong-and-app` |
+| Cloud SQL | `mbl-cms-db` |
+| Region | `asia-southeast1` |
+| Secrets (Secret Manager) | `DATABASE_URL`, `SECRET_KEY`, `VNPAY_*` |
+
+Deploy thủ công:
+
+```bash
+gcloud config set project <BACKEND_GCP_PROJECT>
+gcloud builds submit --config=cloudbuild.yaml .
+```
+
+---
+
+## Troubleshooting
+
+| Lỗi | Nguyên nhân | Cách xử lý |
+|---|---|---|
+| 403 Forbidden | Thiếu `X-Quan-Secret` | Thêm header, kiểm tra `API_SECRET_KEY` |
+| 401 Unauthorized | JWT hết hạn | Refresh token hoặc login lại |
+| 500 DB Error | Schema chưa sync | `alembic upgrade head` |
+| CORS Error | Origin chưa whitelist | Thêm origin vào `CORS_ORIGINS` |
+| Upload media fail | Thiếu GCS credentials | Kiểm tra `GCS_BUCKET_NAME` + SA JSON |
+
+---
+
+## Tài liệu thêm
+
+| File | Nội dung |
+|---|---|
+| `app/core/config.py` | Toàn bộ env vars |
+| `md_du_an/03_API_FLOW_VA_REQUEST_LIFECYCLE.md` | Request / auth flow |
+| `md_du_an/07_DEPLOYMENT_DEBUG_VA_READING_ORDER.md` | Deploy & debug |
+| `SECURITY.md` | Dọn git history + rotate secret |

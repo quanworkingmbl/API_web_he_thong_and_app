@@ -1,0 +1,1302 @@
+"""
+app/api/v1/deposit.py
+=====================
+Ví Sàn — Platform Deposit Wallet
+
+Seller phải nạp ký quỹ >= MIN_DEPOSIT_REQUIRED (500,000đ) trước khi
+bán hàng. Hỗ trợ 2 hình thức:
+  1. Chuyển khoản ngân hàng thủ công → upload biên lai → Admin duyệt
+  2. VNPay Sandbox (test) → tự động CONFIRMED khi callback thành công
+
+Endpoints:
+  Seller:
+    GET  /deposit/my/balance       — Xem số dư & trạng thái ký quỹ
+    GET  /deposit/my/history       — Lịch sử giao dịch (phân trang)
+    POST /deposit/topup/bank       — Tạo yêu cầu nạp chuyển khoản
+    POST /deposit/topup/vnpay      — Tạo URL thanh toán VNPay
+    GET  /deposit/vnpay/return     — VNPay redirect callback (browser)
+    GET  /deposit/vnpay/ipn        — VNPay IPN (server-to-server)
+
+  Admin:
+    GET  /deposit/admin/list       — Danh sách tất cả yêu cầu nạp
+    POST /deposit/admin/{id}/confirm — Xác nhận đã nhận tiền
+    POST /deposit/admin/{id}/reject  — Từ chối yêu cầu
+    POST /deposit/admin/deduct     — Khấu trừ thủ công (xử lý gian lận)
+"""
+
+import json
+import logging
+import os
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+from app.models.settlement import (
+    DepositStatus,
+    DepositTransaction,
+    DepositTransactionType,
+    SellerDepositWallet,
+)
+from app.models.user import User
+from app.services.vnpay import get_client_ip, vnpay_service
+
+_TZ_VN = timezone(timedelta(hours=7))
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+# ── Hằng số ──────────────────────────────────────────────────────────────────
+MIN_DEPOSIT_REQUIRED = Decimal("500000")
+PLATFORM_BANK_NAME    = "MB Bank"
+PLATFORM_BANK_ACCOUNT = "0123456789"
+PLATFORM_BANK_OWNER   = "CONG TY SAN NONG SAN"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _require_seller(user: User):
+    """Chỉ seller mới được gọi endpoint này."""
+    if user.type not in ("producer", "seller"):
+        raise HTTPException(status_code=403, detail="Chi danh cho Seller.")
+
+
+def _require_admin(user: User):
+    """Chỉ admin mới được gọi endpoint này."""
+    if user.type not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="Chi danh cho Admin.")
+
+
+def _get_or_create_deposit_wallet(seller_id: int, db: Session) -> SellerDepositWallet:
+    wallet = db.query(SellerDepositWallet).filter(
+        SellerDepositWallet.seller_id == seller_id
+    ).first()
+    if not wallet:
+        wallet = SellerDepositWallet(
+            seller_id=seller_id,
+            deposit_balance=Decimal("0"),
+            total_deposited=Decimal("0"),
+            total_deducted=Decimal("0"),
+        )
+        db.add(wallet)
+        db.flush()
+    return wallet
+
+
+def _confirm_deposit_tx(tx: DepositTransaction, db: Session):
+    """Xác nhận giao dịch nạp tiền → cộng vào deposit_balance."""
+    wallet = _get_or_create_deposit_wallet(tx.seller_id, db)
+    amount = Decimal(str(tx.amount))
+    wallet.deposit_balance = Decimal(str(wallet.deposit_balance)) + amount
+    wallet.total_deposited = Decimal(str(wallet.total_deposited)) + amount
+    tx.status = DepositStatus.CONFIRMED
+    tx.reviewed_at = datetime.now(timezone.utc)
+
+
+def _deduct_cod_deposit_for_order(order, actor_id: int, db: Session) -> tuple[bool, Decimal]:
+    """
+    Trừ 10% giá trị đơn COD từ ví ký quỹ khi seller xác nhận đơn.
+
+    Returns:
+        (deducted, amount)
+        - deducted=False nếu không phải COD hoặc đơn đã trừ trước đó.
+        - amount là số tiền COD deposit tương ứng.
+    """
+    from app.models.order import Order
+
+    payment_method = order.payment_method.value if hasattr(order.payment_method, "value") else str(order.payment_method)
+    if payment_method != "COD":
+        return False, Decimal("0")
+
+    locked_order = (
+        db.query(Order)
+        .filter(Order.id == order.id)
+        .with_for_update()
+        .first()
+    )
+    if not locked_order:
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+
+    if locked_order.cod_deposit_deducted:
+        return False, Decimal(str(locked_order.cod_deposit_amount or 0))
+
+    base_amount = Decimal(str(locked_order.total_amount or 0))
+    deduct_amount = (base_amount * Decimal("0.10")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if deduct_amount <= 0:
+        return False, Decimal("0")
+
+    wallet = (
+        db.query(SellerDepositWallet)
+        .filter(SellerDepositWallet.seller_id == locked_order.seller_id)
+        .with_for_update()
+        .first()
+    )
+    if not wallet:
+        raise HTTPException(
+            status_code=400,
+            detail="Seller chưa có ví ký quỹ. Vui lòng nạp ký quỹ trước khi xác nhận đơn COD.",
+        )
+
+    current_balance = Decimal(str(wallet.deposit_balance or 0))
+    if current_balance < deduct_amount:
+        needed = deduct_amount - current_balance
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Ví ký quỹ không đủ để xác nhận đơn COD. "
+                f"Cần {int(deduct_amount):,}đ, hiện có {int(current_balance):,}đ, "
+                f"cần nạp thêm {int(needed):,}đ."
+            ),
+        )
+
+    wallet.deposit_balance = current_balance - deduct_amount
+    wallet.total_deducted = Decimal(str(wallet.total_deducted or 0)) + deduct_amount
+
+    tx = DepositTransaction(
+        seller_id=locked_order.seller_id,
+        order_id=locked_order.id,
+        amount=deduct_amount,
+        tx_type=DepositTransactionType.DEDUCT,
+        status=DepositStatus.CONFIRMED,
+        payment_method="COD",
+        note=f"Khấu trừ 10% ký quỹ COD cho đơn {locked_order.order_number}",
+        reviewed_by=actor_id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    db.add(tx)
+
+    locked_order.cod_deposit_amount = deduct_amount
+    locked_order.cod_deposit_deducted = True
+    locked_order.cod_deposit_deducted_at = datetime.now(timezone.utc)
+
+    logger.info(
+        "[Deposit][COD] Deduct %s VND from seller #%s for order #%s. Balance: %s -> %s",
+        deduct_amount,
+        locked_order.seller_id,
+        locked_order.id,
+        current_balance,
+        wallet.deposit_balance,
+    )
+    return True, deduct_amount
+
+
+# ── Pydantic Schemas ──────────────────────────────────────────────────────────
+
+class BankTopupRequest(BaseModel):
+    amount: float
+    bank_ref: str
+    receipt_url: Optional[str] = None
+
+
+class VNPayTopupRequest(BaseModel):
+    amount: float
+
+
+class AdminConfirmRequest(BaseModel):
+    note: Optional[str] = None
+
+
+class AdminRejectRequest(BaseModel):
+    note: str
+
+
+class AdminDeductRequest(BaseModel):
+    seller_id: int
+    amount: float
+    note: str
+
+
+# ==============================================================================
+# SELLER ENDPOINTS
+# ==============================================================================
+
+@router.get("/my/balance", summary="Seller: Xem số dư ký quỹ")
+def get_my_deposit_balance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Trả về số dư ký quỹ hiện tại và trạng thái (đủ / thiếu)."""
+    _require_seller(current_user)
+    wallet = _get_or_create_deposit_wallet(current_user.id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+    return {
+        "success": True,
+        "data": {
+            "deposit_balance":   str(balance),
+            "total_deposited":   str(wallet.total_deposited),
+            "total_deducted":    str(wallet.total_deducted),
+            "min_required":      str(MIN_DEPOSIT_REQUIRED),
+            "is_sufficient":     balance >= MIN_DEPOSIT_REQUIRED,
+            "platform_bank": {
+                "bank_name":    PLATFORM_BANK_NAME,
+                "account_number": PLATFORM_BANK_ACCOUNT,
+                "account_owner":  PLATFORM_BANK_OWNER,
+            },
+        },
+    }
+
+
+@router.get("/my/history", summary="Seller: Lịch sử giao dịch ký quỹ")
+def get_my_deposit_history(
+    page:     int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    status:   Optional[str] = Query(None, description="PENDING | CONFIRMED | REJECTED"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_seller(current_user)
+    q = db.query(DepositTransaction).filter(
+        DepositTransaction.seller_id == current_user.id
+    )
+    if status:
+        try:
+            q = q.filter(DepositTransaction.status == DepositStatus(status))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Status khong hop le: {status}")
+
+    total = q.count()
+    items = q.order_by(DepositTransaction.created_at.desc()) \
+             .offset((page - 1) * per_page).limit(per_page).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id":             t.id,
+                "order_id":       t.order_id,
+                "order_number":   t.order.order_number if t.order else None,
+                "amount":         str(t.amount),
+                "tx_type":        t.tx_type,
+                "status":         t.status,
+                "payment_method": t.payment_method,
+                "bank_ref":       t.bank_ref,
+                "receipt_url":    t.receipt_url,
+                "note":           t.note,
+                "created_at":     t.created_at.isoformat() if t.created_at else None,
+                "reviewed_at":    t.reviewed_at.isoformat() if t.reviewed_at else None,
+            }
+            for t in items
+        ],
+        "meta": {"total": total, "page": page, "per_page": per_page},
+    }
+
+
+@router.post("/topup/bank", summary="Seller: Nạp tiền qua chuyển khoản ngân hàng")
+def topup_bank_transfer(
+    body: BankTopupRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Seller tạo yêu cầu nạp tiền bằng chuyển khoản:
+      - Điền số tiền, mã tham chiếu GD
+      - Upload ảnh biên lai (qua /medias trước, rồi truyền URL vào đây)
+      - Admin sẽ xem và duyệt thủ công
+    """
+    _require_seller(current_user)
+    if body.amount < float(MIN_DEPOSIT_REQUIRED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"So tien nap toi thieu la {int(MIN_DEPOSIT_REQUIRED):,}d."
+        )
+
+    tx = DepositTransaction(
+        seller_id=current_user.id,
+        amount=Decimal(str(body.amount)),
+        tx_type=DepositTransactionType.TOP_UP,
+        status=DepositStatus.PENDING,
+        payment_method="BANK_TRANSFER",
+        bank_ref=body.bank_ref,
+        receipt_url=body.receipt_url,
+    )
+    db.add(tx)
+    db.commit()
+    db.refresh(tx)
+
+    logger.info("[Deposit] Seller #%s tao yeu cau nap CK %s VND (tx #%s)", current_user.id, body.amount, tx.id)
+    return {
+        "success": True,
+        "message": "Yeu cau nap tien da duoc gui. Vui long cho Admin xac nhan.",
+        "data": {"transaction_id": tx.id, "status": tx.status},
+    }
+
+
+@router.post("/topup/vnpay", summary="Seller: Nạp tiền qua VNPay (test sandbox)")
+def topup_vnpay(
+    body: VNPayTopupRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Tạo URL thanh toán VNPay để nạp ký quỹ.
+    Sau khi thanh toán thành công, VNPay gọi callback → tự động CONFIRMED.
+    """
+    _require_seller(current_user)
+    if body.amount < float(MIN_DEPOSIT_REQUIRED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"So tien nap toi thieu la {int(MIN_DEPOSIT_REQUIRED):,}d."
+        )
+
+    # Tạo giao dịch PENDING trước để có ID
+    tx = DepositTransaction(
+        seller_id=current_user.id,
+        amount=Decimal(str(body.amount)),
+        tx_type=DepositTransactionType.TOP_UP,
+        status=DepositStatus.PENDING,
+        payment_method="VNPAY",
+    )
+    db.add(tx)
+    db.flush()  # lấy tx.id
+
+    # TxnRef: chỉ số — id (6 chữ số) + timestamp (14), ví dụ 00000220260601165343
+    now_str = datetime.now(_TZ_VN).strftime("%Y%m%d%H%M%S")
+    txn_ref = f"{tx.id:06d}{now_str}"
+    tx.vnpay_txn_ref = txn_ref
+
+    deposit_return_url = os.getenv("VNPAY_DEPOSIT_RETURN_URL") or (
+        vnpay_service.return_url.replace(
+            "/payments/vnpay/return", "/deposit/vnpay/return"
+        )
+    )
+    order_info = f"Nap ky quy vi san seller #{current_user.id}"
+
+    payment_url = vnpay_service.create_payment_url(
+        order_id=tx.id,
+        amount=float(body.amount),
+        order_info=order_info,
+        client_ip=get_client_ip(request),
+        return_url=deposit_return_url,
+        txn_ref=txn_ref,
+    )
+
+    db.commit()
+    logger.info("[Deposit] Seller #%s tao VNPay deposit %s VND (txn_ref=%s)", current_user.id, body.amount, txn_ref)
+    return {
+        "success": True,
+        "data": {
+            "transaction_id": tx.id,
+            "payment_url":    payment_url,
+            "txn_ref":        txn_ref,
+        },
+    }
+
+
+@router.get("/vnpay/status/{transaction_id}", summary="Seller: Kiểm tra trạng thái nạp VNPay")
+def get_vnpay_deposit_status(
+    transaction_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Trả trạng thái giao dịch VNPay để CMS biết đã cộng ví hay còn chờ callback."""
+    _require_seller(current_user)
+    tx = db.query(DepositTransaction).filter(
+        DepositTransaction.id == transaction_id,
+        DepositTransaction.seller_id == current_user.id,
+        DepositTransaction.payment_method == "VNPAY",
+        DepositTransaction.tx_type == DepositTransactionType.TOP_UP,
+    ).first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Giao dịch VNPay không tồn tại")
+
+    wallet = _get_or_create_deposit_wallet(current_user.id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+    return {
+        "success": True,
+        "data": {
+            "transaction_id": tx.id,
+            "status": tx.status.value if hasattr(tx.status, "value") else str(tx.status),
+            "amount": str(tx.amount),
+            "reviewed_at": tx.reviewed_at.isoformat() if tx.reviewed_at else None,
+            "deposit_balance": str(balance),
+            "is_sufficient": balance >= MIN_DEPOSIT_REQUIRED,
+        },
+    }
+
+
+def _build_result_html(success: bool, amount: int = 0, tx_id: int = 0,
+                        title: str = "", subtitle: str = "",
+                        redirect_url: str = "/seller/wallet?tab=topup") -> str:
+    """Tạo trang kết quả thanh toán đẹp với animation."""
+    if success:
+        icon_color  = "#22c55e"
+        bg_color    = "#f0fdf4"
+        border_color = "#bbf7d0"
+        circle_anim = "circle-success"
+        path_d = "M6 12 L10 16 L18 8"
+        status_label = "THÀNH CÔNG"
+        amount_fmt = f"{amount:,}đ".replace(",", ".")
+        detail_html = f"""
+            <div class="amount">+{amount_fmt}</div>
+            <p class="detail-text">Ký quỹ Ví Sàn đã được cộng vào tài khoản của bạn</p>
+        """
+    else:
+        icon_color   = "#ef4444"
+        bg_color     = "#fef2f2"
+        border_color = "#fecaca"
+        circle_anim  = "circle-fail"
+        path_d = "M8 8 L16 16 M16 8 L8 16"
+        status_label = "THẤT BẠI"
+        amount_fmt = f"{amount:,}đ".replace(",", ".") if amount else ""
+        detail_html = f"""
+            <p class="detail-text" style="color:#ef4444">
+                Giao dịch không thành công.<br>Vui lòng thử lại hoặc liên hệ hỗ trợ.
+            </p>
+        """
+
+    return f"""<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{'Nạp ký quỹ thành công' if success else 'Thanh toán thất bại'} — Agrarian</title>
+  <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: {bg_color};
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }}
+    .card {{
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.10);
+      padding: 48px 40px 40px;
+      text-align: center;
+      max-width: 420px;
+      width: 100%;
+      border: 1px solid {border_color};
+      animation: slide-up 0.5s cubic-bezier(.22,.68,0,1.2) both;
+    }}
+    @keyframes slide-up {{
+      from {{ opacity: 0; transform: translateY(32px) scale(0.97); }}
+      to   {{ opacity: 1; transform: translateY(0)   scale(1); }}
+    }}
+
+    /* ── Animated circle ── */
+    .icon-wrap {{
+      width: 88px; height: 88px;
+      margin: 0 auto 24px;
+    }}
+    .icon-wrap svg {{
+      width: 88px; height: 88px;
+      overflow: visible;
+    }}
+    .circle {{
+      fill: none;
+      stroke: {icon_color};
+      stroke-width: 3;
+      stroke-dasharray: 264;
+      stroke-dashoffset: 264;
+      stroke-linecap: round;
+      transform-origin: center;
+      transform: rotate(-90deg);
+      animation: draw-circle 0.65s ease forwards 0.1s;
+    }}
+    @keyframes draw-circle {{
+      to {{ stroke-dashoffset: 0; }}
+    }}
+    .checkmark {{
+      fill: none;
+      stroke: {icon_color};
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 40;
+      stroke-dashoffset: 40;
+      animation: draw-check 0.4s ease forwards 0.75s;
+    }}
+    @keyframes draw-check {{
+      to {{ stroke-dashoffset: 0; }}
+    }}
+    .icon-bg {{
+      fill: {'#dcfce7' if success else '#fee2e2'};
+      stroke: none;
+    }}
+
+    /* ── Badge ── */
+    .badge {{
+      display: inline-block;
+      background: {icon_color};
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      padding: 4px 14px;
+      border-radius: 99px;
+      margin-bottom: 14px;
+    }}
+
+    h1 {{
+      font-size: 22px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 6px;
+    }}
+    .amount {{
+      font-size: 36px;
+      font-weight: 800;
+      color: {icon_color};
+      margin: 16px 0 8px;
+      letter-spacing: -1px;
+    }}
+    .detail-text {{
+      color: #6b7280;
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }}
+
+    /* ── Info box ── */
+    .info-box {{
+      background: #f9fafb;
+      border: 1px solid #f0f0f0;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 28px;
+      text-align: left;
+    }}
+    .info-row {{
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      padding: 6px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }}
+    .info-row:last-child {{ border-bottom: none; }}
+    .info-label {{ color: #9ca3af; }}
+    .info-value {{ color: #111; font-weight: 600; }}
+
+    /* ── Buttons ── */
+    .btn-primary {{
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: {'#16a34a' if success else '#6b7280'};
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.15s;
+    }}
+    .btn-primary:hover {{ opacity: 0.88; }}
+
+    /* ── Countdown ── */
+    .countdown {{
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 14px;
+    }}
+    #cnt {{ font-weight: 700; color: #374151; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-wrap">
+      <svg viewBox="0 0 88 88">
+        <circle class="icon-bg" cx="44" cy="44" r="40"/>
+        <circle class="circle" cx="44" cy="44" r="40"/>
+        <path class="checkmark" d="{path_d.replace('6 12','18 44').replace('10 16','38 60').replace('18 8','70 28').replace('8 8','28 28').replace('16 16','60 60').replace('16 8','60 28').replace('8 16','28 60')}"/>
+      </svg>
+    </div>
+
+    <div class="badge">{status_label}</div>
+    <h1>{'Nạp ký quỹ thành công!' if success else 'Thanh toán không thành công'}</h1>
+
+    {detail_html}
+
+    <div class="info-box">
+      <div class="info-row">
+        <span class="info-label">Mã giao dịch</span>
+        <span class="info-value">#{tx_id}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Phương thức</span>
+        <span class="info-value">VNPay</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Trạng thái</span>
+        <span class="info-value" style="color:{icon_color}">{status_label}</span>
+      </div>
+    </div>
+
+    <a href="{redirect_url}" class="btn-primary" id="back-btn">
+      {'↩ Quay lại Ví Sàn' if success else '↩ Thử lại'}
+    </a>
+    <p class="countdown">Tự động chuyển sau <span id="cnt">5</span> giây</p>
+  </div>
+
+  <script>
+    var n = 5;
+    var el = document.getElementById('cnt');
+    var timer = setInterval(function() {{
+      n--;
+      el.textContent = n;
+      if (n <= 0) {{
+        clearInterval(timer);
+        window.location.href = '{redirect_url}';
+      }}
+    }}, 1000);
+  </script>
+</body>
+</html>"""
+
+
+@router.get("/vnpay/return", summary="VNPay: Redirect callback sau khi thanh toán")
+def vnpay_return(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    VNPay redirect người dùng về đây sau khi thanh toán.
+    Xác minh chữ ký → cập nhật trạng thái → trả về HTML thông báo đẹp.
+    """
+    params  = dict(request.query_params)
+    result  = vnpay_service.verify_return_url(params)
+    txn_ref = params.get("vnp_TxnRef", "")
+
+    # Lấy VNPAY_WEB_URL để build redirect link về UI
+    # VNPAY_WEB_URL phải là: https://mbl-cms.store/# (có /#/ vì dùng HashRouter)
+    web_url = os.getenv("VNPAY_WEB_URL", "").rstrip("/")
+    # wallet_base_url sẽ là: https://mbl-cms.store/#/seller/wallet
+    wallet_base_url = f"{web_url}/seller/wallet" if web_url else "/#/seller/wallet"
+    wallet_url = f"{wallet_base_url}?tab=topup"
+
+    tx = db.query(DepositTransaction).filter(
+        DepositTransaction.vnpay_txn_ref == txn_ref
+    ).first()
+
+    if not tx:
+        return HTMLResponse(
+            _build_result_html(
+                success=False, tx_id=0,
+                redirect_url=wallet_url,
+            ),
+            status_code=404,
+        )
+
+    # Sau khi nạp thành công → về tab=topup và hiển thị banner success
+    success_wallet_url = f"{wallet_base_url}?tab=topup&vnpay=success&tx_id={tx.id}"
+    failed_wallet_url  = f"{wallet_base_url}?tab=topup&vnpay=failed&tx_id={tx.id}"
+
+    # Đã xử lý rồi → vẫn hiện trang success đẹp
+    if tx.status == DepositStatus.CONFIRMED:
+        return HTMLResponse(
+            _build_result_html(
+                success=True,
+                amount=int(tx.amount),
+                tx_id=tx.id,
+                redirect_url=success_wallet_url,
+            )
+        )
+
+    tx.vnpay_response = json.dumps(params)
+
+    if result["is_valid"] and vnpay_service.is_payment_success(
+        result["response_code"], result["transaction_status"]
+    ):
+        _confirm_deposit_tx(tx, db)
+        db.commit()
+        logger.info("[Deposit] VNPay return OK — tx #%s CONFIRMED", tx.id)
+        return HTMLResponse(
+            _build_result_html(
+                success=True,
+                amount=int(tx.amount),
+                tx_id=tx.id,
+                redirect_url=success_wallet_url,
+            )
+        )
+    else:
+        tx.status = DepositStatus.REJECTED
+        tx.note   = f"VNPay response_code={result.get('response_code')}"
+        db.commit()
+        logger.warning("[Deposit] VNPay return FAIL — tx #%s, code=%s", tx.id, result.get("response_code"))
+        return HTMLResponse(
+            _build_result_html(
+                success=False,
+                amount=int(tx.amount) if tx.amount else 0,
+                tx_id=tx.id,
+                redirect_url=failed_wallet_url,
+            )
+        )
+
+
+
+@router.get("/vnpay/ipn", summary="VNPay: IPN server-to-server callback")
+def vnpay_ipn(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """VNPay gọi IPN để xác nhận giao dịch phía server."""
+    params = dict(request.query_params)
+    result = vnpay_service.verify_return_url(params)
+
+    if not result["is_valid"]:
+        return JSONResponse({"RspCode": "97", "Message": "Invalid Checksum"})
+
+    txn_ref = params.get("vnp_TxnRef", "")
+    tx = (
+        db.query(DepositTransaction)
+        .filter(DepositTransaction.vnpay_txn_ref == txn_ref)
+        .with_for_update()
+        .first()
+    )
+
+    if not tx:
+        return JSONResponse({"RspCode": "01", "Message": "Order not found"})
+
+    if tx.status == DepositStatus.CONFIRMED:
+        return JSONResponse({"RspCode": "02", "Message": "Order already confirmed"})
+
+    tx.vnpay_response = json.dumps(params)
+
+    if vnpay_service.is_payment_success(result["response_code"], result["transaction_status"]):
+        _confirm_deposit_tx(tx, db)
+        db.commit()
+        logger.info("[Deposit] VNPay IPN OK — tx #%s CONFIRMED", tx.id)
+        return JSONResponse({"RspCode": "00", "Message": "Confirm Success"})
+    else:
+        tx.status = DepositStatus.REJECTED
+        tx.note = f"IPN fail code={result.get('response_code')}"
+        db.commit()
+        return JSONResponse({"RspCode": "00", "Message": "Confirm Success"})  # VNPAY yêu cầu luôn trả 00
+
+
+# ==============================================================================
+# ADMIN ENDPOINTS
+# ==============================================================================
+
+@router.get("/admin/list", summary="Admin: Danh sách yêu cầu nạp ký quỹ")
+def admin_list_deposits(
+    page:      int = Query(1, ge=1),
+    per_page:  int = Query(20, ge=1, le=100),
+    status:    Optional[str] = Query(None, description="PENDING | CONFIRMED | REJECTED"),
+    seller_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    q = db.query(DepositTransaction)
+    if status:
+        try:
+            q = q.filter(DepositTransaction.status == DepositStatus(status))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Status khong hop le: {status}")
+    if seller_id:
+        q = q.filter(DepositTransaction.seller_id == seller_id)
+
+    total = q.count()
+    items = q.order_by(DepositTransaction.created_at.desc()) \
+             .offset((page - 1) * per_page).limit(per_page).all()
+
+    result = []
+    for t in items:
+        seller = db.query(User).filter(User.id == t.seller_id).first()
+        result.append({
+            "id":             t.id,
+            "order_id":       t.order_id,
+            "order_number":   t.order.order_number if t.order else None,
+            "seller_id":      t.seller_id,
+            "seller_name":    seller.name if seller else None,
+            "seller_email":   seller.email if seller else None,
+            "amount":         str(t.amount),
+            "tx_type":        t.tx_type,
+            "status":         t.status,
+            "payment_method": t.payment_method,
+            "bank_ref":       t.bank_ref,
+            "receipt_url":    t.receipt_url,
+            "note":           t.note,
+            "created_at":     t.created_at.isoformat() if t.created_at else None,
+            "reviewed_at":    t.reviewed_at.isoformat() if t.reviewed_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": result,
+        "meta": {"total": total, "page": page, "per_page": per_page},
+    }
+
+
+@router.post("/admin/{tx_id}/confirm", summary="Admin: Xác nhận yêu cầu nạp tiền")
+def admin_confirm_deposit(
+    tx_id: int,
+    body:  AdminConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    tx = db.query(DepositTransaction).filter(DepositTransaction.id == tx_id).with_for_update().first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Khong tim thay giao dich.")
+    if tx.status != DepositStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Giao dich dang o trang thai {tx.status}, khong the duyet.")
+
+    _confirm_deposit_tx(tx, db)
+    tx.note        = body.note
+    tx.reviewed_by = current_user.id
+    db.commit()
+
+    logger.info("[Deposit] Admin #%s xac nhan tx #%s (seller #%s, amount=%s)", current_user.id, tx.id, tx.seller_id, tx.amount)
+    return {"success": True, "message": "Da xac nhan nap ky quy thanh cong."}
+
+
+@router.post("/admin/{tx_id}/reject", summary="Admin: Từ chối yêu cầu nạp tiền")
+def admin_reject_deposit(
+    tx_id: int,
+    body:  AdminRejectRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    tx = db.query(DepositTransaction).filter(DepositTransaction.id == tx_id).with_for_update().first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Khong tim thay giao dich.")
+    if tx.status != DepositStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Giao dich dang o trang thai {tx.status}, khong the tu choi.")
+
+    tx.status      = DepositStatus.REJECTED
+    tx.note        = body.note
+    tx.reviewed_by = current_user.id
+    tx.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    logger.info("[Deposit] Admin #%s tu choi tx #%s ly do: %s", current_user.id, tx.id, body.note)
+    return {"success": True, "message": "Da tu choi yeu cau nap tien."}
+
+
+@router.post("/admin/deduct", summary="Admin: Khấu trừ ký quỹ seller (xử lý gian lận)")
+def admin_deduct_deposit(
+    body: AdminDeductRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin khấu trừ từ deposit_balance của seller để xử lý:
+      - Trường hợp gian lận
+      - Hoàn tiền cho buyer khi seller không phối hợp
+    """
+    _require_admin(current_user)
+    amount = Decimal(str(body.amount))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="So tien khau tru phai > 0.")
+
+    wallet = db.query(SellerDepositWallet).filter(
+        SellerDepositWallet.seller_id == body.seller_id
+    ).with_for_update().first()
+
+    if not wallet:
+        raise HTTPException(status_code=404, detail="Seller chua co vi ky quy.")
+
+    current_balance = Decimal(str(wallet.deposit_balance))
+    new_balance     = current_balance - amount
+
+    wallet.deposit_balance = new_balance
+    wallet.total_deducted  = Decimal(str(wallet.total_deducted)) + amount
+
+    # Ghi lịch sử
+    tx = DepositTransaction(
+        seller_id=body.seller_id,
+        amount=amount,
+        tx_type=DepositTransactionType.DEDUCT,
+        status=DepositStatus.CONFIRMED,
+        payment_method=None,
+        note=body.note,
+        reviewed_by=current_user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    db.add(tx)
+    db.commit()
+
+    logger.warning(
+        "[Deposit] Admin #%s khau tru %s VND tu seller #%s. Balance: %s -> %s. Ly do: %s",
+        current_user.id, amount, body.seller_id, current_balance, new_balance, body.note,
+    )
+    return {
+        "success": True,
+        "message": f"Da khau tru {int(amount):,}d tu seller #{body.seller_id}.",
+        "data": {
+            "new_balance": str(new_balance),
+            "is_sufficient": new_balance >= MIN_DEPOSIT_REQUIRED,
+        },
+    }
+
+
+@router.get("/admin/wallets", summary="Admin: Danh sách ví ký quỹ tất cả seller")
+def admin_list_wallets(
+    page:     int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    low_balance: bool = Query(False, description="Chỉ lấy seller thiếu ký quỹ"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    q = db.query(SellerDepositWallet)
+    if low_balance:
+        q = q.filter(SellerDepositWallet.deposit_balance < float(MIN_DEPOSIT_REQUIRED))
+
+    total = q.count()
+    items = q.order_by(SellerDepositWallet.deposit_balance.asc()) \
+             .offset((page - 1) * per_page).limit(per_page).all()
+
+    result = []
+    for w in items:
+        seller = db.query(User).filter(User.id == w.seller_id).first()
+        bal = Decimal(str(w.deposit_balance))
+        result.append({
+            "seller_id":       w.seller_id,
+            "seller_name":     seller.name  if seller else None,
+            "seller_email":    seller.email if seller else None,
+            "deposit_balance": str(bal),
+            "total_deposited": str(w.total_deposited),
+            "total_deducted":  str(w.total_deducted),
+            "is_sufficient":   bal >= MIN_DEPOSIT_REQUIRED,
+            "updated_at":      w.updated_at.isoformat() if w.updated_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": result,
+        "meta": {"total": total, "page": page, "per_page": per_page},
+    }
+
+
+# ==============================================================================
+# RÚT KÝ QUỸ — Seller yêu cầu rút một phần ký quỹ
+# ==============================================================================
+
+from app.models.settlement import DepositWithdrawalRequest, DepositWithdrawalStatus
+from app.models.seller_profile import SellerProfile
+
+
+class DepositWithdrawalRequestBody(BaseModel):
+    amount: float
+    note: Optional[str] = None
+
+
+class AdminReviewWithdrawalBody(BaseModel):
+    transaction_ref: Optional[str] = None
+    admin_note: Optional[str] = None
+
+
+class AdminRejectWithdrawalBody(BaseModel):
+    admin_note: str
+
+
+@router.post("/withdrawal/request", summary="Seller: Tạo yêu cầu rút ký quỹ")
+def create_deposit_withdrawal(
+    body: DepositWithdrawalRequestBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Seller tạo yêu cầu rút một phần ký quỹ.
+
+    Quy tắc:
+      - deposit_balance - amount >= MIN_DEPOSIT_REQUIRED (500,000đ)
+      - Không trừ ví ngay — chờ admin duyệt
+      - Chỉ được có 1 yêu cầu PENDING cùng lúc
+    """
+    _require_seller(current_user)
+
+    amount = Decimal(str(body.amount))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Số tiền rút phải lớn hơn 0")
+
+    wallet = _get_or_create_deposit_wallet(current_user.id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+
+    if balance - amount < MIN_DEPOSIT_REQUIRED:
+        max_withdrawable = balance - MIN_DEPOSIT_REQUIRED
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Số dư sau rút phải giữ tối thiểu {int(MIN_DEPOSIT_REQUIRED):,}đ. "
+                f"Số tiền tối đa có thể rút: {max(0, int(max_withdrawable)):,}đ"
+            ),
+        )
+
+    # Chỉ được có 1 yêu cầu PENDING
+    existing = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.seller_id == current_user.id,
+        DepositWithdrawalRequest.status == DepositWithdrawalStatus.PENDING,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Bạn đã có yêu cầu rút ký quỹ đang chờ duyệt. Vui lòng chờ admin xử lý."
+        )
+
+    # Snapshot thông tin ngân hàng
+    seller_profile = db.query(SellerProfile).filter(
+        SellerProfile.user_id == current_user.id
+    ).first()
+
+    req = DepositWithdrawalRequest(
+        seller_id=current_user.id,
+        amount=amount,
+        balance_snapshot=balance,
+        bank_name=seller_profile.bank_name if seller_profile else None,
+        bank_account_number=seller_profile.bank_account_number if seller_profile else None,
+        bank_account_name=seller_profile.bank_account_name if seller_profile else None,
+        note=body.note,
+        status=DepositWithdrawalStatus.PENDING,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+
+    return {
+        "success": True,
+        "message": "Đã gửi yêu cầu rút ký quỹ. Admin sẽ xử lý trong 1-3 ngày làm việc.",
+        "data": {
+            "id": req.id,
+            "amount": str(req.amount),
+            "balance_snapshot": str(req.balance_snapshot),
+            "status": req.status.value,
+            "created_at": req.created_at.isoformat() if req.created_at else None,
+        },
+    }
+
+
+@router.get("/withdrawal/my", summary="Seller: Lịch sử yêu cầu rút ký quỹ")
+def get_my_deposit_withdrawals(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(15, ge=1, le=50),
+    status: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Seller xem danh sách yêu cầu rút ký quỹ của mình."""
+    _require_seller(current_user)
+
+    q = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.seller_id == current_user.id
+    )
+    if status:
+        try:
+            q = q.filter(DepositWithdrawalRequest.status == DepositWithdrawalStatus(status))
+        except ValueError:
+            pass
+
+    total = q.count()
+    items = q.order_by(DepositWithdrawalRequest.created_at.desc()) \
+             .offset((page - 1) * per_page).limit(per_page).all()
+
+    wallet = _get_or_create_deposit_wallet(current_user.id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+    max_withdrawable = max(Decimal("0"), balance - MIN_DEPOSIT_REQUIRED)
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": r.id,
+                "amount": str(r.amount),
+                "balance_snapshot": str(r.balance_snapshot) if r.balance_snapshot else None,
+                "bank_name": r.bank_name,
+                "bank_account_number": r.bank_account_number,
+                "bank_account_name": r.bank_account_name,
+                "status": r.status.value,
+                "note": r.note,
+                "admin_note": r.admin_note,
+                "transaction_ref": r.transaction_ref,
+                "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in items
+        ],
+        "meta": {
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "current_balance": str(balance),
+            "max_withdrawable": str(max_withdrawable),
+        },
+    }
+
+
+@router.post("/admin/withdrawal/{req_id}/approve", summary="Admin: Duyệt yêu cầu rút ký quỹ")
+def admin_approve_deposit_withdrawal(
+    req_id: int,
+    body: AdminReviewWithdrawalBody = AdminReviewWithdrawalBody(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin duyệt yêu cầu rút ký quỹ:
+      - Kiểm tra lại balance đủ (deposit_balance - amount >= 500K)
+      - Trừ deposit_balance
+      - Cộng total_deducted
+      - Ghi DepositTransaction (tx_type=REFUND)
+      - Cập nhật status → APPROVED
+    """
+    _require_admin(current_user)
+
+    req = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.id == req_id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại")
+
+    if req.status != DepositWithdrawalStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Yêu cầu đã ở trạng thái {req.status.value}, không thể duyệt lại"
+        )
+
+    amount = Decimal(str(req.amount))
+    wallet = _get_or_create_deposit_wallet(req.seller_id, db)
+    balance = Decimal(str(wallet.deposit_balance))
+
+    if balance - amount < MIN_DEPOSIT_REQUIRED:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Số dư ký quỹ ({int(balance):,}đ) không đủ để rút {int(amount):,}đ "
+                f"trong khi vẫn giữ tối thiểu {int(MIN_DEPOSIT_REQUIRED):,}đ"
+            ),
+        )
+
+    # Trừ deposit_balance
+    new_balance = balance - amount
+    wallet.deposit_balance = new_balance
+    wallet.total_deducted = Decimal(str(wallet.total_deducted)) + amount
+
+    # Ghi lịch sử
+    tx = DepositTransaction(
+        seller_id=req.seller_id,
+        amount=amount,
+        tx_type=DepositTransactionType.REFUND,
+        status=DepositStatus.CONFIRMED,
+        payment_method="WITHDRAWAL",
+        bank_ref=body.transaction_ref,
+        note=f"Rút ký quỹ — duyệt bởi admin #{current_user.id}. {body.admin_note or ''}".strip(),
+        reviewed_by=current_user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    db.add(tx)
+
+    # Cập nhật request
+    req.status = DepositWithdrawalStatus.APPROVED
+    req.transaction_ref = body.transaction_ref
+    req.admin_note = body.admin_note
+    req.reviewed_by = current_user.id
+    req.reviewed_at = datetime.now(timezone.utc)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Đã duyệt yêu cầu rút {int(amount):,}đ. Số dư còn lại: {int(new_balance):,}đ",
+        "data": {
+            "req_id": req_id,
+            "amount": str(amount),
+            "new_balance": str(new_balance),
+            "status": "APPROVED",
+        },
+    }
+
+
+@router.post("/admin/withdrawal/{req_id}/reject", summary="Admin: Từ chối yêu cầu rút ký quỹ")
+def admin_reject_deposit_withdrawal(
+    req_id: int,
+    body: AdminRejectWithdrawalBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Admin từ chối yêu cầu rút ký quỹ (không trừ ví)."""
+    _require_admin(current_user)
+
+    req = db.query(DepositWithdrawalRequest).filter(
+        DepositWithdrawalRequest.id == req_id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Yêu cầu không tồn tại")
+
+    if req.status != DepositWithdrawalStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Yêu cầu đã ở trạng thái {req.status.value}, không thể từ chối"
+        )
+
+    req.status = DepositWithdrawalStatus.REJECTED
+    req.admin_note = body.admin_note
+    req.reviewed_by = current_user.id
+    req.reviewed_at = datetime.now(timezone.utc)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Đã từ chối yêu cầu rút ký quỹ",
+        "data": {"req_id": req_id, "status": "REJECTED"},
+    }
+
+
+@router.get("/admin/withdrawal/list", summary="Admin: Danh sách yêu cầu rút ký quỹ")
+def admin_list_deposit_withdrawals(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    seller_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Admin xem danh sách tất cả yêu cầu rút ký quỹ."""
+    _require_admin(current_user)
+
+    q = db.query(DepositWithdrawalRequest)
+    if status:
+        try:
+            q = q.filter(DepositWithdrawalRequest.status == DepositWithdrawalStatus(status))
+        except ValueError:
+            pass
+    if seller_id:
+        q = q.filter(DepositWithdrawalRequest.seller_id == seller_id)
+
+    total = q.count()
+    items = q.order_by(DepositWithdrawalRequest.created_at.desc()) \
+             .offset((page - 1) * per_page).limit(per_page).all()
+
+    result = []
+    for r in items:
+        seller = db.query(User).filter(User.id == r.seller_id).first()
+        result.append({
+            "id": r.id,
+            "seller_id": r.seller_id,
+            "seller_name": seller.name if seller else None,
+            "seller_email": seller.email if seller else None,
+            "amount": str(r.amount),
+            "balance_snapshot": str(r.balance_snapshot) if r.balance_snapshot else None,
+            "bank_name": r.bank_name,
+            "bank_account_number": r.bank_account_number,
+            "bank_account_name": r.bank_account_name,
+            "status": r.status.value,
+            "note": r.note,
+            "admin_note": r.admin_note,
+            "transaction_ref": r.transaction_ref,
+            "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": result,
+        "meta": {"total": total, "page": page, "per_page": per_page},
+    }
+

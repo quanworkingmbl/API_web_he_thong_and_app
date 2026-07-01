@@ -1,0 +1,86 @@
+substitutions:
+  _REGION: asia-southeast1
+  _REPO: mbl-cms-repo
+  _SERVICE: api-web-he-thong-and-app
+  _PROJECT: mbl-cms-backend-2026
+  _CLOUDSQL_INSTANCE: mbl-cms-backend-2026:asia-southeast1:mbl-cms-db
+  _CORS_ORIGINS: >-
+    http://localhost:3000,http://localhost:5173,https://quancmsbe.site,https://www.quancmsbe.site,https://api.quancmsbe.site,https://mbl-cms.store,https://www.mbl-cms.store
+
+steps:
+  # ── Step 1: Build Docker image ───────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Build'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:latest'
+      - '.'
+
+  # ── Step 2: Push lên Artifact Registry ──────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}'
+
+  # ── Step 3: Alembic migrate (chạy trong Cloud Build, KHÔNG chạy khi startup) ──
+  # Dùng image vừa build để chạy alembic upgrade head trước khi deploy
+  - name: '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+    id: 'Migrate'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      # Nhiều head: upgrade heads trước merge; sau merge chỉ còn 1 head (w2x3y4z5a6b7)
+      - 'alembic upgrade heads'
+    env:
+      - 'DATABASE_URL=$$DATABASE_URL'
+    secretEnv:
+      - 'DATABASE_URL'
+
+  # ── Step 4: Deploy lên Cloud Run ────────────────────────────
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Deploy'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=3'
+      - '--timeout=300'
+      - '--startup-cpu-boost'
+      - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SECRET_KEY=SECRET_KEY:latest,VNPAY_TMN_CODE=VNPAY_TMN_CODE:latest,VNPAY_HASH_SECRET=VNPAY_HASH_SECRET:latest'
+      - >-
+        --set-env-vars=CORS_ORIGINS=${_CORS_ORIGINS},VNPAY_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html,VNPAY_RETURN_URL=https://api.quancmsbe.site/api/payments/vnpay/return,VNPAY_IPN_URL=https://api.quancmsbe.site/api/payments/vnpay/ipn
+      - '--traffic=100'   # ← Luôn route 100% traffic sang revision mới nhất
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/${_PROJECT}/secrets/DATABASE_URL/versions/latest
+      env: 'DATABASE_URL'
+    - versionName: projects/${_PROJECT}/secrets/VNPAY_TMN_CODE/versions/latest
+      env: 'VNPAY_TMN_CODE'
+    - versionName: projects/${_PROJECT}/secrets/VNPAY_HASH_SECRET/versions/latest
+      env: 'VNPAY_HASH_SECRET'
+
+images:
+  - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_SERVICE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_MEDIUM'
+
+timeout: '900s'

@@ -4,9 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
+# env/
 venv/
-ENV/
+# ENV/
 build/
 develop-eggs/
 dist/
@@ -28,6 +28,13 @@ wheels/
 .env.local
 .env.*.local
 
+# Google Cloud / Firebase service account keys
+project-f3e21dd2-0270-45f3-91c-392a0d4991a3.json
+project-*.json
+*service-account*.json
+app/firebase-service-account.json
+credentials*.json
+*.pem
 # IDE
 .vscode/
 .idea/
@@ -54,3 +61,6 @@ encode_*.py
 setup_*.py
 *_test.py
 
+
+
+sql.sql
